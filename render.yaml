@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: soundabode-backend-api
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: cd server && npm install
+    startCommand: cd server && npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
+      - key: HOST
+        value: 0.0.0.0
+      - key: MONGODB_URI
+        sync: false
+      - key: ADMIN_PASSCODE
+        sync: false
+      - key: ASHU_PASSCODE
+        sync: false
+      - key: VAIBHAV_PASSCODE
+        sync: false
+      - key: CORS_ORIGIN
+        value: https://soundabode.com,https://www.soundabode.com
+      - key: GOOGLE_SHEETS_URL
+        sync: false

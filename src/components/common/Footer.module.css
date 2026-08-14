@@ -1,0 +1,228 @@
+/* Footer.module.css - Authentic Studio Design */
+
+.siteFooter {
+  width: 100%;
+  background-color: #05070a;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 4.5rem 1.5rem 2.5rem;
+  box-sizing: border-box;
+}
+
+.footerContainer {
+  max-width: 1140px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+}
+
+.footerColumns {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr 1.1fr 1fr;
+  gap: 2rem;
+  width: 100%;
+}
+
+.footerColumn h4 {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 1.1rem 0;
+}
+
+.footerColumn ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.footerColumn a,
+.admissionLinkBtn {
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 0.84rem;
+  text-decoration: none;
+  font-weight: 400;
+  transition: color 0.2s ease;
+  background: transparent;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.footerColumn a:hover,
+.admissionLinkBtn:hover {
+  color: #ffffff;
+}
+
+.footerColumn a svg {
+  width: 16px;
+  height: 16px;
+  stroke: rgba(255, 255, 255, 0.85);
+  fill: none;
+  display: inline-block;
+  opacity: 0.9;
+  transition: opacity 0.2s ease, transform 0.2s ease, stroke 0.2s ease;
+  flex-shrink: 0;
+}
+
+.footerColumn a:hover svg {
+  opacity: 1;
+  stroke: #ef4444;
+  transform: scale(1.15);
+}
+
+.admissionIcon {
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+  flex-shrink: 0;
+}
+
+.admissionLinkBtn:hover .admissionIcon {
+  opacity: 1;
+}
+
+.brandColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.footerLogo {
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #ffffff;
+  margin: 0;
+}
+
+.footerTagline {
+  font-size: 0.84rem;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.footerAddress {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.5;
+  margin-top: 0.3rem;
+}
+
+.footerBottom {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.copyright {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.45);
+  margin: 0;
+}
+
+.legalLinks {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem 1.15rem;
+  flex-wrap: wrap;
+}
+
+.legalLinks a,
+.cookieLinkBtn {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.45);
+  text-decoration: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.2s ease;
+  white-space: nowrap;
+}
+
+.legalLinks a:hover,
+.cookieLinkBtn:hover {
+  color: #ffffff;
+}
+
+@media (max-width: 900px) {
+  .footerColumns {
+    grid-template-columns: 1.2fr 1fr 1fr;
+    gap: 2.25rem 1.5rem;
+  }
+
+  .brandColumn {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .siteFooter {
+    padding: 3rem 1.25rem 5rem;
+  }
+
+  .footerContainer {
+    gap: 2rem;
+  }
+
+  .footerColumns {
+    grid-template-columns: 1fr 1fr;
+    gap: 1.75rem 1rem;
+  }
+
+  .brandColumn {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 1.5rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .footerColumn h4 {
+    font-size: 0.78rem;
+    margin-bottom: 0.8rem;
+  }
+
+  .footerColumn a,
+  .admissionLinkBtn {
+    font-size: 0.82rem;
+  }
+
+  .footerBottom {
+    flex-direction: column;
+    gap: 1.25rem;
+    align-items: flex-start;
+  }
+
+  .copyright {
+    font-size: 0.78rem;
+  }
+
+  .legalLinks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem 1.1rem;
+    width: 100%;
+  }
+
+  .legalLinks a,
+  .cookieLinkBtn {
+    font-size: 0.75rem;
+  }
+}

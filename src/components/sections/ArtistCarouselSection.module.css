@@ -1,0 +1,159 @@
+.artistCarouselSectionWrapper {
+  width: 100%;
+  background-color: #07090e;
+  padding: 4rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.artistCarouselContainer {
+  position: relative;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 3.5rem;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.artistScrollTrack {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  padding: 0.5rem 0;
+  width: 100%;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.artistScrollTrack::-webkit-scrollbar {
+  display: none;
+}
+
+.artistCard {
+  position: relative;
+  flex: 0 0 175px;
+  height: 240px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #12141d;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  transition: transform 0.25s ease, border-color 0.25s ease;
+  user-select: none;
+}
+
+.artistCard:hover {
+  transform: translateY(-4px);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.artistImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.artistOverlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(7, 9, 14, 0.92) 0%,
+    rgba(7, 9, 14, 0.3) 45%,
+    transparent 75%
+  );
+  z-index: 1;
+}
+
+.artistName {
+  position: absolute;
+  bottom: 1rem;
+  left: 0.8rem;
+  right: 0.8rem;
+  z-index: 2;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #ffffff;
+  text-align: center;
+  margin: 0;
+}
+
+.carouselArrowBtn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(18, 20, 29, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: all 0.25s ease;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
+.sectionHeaderBox {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.taglineRed {
+  color: #ef4444;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-bottom: 0.4rem;
+  display: block;
+}
+
+.sectionHeader {
+  font-size: clamp(1.6rem, 2.5vw, 2.2rem);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.accentRed {
+  color: #ef4444;
+}
+
+.carouselArrowBtn:hover {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #ef4444;
+  transform: translateY(-50%) scale(1.08);
+}
+
+.leftArrow {
+  left: 1rem;
+}
+
+.rightArrow {
+  right: 1rem;
+}
+
+@media (max-width: 600px) {
+  .artistCarouselContainer {
+    padding: 0 2.5rem;
+  }
+  .artistCard {
+    flex: 0 0 150px;
+    height: 210px;
+  }
+}

@@ -1,0 +1,954 @@
+/* AdmissionPage.module.css - Redesigned Studio Layout & Authentic Branding */
+
+.pageWrapper {
+  background-color: #06070a;
+  min-height: 100vh;
+  color: #f4f4f5;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+
+.heroHeader {
+  background: #06070a;
+  padding: 5rem 1.5rem 2rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.headerContainer {
+  max-width: 860px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.backLink {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.82rem;
+  text-decoration: none;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: color 0.2s ease;
+  width: fit-content;
+}
+
+.backLink:hover {
+  color: #ffffff;
+}
+
+.headerTopRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.pageTitle {
+  font-size: 1.65rem;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.formBadge {
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-family: monospace;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.7);
+  padding: 0.35rem 0.85rem;
+  border-radius: 6px;
+  letter-spacing: 0.05em;
+}
+
+.headerSubtext {
+  font-size: 0.88rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Main Form Area */
+.mainContainer {
+  max-width: 860px;
+  margin: 2rem auto 4rem;
+  padding: 0 1.5rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Authentic Paper Document */
+.formDocument {
+  background: #ffffff;
+  color: #0f172a;
+  padding: 2.75rem 2.75rem 2.25rem;
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  font-family: 'Inter', system-ui, sans-serif;
+  border: 1px solid #cbd5e1;
+  box-sizing: border-box;
+}
+
+.docHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid #1e293b;
+}
+
+.docBrandHeader {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.docCourseSubtitle {
+  font-size: 0.82rem;
+  color: #64748b;
+  font-weight: 600;
+  display: block;
+}
+
+.docFormNoSub {
+  font-size: 0.75rem;
+  color: #475569;
+  font-weight: 700;
+  font-family: monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  margin-top: 0.2rem;
+  letter-spacing: 0.03em;
+}
+
+.docHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.tableResponsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-top: 0.5rem;
+  border-radius: 4px;
+}
+
+.colSelect {
+  width: 44px;
+  text-align: center;
+}
+
+.colTenure {
+  width: 120px;
+}
+
+.colFee {
+  width: 120px;
+}
+
+.docLogoImg {
+  height: 42px;
+  width: auto;
+  object-fit: contain;
+}
+
+.docTitleH2 {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.docFormNo {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #334155;
+  font-family: monospace;
+  background: #f1f5f9;
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
+  border: 1px solid #cbd5e1;
+}
+
+.sectionHeaderBar {
+  background: #272e39;
+  color: #ffffff;
+  padding: 0.5rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: capitalize;
+  margin: 1.25rem 0 1rem 0;
+  border-radius: 2px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* Field Grid */
+.fieldGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.fullWidth {
+  grid-column: 1 / -1;
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.formGroup label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.reqStar {
+  color: #dc2626;
+  margin-left: 0.2rem;
+}
+
+.formInput {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 0.88rem;
+  color: #0f172a;
+  background: #f8fafc;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.formInput:focus {
+  border-color: #1e293b;
+  background: #ffffff;
+}
+
+.formTextarea {
+  min-height: 70px;
+  resize: vertical;
+}
+
+/* Course Table */
+.courseTable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+}
+
+.courseTable th {
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  border: 1px solid #cbd5e1;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.courseTable td {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #cbd5e1;
+  font-size: 0.85rem;
+  color: #0f172a;
+}
+
+.courseTableRow {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.courseTableRow:hover {
+  background-color: #f8fafc;
+}
+
+.selectedRow {
+  background-color: #f1f5f9 !important;
+  font-weight: 600;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.checkboxSquare {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #475569;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  box-sizing: border-box;
+}
+
+.selectedRow .checkboxSquare {
+  border-color: #0f172a;
+  background: #0f172a !important;
+  color: #ffffff !important;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.checkedMarkText {
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+  color: #ffffff;
+  display: block;
+}
+
+.selectedBadgePrint {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #0284c7;
+  margin-left: 0.4rem;
+  text-transform: uppercase;
+}
+
+/* Disclaimer & Rules */
+.disclaimerList {
+  margin: 0.5rem 0 0 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.disclaimerList li {
+  font-size: 0.78rem;
+  color: #334155;
+  line-height: 1.45;
+}
+
+/* Agreement Clause */
+.agreementBox {
+  margin-top: 1.25rem;
+  padding: 1rem 1.15rem;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+}
+
+.agreementParagraph {
+  font-size: 0.84rem;
+  color: #1e293b;
+  line-height: 1.5;
+  margin: 0 0 0.85rem 0;
+}
+
+.paymentToggleGroup {
+  display: flex;
+  gap: 0.75rem;
+  margin: 0.65rem 0 1rem 0;
+  flex-wrap: wrap;
+}
+
+.paymentToggleOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 6px;
+  border: 1.5px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.paymentToggleOption:hover {
+  border-color: #0f172a;
+  background: #f1f5f9;
+}
+
+.paymentToggleActive {
+  border-color: #0f172a !important;
+  background: #0f172a !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.toggleRadioIcon {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 900;
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.paymentToggleActive .toggleRadioIcon {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.agreedLabel {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.agreedLabel input {
+  margin-top: 0.15rem;
+  accent-color: #0f172a;
+  width: 15px;
+  height: 15px;
+}
+
+/* Form Branding Footer with Official Logo */
+.docFooterBranding {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #cbd5e1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.addressText {
+  font-size: 0.72rem;
+  color: #475569;
+  line-height: 1.45;
+}
+
+.brandingLogoBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.logoFooterGroup {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.footerLogoImg {
+  height: 24px;
+  width: auto;
+}
+
+.footerLogoText {
+  font-size: 0.9rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #0f172a;
+  text-transform: uppercase;
+}
+
+.partnerLogos {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.partnerLogoText {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #1e293b;
+  padding: 0.25rem 0.45rem;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+/* Page Form Actions */
+.formActionsBar {
+  margin-top: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+}
+
+.printBtn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #e4e4e7;
+  padding: 0.7rem 1.3rem;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.2s ease;
+}
+
+.printBtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border-color: #ffffff;
+}
+
+.submitBtn {
+  background: #ffffff;
+  color: #09090b;
+  border: 1px solid #ffffff;
+  padding: 0.7rem 1.75rem;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.submitBtn:hover {
+  background: #e4e4e7;
+  border-color: #e4e4e7;
+}
+
+.submitBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.successBox {
+  background: #0f1117;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 3rem 2rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.successTitle {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0;
+}
+
+.successSubtext {
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.7);
+  max-width: 520px;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.refCode {
+  font-family: monospace;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #e4e4e7;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.6rem 1.25rem;
+  border-radius: 6px;
+}
+
+/* STRICT 1-PAGE A4 PRINT STYLES */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm 12mm;
+  }
+
+  :global(body.is-printing-admission-page) > :global(main) > *:not(:has(.formDocument)),
+  :global(body.is-printing-admission-page) > *:not(:global(main)):not(:has(.formDocument)),
+  .heroHeader,
+  .formActionsBar {
+    display: none !important;
+  }
+
+  html, body, .pageWrapper {
+    background: #ffffff !important;
+    color: #000000 !important;
+    width: 100% !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .mainContainer {
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .formDocument {
+    display: block !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-sizing: border-box !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .docHeader {
+    margin-bottom: 8px !important;
+    padding-bottom: 6px !important;
+  }
+
+  .docTitleH2 {
+    font-size: 1.25rem !important;
+  }
+
+  .docLogoImg {
+    height: 32px !important;
+  }
+
+  .sectionHeaderBar {
+    background: #1e293b !important;
+    color: #ffffff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    margin: 8px 0 6px 0 !important;
+    padding: 3px 6px !important;
+    font-size: 11px !important;
+  }
+
+  .fieldGrid {
+    gap: 6px !important;
+  }
+
+  .formGroup label {
+    font-size: 10px !important;
+    color: #000000 !important;
+  }
+
+  .formInput {
+    background: #ffffff !important;
+    border: 1px solid #475569 !important;
+    color: #000000 !important;
+    padding: 3px 5px !important;
+    font-size: 11px !important;
+  }
+
+  .formTextarea {
+    min-height: 40px !important;
+  }
+
+  .courseTable th {
+    background: #f1f5f9 !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    padding: 3px 6px !important;
+    font-size: 10px !important;
+  }
+
+  .courseTable td {
+    padding: 4px 6px !important;
+    font-size: 10.5px !important;
+  }
+
+  .selectedRow {
+    background: #f8fafc !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .selectedRow .checkboxSquare {
+    background: #000000 !important;
+    color: #ffffff !important;
+    border-color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .checkedMarkText {
+    color: #ffffff !important;
+    font-weight: 900 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .selectedBadgePrint {
+    color: #000000 !important;
+    font-weight: 900 !important;
+  }
+
+  .disclaimerList {
+    margin-top: 4px !important;
+    gap: 2px !important;
+  }
+
+  .disclaimerList li {
+    font-size: 9.5px !important;
+    line-height: 1.25 !important;
+  }
+
+  .agreementBox {
+    margin-top: 8px !important;
+    padding: 6px 8px !important;
+    border: 1px solid #cbd5e1 !important;
+  }
+
+  .agreementParagraph {
+    font-size: 10.5px !important;
+    margin-bottom: 4px !important;
+  }
+
+  .agreedLabel {
+    font-size: 10px !important;
+  }
+
+  .docFooterBranding {
+    margin-top: 10px !important;
+    padding-top: 6px !important;
+  }
+
+  .addressText {
+    font-size: 9px !important;
+  }
+
+  .footerLogoImg {
+    height: 20px !important;
+  }
+
+  .footerLogoText {
+    font-size: 11px !important;
+  }
+
+  .partnerLogoText {
+    font-size: 8.5px !important;
+    padding: 2px 4px !important;
+  }
+}
+
+@media (max-width: 650px) {
+  .heroHeader {
+    padding: 3.5rem 1rem 1.5rem;
+  }
+
+  .pageTitle {
+    font-size: 1.3rem;
+  }
+
+  .mainContainer {
+    margin: 1rem auto 2rem;
+    padding: 0 0.75rem;
+  }
+
+  .formDocument {
+    padding: 1.25rem 0.85rem;
+    border-radius: 6px;
+  }
+
+  .docHeader {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 1.25rem;
+  }
+
+  .docBrandHeader {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 0.5rem;
+  }
+
+  .docHeaderRight {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .fieldGrid {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+
+  .formInput {
+    font-size: 16px; /* Prevents auto-zoom on mobile safari */
+    padding: 0.55rem 0.65rem;
+  }
+
+  .colTenure, .colFee {
+    width: auto;
+  }
+
+  .courseTable th {
+    padding: 0.45rem 0.5rem;
+    font-size: 0.7rem;
+  }
+
+  .courseTable td {
+    padding: 0.5rem;
+    font-size: 0.78rem;
+  }
+
+  .paymentToggleGroup {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .paymentToggleOption {
+    width: 100%;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  .docFooterBranding {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 1rem;
+  }
+
+  .addressText {
+    text-align: center;
+    font-size: 0.68rem;
+  }
+
+  .brandingLogoBlock {
+    align-items: center;
+  }
+
+  .formActionsBar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .submitBtn {
+    width: 100%;
+    padding: 0.8rem;
+    font-size: 0.95rem;
+  }
+}
+
+/* PASSPORT PHOTO (1.5" x 2") STYLES */
+.passportPhotoWrapper {
+  width: 1.5in;
+  height: 2in;
+  flex-shrink: 0;
+  position: relative;
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 4px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  overflow: hidden;
+  box-sizing: border-box;
+  transition: all 0.15s ease;
+}
+
+.passportPhotoWrapperUploadable {
+  cursor: pointer;
+}
+
+.passportPhotoWrapperUploadable:hover {
+  border-color: #e11d48;
+  background: #f1f5f9;
+}
+
+.passportPhotoImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.passportPhotoPlaceholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem;
+  color: #64748b;
+  font-size: 0.68rem;
+  line-height: 1.3;
+  pointer-events: none;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.passportPhotoIcon {
+  margin-bottom: 0.3rem;
+  color: #94a3b8;
+}
+
+.passportPhotoLabel {
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 0.15rem;
+}
+
+.passportPhotoSub {
+  font-size: 0.6rem;
+  color: #64748b;
+}
+
+.passportPhotoRemoveBtn {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(15, 23, 42, 0.75);
+  color: #ffffff;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.25rem 0;
+  text-align: center;
+  cursor: pointer;
+  border: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.passportPhotoWrapper:hover .passportPhotoRemoveBtn {
+  opacity: 1;
+}
+
+@media print {
+  .passportPhotoRemoveBtn {
+    display: none !important;
+  }
+}

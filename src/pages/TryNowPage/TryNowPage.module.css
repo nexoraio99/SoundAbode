@@ -1,0 +1,287 @@
+/* ============================================================================
+   Try Now Page Module Styles
+   ============================================================================ */
+
+.pageWrapper {
+  min-height: 100vh;
+  background-color: #06070a;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+}
+
+.heroHeader {
+  padding: 7rem 1.5rem 2rem;
+  text-align: center;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.eyebrow {
+  color: #ef4444;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-bottom: 0.5rem;
+}
+
+.title {
+  font-family: 'Roboto', sans-serif;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  font-weight: 900;
+  line-height: 1.15;
+  color: #ffffff;
+  margin-bottom: 1rem;
+  text-transform: uppercase;
+}
+
+.accentRed {
+  color: #ef4444;
+}
+
+.subtitle {
+  font-size: clamp(0.95rem, 1.2vw, 1.1rem);
+  color: rgba(255, 255, 255, 0.75);
+  line-height: 1.6;
+}
+
+.tabControls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.tabBtn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.8);
+  padding: 0.6rem 1.5rem;
+  border-radius: 9999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tabBtnActive {
+  background: #bf2427;
+  color: #ffffff;
+  border-color: #bf2427;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.mainContent {
+  flex: 1;
+  padding: 1rem 1.5rem 4rem;
+  width: 100%;
+  max-width: 1480px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+}
+
+.sectionTitle {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.badge {
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 0.65rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-weight: 900;
+}
+
+.sectionHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 1.2rem;
+}
+
+.mobileControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobileToggleBtn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.mobileToggleBtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.activeToggle {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+/* ----------------------------------------------------------------------
+   Stage frames
+   These are just "viewports" — plain containers with a defined size.
+   The console itself is rendered at its natural size inside
+   .consoleNaturalWrapper and scaled with a JS-computed transform, so it
+   always fits whatever size these frames end up being on a given device.
+   ---------------------------------------------------------------------- */
+
+.landscapeViewportFrame {
+  position: relative;
+  width: 100%;
+  /* Fluid height instead of a fixed 560px: leaves room on short phones,
+     grows a bit on taller ones, and always leaves scaling headroom. */
+  height: min(560px, 78vh);
+  min-height: 320px;
+  background: #040508;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.9);
+}
+
+.uprightStageFrame {
+  position: relative;
+  width: 100%;
+  height: min(820px, 85vh);
+  min-height: 440px;
+  background: #040508;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.9);
+}
+
+.landscapeNoticeBanner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  background: rgba(16, 18, 26, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 4px 14px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+  color: #ef4444;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Fixed-size "design canvas" the console renders on at its real desktop
+   dimensions (see CONSOLE_DESIGN_WIDTH/HEIGHT in TryNowPage.tsx). Explicit
+   pixel width/height — never `100%` or `max-content` here — is what avoids
+   the circular-sizing collapse that made the console render blank.
+   transform-origin + absolute centering means the JS-computed
+   rotate()/scale() always keeps it centered in its frame. */
+.consoleDesignCanvas {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  flex-shrink: 0;
+  transform-origin: center center;
+  will-change: transform;
+  overflow: hidden;
+}
+
+/* FULLSCREEN OVERLAY (Works 100% on iOS Safari, Android, and Desktop) */
+.fullscreenActiveOverlay {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  z-index: 999999 !important;
+  background: #040508 !important;
+  border-radius: 0 !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+}
+
+/* In fullscreen, let the stage frames fill the whole overlay. The scaling
+   logic in JS re-measures the frame automatically (via ResizeObserver), so
+   no fixed calc() width/height hacks are needed here anymore. */
+.fullscreenActiveOverlay .landscapeViewportFrame,
+.fullscreenActiveOverlay .uprightStageFrame {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 100dvh !important;
+  border-radius: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+.exitFullscreenFloatingBtn {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 1000000;
+  background: rgba(239, 68, 68, 0.9);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.7);
+  transition: all 0.15s ease;
+}
+
+.exitFullscreenFloatingBtn:hover {
+  background: #dc2626;
+  transform: scale(1.03);
+}

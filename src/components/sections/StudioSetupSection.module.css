@@ -1,0 +1,175 @@
+.studioSetupSectionWrapper {
+  width: 100%;
+  background-color: #07090e;
+  padding: 4.5rem 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  box-sizing: border-box;
+}
+
+.studioSetupContainer {
+  max-width: 1140px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2.5rem;
+}
+
+.taglineRed {
+  color: #ef4444;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin: 0;
+  text-align: center;
+}
+
+.accentRed {
+  color: #ef4444;
+}
+
+.sectionHeader {
+  font-size: clamp(1.6rem, 2.5vw, 2.2rem);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  text-align: center;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.gearGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+  width: 100%;
+}
+
+.gearCard {
+  position: relative;
+  background: rgba(6, 6, 6, 0.70);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 1.8rem 1.4rem 2.8rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 1rem;
+  min-height: 230px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: all 0.25s ease;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.gearCard::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.055) 0%,
+    rgba(255, 255, 255, 0.018) 30%,
+    transparent 55%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+.gearCard:hover {
+  transform: translateY(-4px);
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(22, 21, 21, 0.70);
+}
+
+.cardIconBox {
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.95;
+}
+
+.cardContent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cardTitle {
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.cardDescription {
+  font-size: 0.84rem;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.55;
+  font-weight: 400;
+  margin: 0;
+}
+
+.detailsBtn {
+  position: absolute;
+  bottom: 1rem;
+  right: 1.2rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #ef4444;
+  cursor: pointer;
+  opacity: 0.85;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.gearCard:hover .detailsBtn {
+  opacity: 1;
+  transform: translateX(2px);
+}
+
+.bookTourBtn {
+  margin-top: 0.5rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  padding: 0.7rem 1.8rem;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: all 0.25s ease;
+}
+
+.bookTourBtn:hover {
+  background: #bf2427;
+  color: #ffffff;
+  border-color: #bf2427;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+@media (max-width: 900px) {
+  .gearGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .gearGrid {
+    grid-template-columns: 1fr;
+  }
+}

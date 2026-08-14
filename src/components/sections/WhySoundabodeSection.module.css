@@ -1,0 +1,251 @@
+.whyAcademyOverlaySection {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 1.5rem 2rem;
+  background: #07090e;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.whyAcademyContent {
+  max-width: 1140px;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  align-items: center;
+  margin: 0 auto;
+}
+
+.whyAcademyLeftCol {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1.1rem;
+  text-align: left;
+}
+
+.taglineRed {
+  color: #ef4444;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.accentRed {
+  color: #ef4444;
+}
+
+.whyAcademyTitle {
+  font-size: clamp(1.8rem, 2.8vw, 2.6rem);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.whyAcademyParagraph {
+  font-size: 0.88rem;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.6;
+  font-weight: 400;
+  margin: 0;
+}
+
+.learnMoreBtn {
+  margin-top: 0.4rem;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+  padding: 0.65rem 1.4rem;
+  border-radius: 9999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.25s ease;
+}
+
+.learnMoreBtn:hover {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #ef4444;
+  transform: translateY(-2px);
+}
+
+.whyAcademyRightCol {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+
+.mediaTopRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  width: 100%;
+}
+
+.mediaCardPortrait {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #12141d;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.mediaCardPortrait::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.07) 0%,
+    rgba(255, 255, 255, 0.02) 30%,
+    transparent 55%
+  );
+  pointer-events: none;
+  z-index: 2;
+}
+
+.mediaBottomRow {
+  width: 100%;
+}
+
+.mediaCardLandscape {
+  position: relative;
+  aspect-ratio: 16 / 7;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #12141d;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.mediaCardLandscape::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.065) 0%,
+    rgba(255, 255, 255, 0.018) 30%,
+    transparent 55%
+  );
+  pointer-events: none;
+  z-index: 2;
+}
+
+.mediaImg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.mediaImgGrayscale {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  filter: grayscale(100%) contrast(1.15) brightness(0.9);
+}
+
+.mediaImgLandscape {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center center;
+  display: block;
+}
+
+@media (max-width: 900px) {
+  .whyAcademyOverlaySection {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 4.5rem 1.25rem 2.5rem;
+    align-items: flex-start;
+  }
+
+  .whyAcademyContent {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  .whyAcademyTitle {
+    font-size: clamp(1.75rem, 6vw, 2.35rem);
+  }
+}
+
+@media (max-width: 640px) {
+  .whyAcademyOverlaySection {
+    padding: 4.25rem 1rem 2rem;
+    height: 100%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    align-items: flex-start;
+  }
+
+  .whyAcademyLeftCol {
+    gap: 0.65rem;
+  }
+
+  .whyAcademyParagraph {
+    font-size: 0.825rem;
+    line-height: 1.5;
+  }
+
+  .whyAcademyRightCol {
+    gap: 0.5rem;
+  }
+
+  .mediaTopRow {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+  }
+
+  .mediaCardPortrait {
+    aspect-ratio: 4 / 5;
+    border-radius: 10px;
+  }
+
+  .mediaCardLandscape {
+    aspect-ratio: 16 / 7;
+    border-radius: 10px;
+  }
+
+  .mediaBottomRow {
+    display: block;
+    width: 100%;
+  }
+
+  .learnMoreBtn {
+    height: 38px;
+    padding: 0 1.15rem;
+    font-size: 0.8rem;
+  }
+}

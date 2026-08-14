@@ -1,0 +1,71 @@
+.preloaderOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: #050505;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999999;
+  overflow: hidden;
+  transition: opacity 0.6s ease, visibility 0.6s ease;
+  user-select: none;
+}
+
+.preloaderOverlay.fadeOut {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.logoWrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logoText {
+  font-family: 'Orbitron', 'Syncopate', system-ui, -apple-system, sans-serif;
+  font-size: clamp(1.8rem, 4vw, 3.8rem);
+  font-weight: 800;
+  letter-spacing: 0.38em;
+  text-transform: uppercase;
+  position: relative;
+  display: flex;
+  gap: 0.05em;
+}
+
+.letter {
+  position: relative;
+  display: inline-block;
+  color: #2b303b; /* Dark base text matching screenshot */
+  transition: color 0.3s ease;
+}
+
+.letterFilled {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: #98a2b3; /* Sleek metallic light grey matching screenshot */
+  overflow: hidden;
+  white-space: nowrap;
+  width: 0%;
+  transition: width 0.08s linear;
+}
+
+/* Stencil Horizontal Cutout Lines matching the exact screenshot grid slices */
+.stencilOverlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 12px,
+    #050505 12px,
+    #050505 14px
+  );
+}

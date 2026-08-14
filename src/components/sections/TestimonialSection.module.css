@@ -1,0 +1,200 @@
+.wallOfLoveWrapper {
+  position: relative;
+  width: 100%;
+  padding: 5rem 0 5.5rem;
+  background-color: #000000;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.headerBox {
+  text-align: center;
+  margin-bottom: 2.8rem;
+  padding: 0 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.subTagline {
+  color: #ef4444;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.mainTitle {
+  font-size: clamp(1.6rem, 2.5vw, 2.4rem);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.accentRed {
+  color: #ef4444;
+}
+
+.marqueeRow {
+  width: 100%;
+  overflow: hidden;
+  margin-bottom: 1.25rem;
+  position: relative;
+  mask-image: linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%);
+}
+
+.marqueeTrack {
+  display: flex;
+  align-items: stretch;
+  gap: 1.25rem;
+  width: max-content;
+  will-change: transform;
+}
+
+.trackLeft {
+  animation: marqueeScrollLeft 45s linear infinite;
+}
+
+.trackRight {
+  animation: marqueeScrollRight 48s linear infinite;
+}
+
+.marqueeTrack:hover {
+  animation-play-state: paused;
+}
+
+@keyframes marqueeScrollLeft {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes marqueeScrollRight {
+  0% {
+    transform: translateX(-50%);
+  }
+  100% {
+    transform: translateX(0%);
+  }
+}
+
+/* Card Styling - Soundabode Theme Colors */
+.card {
+  width: 380px;
+  min-width: 380px;
+  background: #000000;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1.5rem;
+  box-sizing: border-box;
+  transition: all 0.3s ease;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
+.card:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: #08080c;
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.7);
+}
+
+.quoteText {
+  font-size: 0.92rem;
+  color: rgba(255, 255, 255, 0.88);
+  line-height: 1.55;
+  font-weight: 400;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.authorGroup {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #191c28;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.avatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.authorMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.nameRow {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.authorName {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.verifiedBadge {
+  flex-shrink: 0;
+}
+
+.authorRole {
+  font-size: 0.76rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 400;
+}
+
+@media (max-width: 640px) {
+  .card {
+    width: 300px;
+    min-width: 300px;
+    padding: 1.25rem;
+  }
+  .quoteText {
+    font-size: 0.88rem;
+  }
+}
