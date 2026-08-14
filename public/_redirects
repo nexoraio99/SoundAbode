@@ -1,2 +1,6 @@
+# Exclude static hashed assets from SPA rewrite rule so missing JS files return proper 404
+/assets/*  /assets/:splat  404
+
 # Cloudflare Pages SPA Client-Side Routing Fallback
-/*    /index.html   200
+/*         /index.html     200
+

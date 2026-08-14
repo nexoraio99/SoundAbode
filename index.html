@@ -2,6 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Auto-recover from stale JS module cache errors after new deployments
+      window.addEventListener('error', function (e) {
+        if (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
+          const key = 'soundabode_reload_ts';
+          const last = parseInt(sessionStorage.getItem(key) || '0', 10);
+          if (Date.now() - last > 5000) {
+            sessionStorage.setItem(key, Date.now().toString());
+            window.location.reload();
+          }
+        }
+      }, true);
+    </script>
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Best Music Production &amp; DJ School India | Soundabode Pune</title>
     <meta name="description" content="Soundabode is India's most practical music academy offering certified Ableton Live Music Production, DJ Training, Audio Engineering, Film Scoring and Sound Design programs in Pune." />
