@@ -575,6 +575,23 @@ app.post('/api/auth/change-passcode', requireAuth, requireAdmin, (req, res) => {
   res.json({ success: true, message: 'Admin passcode updated for this session. Update server/.env to persist across restarts.' });
 });
 
+// Root Landing Route — public server welcome & API status
+app.get('/', (req, res) => {
+  const dbState = mongoose.connection.readyState;
+  const dbStatusMap = { 0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting' };
+  res.json({
+    name: 'Soundabode Backend API',
+    status: 'online',
+    version: '1.0.0',
+    mongodb: dbStatusMap[dbState] || 'unknown',
+    endpoints: {
+      health: '/api/health',
+      posts: '/api/posts',
+      testSheets: '/api/test-google-sheets',
+    },
+  });
+});
+
 // Health Check & DB Status — public (safe, no sensitive data)
 app.get('/api/health', (req, res) => {
   const dbState = mongoose.connection.readyState;
@@ -585,6 +602,7 @@ app.get('/api/health', (req, res) => {
     uriConfigured: Boolean(process.env.MONGODB_URI),
   });
 });
+
 
 // Clear All Data — admin only
 app.delete('/api/clear-all-data', requireAuth, requireAdmin, async (req, res) => {
