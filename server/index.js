@@ -635,16 +635,20 @@ async function forwardToGoogleSheets(rawPayload) {
     return;
   }
 
-  let validatedUrl;
+  let validatedUrl = null;
   try {
-    validatedUrl = new URL(rawSheetsUrl);
-    if (validatedUrl.protocol !== 'https:' || validatedUrl.hostname !== 'script.google.com' || !validatedUrl.pathname.startsWith('/macros/s/')) {
+    const parsed = new URL(rawSheetsUrl);
+    if (parsed.protocol === 'https:' && parsed.hostname === 'script.google.com' && parsed.pathname.startsWith('/macros/s/')) {
+      validatedUrl = parsed;
+    } else {
       console.warn('[WARN] [Google Sheets] Blocked untrusted URL destination.');
       return;
     }
   } catch {
     return;
   }
+
+  if (!validatedUrl) return;
 
   // Deduplication signature (15 second window)
   const signature = payload.studentId && payload.date && payload.timeSlot
@@ -695,7 +699,11 @@ async function forwardToGoogleSheets(rawPayload) {
   };
 
   try {
-    const fetchFn = globalThis.fetch || fetch;
+    const fetchFn = globalThis.fetch || (typeof fetch !== 'undefined' ? fetch : null);
+    if (!fetchFn) {
+      console.error('[ERROR] [Google Sheets] Native fetch API is not available in Node environment.');
+      return;
+    }
     const response = await fetchFn(validatedUrl.href, {
       method: 'POST',
       headers: {
