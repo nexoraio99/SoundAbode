@@ -66,7 +66,7 @@ if (helmet) {
             'https://soundabode.com',
             'https://www.soundabode.com',
           ],
-          connectSrc: ["'self'", 'https://script.google.com', 'https://*.mongodb.net'],
+          connectSrc: ["'self'", 'https://script.google.com', 'https://*.mongodb.net', 'https://*.onrender.com'],
           frameSrc: ["'none'"],
           objectSrc: ["'none'"],
           upgradeInsecureRequests: [],
