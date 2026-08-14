@@ -7,6 +7,7 @@ import { InquiryService, ContactInquiry } from '../../services/inquiryService';
 import { AttendanceService, EnrolledStudent } from '../../services/attendanceService';
 import { AdmissionService, AdmissionSubmission } from '../../services/admissionService';
 import { AuthService, CmsUser } from '../../services/authService';
+import { getApiBaseUrl } from '../../services/apiConfig';
 import { BlogPost } from '../../types/blog';
 import { DJ_COURSES, EMP_COURSES, DJ_DISCLAIMER, EMP_DISCLAIMER } from '../../constants/admissionConstants';
 import { escapeHtml, safeImageUrl, safeWhatsAppUrl, sanitizePrintHtml } from '../../utils/security';
@@ -278,7 +279,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
     // Check MongoDB Atlas status & poll for connection state
     const checkHealth = () => {
-      const apiBase = (import.meta as any).env?.VITE_API_URL || '/api';
+      const apiBase = getApiBaseUrl();
       fetch(`${apiBase}/health`)
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
