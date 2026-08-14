@@ -10,7 +10,9 @@ export interface LoginResponse {
   error?: string;
 }
 
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || '/api';
+import { getApiBaseUrl } from './apiConfig';
+
+const API_BASE_URL = getApiBaseUrl();
 
 // Session token key — stored in sessionStorage so it expires when the tab closes.
 const SESSION_TOKEN_KEY = 'soundabode_cms_session_token';

@@ -478,8 +478,10 @@ const OFFICIAL_BLOG_POSTS: BlogPost[] = [
   }
 ];
 
+import { getApiBaseUrl } from './apiConfig';
+
 const LOCAL_STORAGE_KEY = 'soundabode_blog_posts';
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || '/api';
+const API_BASE_URL = getApiBaseUrl();
 
 export class BlogService {
   public static normalizePost(post: any): BlogPost {

@@ -2,6 +2,8 @@ import { AuthService } from './authService';
 import { AttendanceService } from './attendanceService';
 import { GoogleSheetsService } from './googleSheetsService';
 
+import { getApiBaseUrl } from './apiConfig';
+
 export interface AdmissionSubmission {
   id: string;
   formNo: string;
@@ -27,7 +29,7 @@ export interface AdmissionSubmission {
 
 const LOCAL_STORAGE_KEY = 'soundabode_admission_submissions';
 export const ADMISSION_EVENT_NAME = 'soundabode_admissions_updated';
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || '/api';
+const API_BASE_URL = getApiBaseUrl();
 
 const INITIAL_ADMISSIONS: AdmissionSubmission[] = [];
 

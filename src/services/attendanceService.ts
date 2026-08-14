@@ -27,10 +27,12 @@ export interface AttendanceRecord {
 const INITIAL_STUDENTS: EnrolledStudent[] = [];
 const INITIAL_ATTENDANCE: AttendanceRecord[] = [];
 
+import { getApiBaseUrl } from './apiConfig';
+
 const STUDENTS_STORAGE_KEY = 'soundabode_enrolled_students';
 const ATTENDANCE_STORAGE_KEY = 'soundabode_attendance_records';
 const ATTENDANCE_EVENT_NAME = 'soundabode_attendance_updated';
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || '/api';
+const API_BASE_URL = getApiBaseUrl();
 
 type AttendanceListener = (records: AttendanceRecord[]) => void;
 

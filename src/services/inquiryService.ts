@@ -1,6 +1,8 @@
 import { AuthService } from './authService';
 import { GoogleSheetsService } from './googleSheetsService';
 
+import { getApiBaseUrl } from './apiConfig';
+
 export interface ContactInquiry {
   id: string;
   name: string;
@@ -18,7 +20,7 @@ const INITIAL_INQUIRIES: ContactInquiry[] = [];
 
 const LOCAL_STORAGE_KEY = 'soundabode_student_inquiries';
 export const INQUIRY_EVENT_NAME = 'soundabode_inquiries_updated';
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || '/api';
+const API_BASE_URL = getApiBaseUrl();
 
 // Cross-tab BroadcastChannel
 let broadcastChannel: BroadcastChannel | null = null;
