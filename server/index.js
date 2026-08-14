@@ -694,14 +694,9 @@ async function forwardToGoogleSheets(rawPayload) {
     submittedAt: String(payload.submittedAt || new Date().toISOString()),
   };
 
-  // Strictly use environment destination URL (validated hostname and path prefix)
-  const destinationUrl = new URL(rawSheetsUrl);
-  if (destinationUrl.protocol !== 'https:' || destinationUrl.hostname !== 'script.google.com' || !destinationUrl.pathname.startsWith('/macros/s/')) {
-    return;
-  }
-
   try {
-    const response = await fetch(destinationUrl.href, {
+    const fetchFn = globalThis.fetch || fetch;
+    const response = await fetchFn(validatedUrl.href, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
