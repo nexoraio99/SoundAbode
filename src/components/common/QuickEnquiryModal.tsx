@@ -40,6 +40,7 @@ export const QuickEnquiryModal: React.FC<QuickEnquiryModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setErrorMsg('');
     setPhoneErrorMsg('');
 

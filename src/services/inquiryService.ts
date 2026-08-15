@@ -178,27 +178,31 @@ export class InquiryService {
     const updated = [newInquiry, ...inquiries];
     this.saveInquiries(updated, newInquiry);
 
-    // Submit to Google Sheets and sync to MongoDB Atlas backend
+    // Primary: Sync to backend API (backend handles Google Sheets forwarding with deduplication)
+    // Fallback: If backend is offline/unreachable, submit directly to Google Sheets from client
     if (typeof window !== 'undefined') {
-      // 1. Client-side submission to Google Sheets
-      GoogleSheetsService.submitToGoogleSheets({
-        source: newInquiry.source || (newInquiry.message?.includes('Pop-up') ? 'Pop-up Quick Enquiry Form' : 'Contact Form'),
-        name: newInquiry.name,
-        email: newInquiry.email,
-        phone: newInquiry.phone,
-        courseInterest: newInquiry.courseInterest,
-        message: newInquiry.message,
-        submittedAt: newInquiry.submittedAt,
-      }).catch((err) => console.warn('Google Sheets client notice:', err));
-
-      // 2. Sync to MongoDB Atlas backend (saves to MongoDB InquiryModel)
       fetch(`${API_BASE_URL}/inquiries`, {
         method: 'POST',
         headers: AuthService.getAuthHeaders(),
         body: JSON.stringify(newInquiry),
-      }).catch((err) => {
-        console.warn('Atlas sync notice:', err);
-      });
+      })
+        .then((res) => {
+          if (!res.ok) {
+            throw new Error(`HTTP error ${res.status}`);
+          }
+        })
+        .catch((err) => {
+          console.warn('Backend sync notice (falling back to client Google Sheets):', err);
+          GoogleSheetsService.submitToGoogleSheets({
+            source: newInquiry.source || (newInquiry.message?.includes('Pop-up') ? 'Pop-up Quick Enquiry Form' : 'Contact Form'),
+            name: newInquiry.name,
+            email: newInquiry.email,
+            phone: newInquiry.phone,
+            courseInterest: newInquiry.courseInterest,
+            message: newInquiry.message,
+            submittedAt: newInquiry.submittedAt,
+          }).catch((gsErr) => console.warn('Google Sheets fallback notice:', gsErr));
+        });
     }
 
     return newInquiry;

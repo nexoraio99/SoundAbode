@@ -795,15 +795,23 @@ async function forwardToGoogleSheets(rawPayload) {
 
   if (!validatedUrl) return;
 
-  // Deduplication signature (15 second window)
-  const signature = payload.studentId && payload.date && payload.timeSlot
+  // Deduplication signature (30 second window)
+  const isAttendance = payload.studentId && payload.date && payload.timeSlot;
+  const leadId = typeof rawPayload.id === 'string' ? rawPayload.id : '';
+  const cleanEmail = payload.email && payload.email !== 'N/A' ? payload.email : '';
+  const cleanPhone = payload.phone || '';
+  const cleanName = payload.name || payload.fullName || payload.firstName || '';
+  
+  const signature = isAttendance
     ? `att-${payload.studentId}-${payload.date}-${payload.timeSlot}-${payload.status}`
-    : `lead-${payload.email || payload.phone || payload.name}-${payload.source || payload.course}`;
+    : (leadId
+      ? `lead-id-${leadId}`
+      : `lead-${cleanPhone || cleanEmail || cleanName}-${payload.source || payload.course}`);
 
   const now = Date.now();
   const lastForward = recentForwardedLeads.get(signature);
-  if (lastForward && now - lastForward < 15000) {
-    console.log('[INFO] [Server Google Sheets] Suppressed duplicate forward within 15s');
+  if (lastForward && now - lastForward < 30000) {
+    console.log(`[INFO] [Server Google Sheets] Suppressed duplicate forward for (${signature}) within 30s`);
     return;
   }
   recentForwardedLeads.set(signature, now);
