@@ -24,7 +24,125 @@ export interface AttendanceRecord {
   updatedAt: string;
 }
 
-const INITIAL_STUDENTS: EnrolledStudent[] = [];
+const INITIAL_STUDENTS: EnrolledStudent[] = [
+  {
+    id: 'std-001',
+    name: 'Shailendra Chakravarthy',
+    email: 'shailendrachakravarthy8@gmail.com',
+    phone: '9866514403/9307031006',
+    course: 'Complete DJ training course',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-01',
+  },
+  {
+    id: 'std-002',
+    name: 'Deeksha Vishwakarma',
+    email: 'deekshavishwakarma705@gmail.com',
+    phone: '8319948935/8819007910',
+    course: 'Complete DJ training course',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-01',
+  },
+  {
+    id: 'std-003',
+    name: 'Sonal Shandilya',
+    email: 'Sha.sonal@gmail.com',
+    phone: '9798880002',
+    course: 'Basic DJ training course',
+    batch: 'Weekend Batch',
+    enrolledDate: '2026-08-02',
+  },
+  {
+    id: 'std-004',
+    name: 'Ridhima Deshpande',
+    email: 'ridhimadeshpande990@gmail.com',
+    phone: '9527556666',
+    course: 'Special 3 months rekordbox course - 50,000',
+    batch: 'Special Batch',
+    enrolledDate: '2026-08-03',
+  },
+  {
+    id: 'std-005',
+    name: 'Pranavadeep Bagul',
+    email: 'pranavdeeponly@gmail.com',
+    phone: '9322060312',
+    course: 'Beginner electronic music production',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-04',
+  },
+  {
+    id: 'std-006',
+    name: 'Anuj Aware',
+    email: 'anujawasare0457@gmail.com',
+    phone: '8975066947',
+    course: 'Basic DJ training',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-05',
+  },
+  {
+    id: 'std-007',
+    name: 'Chaitanya Jain',
+    email: 'djchaitanyajain100@gmail.com',
+    phone: '9172902597',
+    course: 'Beginner electronic music production',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-06',
+  },
+  {
+    id: 'std-008',
+    name: 'Kush Kachoriya',
+    email: 'Kk.wav.work@gmail.com',
+    phone: '7046029474',
+    course: 'Beginner electronic music production',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-07',
+  },
+  {
+    id: 'std-009',
+    name: 'Yogesh Kashid',
+    email: 'kashidyogesh096@gmail.com',
+    phone: '7875547537',
+    course: 'Basic DJ training course plus DJ training crash course',
+    batch: 'Crash Course Batch',
+    enrolledDate: '2026-08-08',
+  },
+  {
+    id: 'std-010',
+    name: 'Rohit Govvilkar',
+    email: 'rohietgovvilkar@gmail.com',
+    phone: '8767607223',
+    course: 'Basic training course',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-09',
+  },
+  {
+    id: 'std-011',
+    name: 'Devansh Prasad',
+    email: 'regurgmusic@gmail.com',
+    phone: '9381340066',
+    course: 'Basic DJ training course',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-10',
+  },
+  {
+    id: 'std-012',
+    name: 'Tavjot Singh',
+    email: 'tavjyotsingh76782222@gmail.com',
+    phone: '7678115930',
+    course: 'Complete DJ training course',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-11',
+  },
+  {
+    id: 'std-013',
+    name: 'Sharvil Sonawane',
+    email: '',
+    phone: '9158979991/9049499991',
+    course: 'Beginner electronic music production',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-12',
+  },
+];
 const INITIAL_ATTENDANCE: AttendanceRecord[] = [];
 
 import { getApiBaseUrl } from './apiConfig';
@@ -72,14 +190,17 @@ export class AttendanceService {
         const parsed: EnrolledStudent[] = JSON.parse(stored);
         const mockIds = ['std-101', 'std-201', 'std-202', 'std-203', 'std-204', 'std-205', 'std-206', 'std-207', 'std-208', 'std-209', 'std-210', 'std-211', 'std-212', 'std-213', 'std-214', 'std-215', 'std-216', 'std-217', 'std-218'];
         const realStudents = parsed.filter((s) => !mockIds.includes(s.id));
-        if (realStudents.length !== parsed.length) {
-          this.saveStudents(realStudents);
+        if (realStudents.length > 0) {
+          if (realStudents.length !== parsed.length) {
+            this.saveStudents(realStudents);
+          }
+          return realStudents;
         }
-        return realStudents;
       }
     } catch {
       // Fallback
     }
+    this.saveStudents(INITIAL_STUDENTS);
     return INITIAL_STUDENTS;
   }
 

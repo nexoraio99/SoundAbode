@@ -357,8 +357,134 @@ const StudentModel = mongoose.model('Student', studentSchema);
 const AdmissionModel = mongoose.model('Admission', admissionSchema);
 const AttendanceRecordModel = mongoose.model('AttendanceRecord', attendanceRecordSchema);
 
+const INITIAL_STUDENT_SEED = [
+  {
+    id: 'std-001',
+    name: 'Shailendra Chakravarthy',
+    email: 'shailendrachakravarthy8@gmail.com',
+    phone: '9866514403/9307031006',
+    course: 'Complete DJ training course',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-01',
+  },
+  {
+    id: 'std-002',
+    name: 'Deeksha Vishwakarma',
+    email: 'deekshavishwakarma705@gmail.com',
+    phone: '8319948935/8819007910',
+    course: 'Complete DJ training course',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-01',
+  },
+  {
+    id: 'std-003',
+    name: 'Sonal Shandilya',
+    email: 'Sha.sonal@gmail.com',
+    phone: '9798880002',
+    course: 'Basic DJ training course',
+    batch: 'Weekend Batch',
+    enrolledDate: '2026-08-02',
+  },
+  {
+    id: 'std-004',
+    name: 'Ridhima Deshpande',
+    email: 'ridhimadeshpande990@gmail.com',
+    phone: '9527556666',
+    course: 'Special 3 months rekordbox course - 50,000',
+    batch: 'Special Batch',
+    enrolledDate: '2026-08-03',
+  },
+  {
+    id: 'std-005',
+    name: 'Pranavadeep Bagul',
+    email: 'pranavdeeponly@gmail.com',
+    phone: '9322060312',
+    course: 'Beginner electronic music production',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-04',
+  },
+  {
+    id: 'std-006',
+    name: 'Anuj Aware',
+    email: 'anujawasare0457@gmail.com',
+    phone: '8975066947',
+    course: 'Basic DJ training',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-05',
+  },
+  {
+    id: 'std-007',
+    name: 'Chaitanya Jain',
+    email: 'djchaitanyajain100@gmail.com',
+    phone: '9172902597',
+    course: 'Beginner electronic music production',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-06',
+  },
+  {
+    id: 'std-008',
+    name: 'Kush Kachoriya',
+    email: 'Kk.wav.work@gmail.com',
+    phone: '7046029474',
+    course: 'Beginner electronic music production',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-07',
+  },
+  {
+    id: 'std-009',
+    name: 'Yogesh Kashid',
+    email: 'kashidyogesh096@gmail.com',
+    phone: '7875547537',
+    course: 'Basic DJ training course plus DJ training crash course',
+    batch: 'Crash Course Batch',
+    enrolledDate: '2026-08-08',
+  },
+  {
+    id: 'std-010',
+    name: 'Rohit Govvilkar',
+    email: 'rohietgovvilkar@gmail.com',
+    phone: '8767607223',
+    course: 'Basic training course',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-09',
+  },
+  {
+    id: 'std-011',
+    name: 'Devansh Prasad',
+    email: 'regurgmusic@gmail.com',
+    phone: '9381340066',
+    course: 'Basic DJ training course',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-10',
+  },
+  {
+    id: 'std-012',
+    name: 'Tavjot Singh',
+    email: 'tavjyotsingh76782222@gmail.com',
+    phone: '7678115930',
+    course: 'Complete DJ training course',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-11',
+  },
+  {
+    id: 'std-013',
+    name: 'Sharvil Sonawane',
+    email: '',
+    phone: '9158979991/9049499991',
+    course: 'Beginner electronic music production',
+    batch: 'Regular Batch',
+    enrolledDate: '2026-08-12',
+  },
+];
+
 async function autoSeedIfEmpty() {
   try {
+    // Seed initial enrolled students if collection is empty
+    const studentCount = await StudentModel.countDocuments();
+    if (studentCount === 0) {
+      await StudentModel.insertMany(INITIAL_STUDENT_SEED);
+      console.log(`[SUCCESS] Seeded ${INITIAL_STUDENT_SEED.length} enrolled students in MongoDB Atlas.`);
+    }
 
     // Clean up any stray admission form entries accidentally stored in InquiryModel
     await InquiryModel.deleteMany({
@@ -1037,10 +1163,14 @@ app.delete('/api/posts/:id', requireAuth, async (req, res) => {
 app.get('/api/students', requireAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState === 1) {
-      const students = await StudentModel.find();
+      let students = await StudentModel.find();
+      if (!students || students.length === 0) {
+        await StudentModel.insertMany(INITIAL_STUDENT_SEED);
+        students = await StudentModel.find();
+      }
       return res.json(students);
     }
-    res.json([]);
+    res.json(INITIAL_STUDENT_SEED);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
