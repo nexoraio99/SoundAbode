@@ -1311,6 +1311,16 @@ function getMailTransporter() {
   return mailTransporter;
 }
 
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 async function sendEmail({ to, subject, text, html, replyTo }) {
   const transporter = getMailTransporter();
   const fromEmail = process.env.SMTP_FROM_EMAIL || 'services@soundabode.com';
