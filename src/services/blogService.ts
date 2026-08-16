@@ -616,22 +616,22 @@ export class BlogService {
     return posts[index];
   }
 
-  public static deletePost(id: string): boolean {
+  public static async deletePost(id: string): Promise<boolean> {
     let posts = this.getStoredPosts();
-    const initialLength = posts.length;
     posts = posts.filter((p) => p.id !== id);
-    if (posts.length !== initialLength) {
-      this.savePosts(posts);
+    this.savePosts(posts);
 
-      if (typeof window !== 'undefined') {
-        fetch(`${API_BASE_URL}/posts/${id}`, {
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch(`${API_BASE_URL}/posts/${id}`, {
           method: 'DELETE',
           headers: AuthService.getAuthHeaders(),
-        }).catch((err) => console.warn('Atlas blog delete notice:', err));
+        });
+        return res.ok;
+      } catch (err) {
+        console.warn('Atlas blog delete notice:', err);
       }
-
-      return true;
     }
-    return false;
+    return true;
   }
 }

@@ -344,21 +344,24 @@ export class AttendanceService {
     return students[index];
   }
 
-  public static deleteStudent(id: string): boolean {
+  public static async deleteStudent(id: string): Promise<boolean> {
     let students = this.getStoredStudents();
-    const initialLen = students.length;
     students = students.filter((s) => s.id !== id);
-    if (students.length !== initialLen) {
-      this.saveStudents(students);
-      if (typeof window !== 'undefined') {
-        fetch(`${API_BASE_URL}/students/${id}`, {
+    this.saveStudents(students);
+    this.notifyChange(this.getStoredAttendance());
+
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch(`${API_BASE_URL}/students/${id}`, {
           method: 'DELETE',
           headers: AuthService.getAuthHeaders(),
-        }).catch((err) => console.warn('Student delete sync notice:', err));
+        });
+        return res.ok;
+      } catch (err) {
+        console.warn('Student delete sync notice:', err);
       }
-      return true;
     }
-    return false;
+    return true;
   }
 
   public static getAttendanceForStudent(
@@ -458,20 +461,22 @@ export class AttendanceService {
     }
   }
 
-  public static deleteAttendanceRecord(id: string): boolean {
+  public static async deleteAttendanceRecord(id: string): Promise<boolean> {
     let records = this.getStoredAttendance();
-    const initialLen = records.length;
     records = records.filter((r) => r.id !== id);
-    if (records.length !== initialLen) {
-      this.saveAttendance(records);
-      if (typeof window !== 'undefined') {
-        fetch(`${API_BASE_URL}/attendance/${id}`, {
+    this.saveAttendance(records);
+
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch(`${API_BASE_URL}/attendance/${id}`, {
           method: 'DELETE',
           headers: AuthService.getAuthHeaders(),
-        }).catch((err) => console.warn('Attendance delete sync notice:', err));
+        });
+        return res.ok;
+      } catch (err) {
+        console.warn('Attendance delete sync notice:', err);
       }
-      return true;
     }
-    return false;
+    return true;
   }
 }

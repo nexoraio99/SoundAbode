@@ -252,17 +252,21 @@ export class AdmissionService {
     return admissions.find((a) => a.formNo.toLowerCase() === formNo.toLowerCase());
   }
 
-  public static deleteAdmission(id: string): boolean {
+  public static async deleteAdmission(id: string): Promise<boolean> {
     const admissions = this.getStoredAdmissions();
     const filtered = admissions.filter((a) => a.id !== id);
-    if (filtered.length === admissions.length) return false;
     this.saveAdmissions(filtered);
 
     if (typeof window !== 'undefined') {
-      fetch(`${API_BASE_URL}/admissions/${id}`, {
-        method: 'DELETE',
-        headers: AuthService.getAuthHeaders(),
-      }).catch((err) => console.warn('Admission delete sync notice:', err));
+      try {
+        const res = await fetch(`${API_BASE_URL}/admissions/${id}`, {
+          method: 'DELETE',
+          headers: AuthService.getAuthHeaders(),
+        });
+        return res.ok;
+      } catch (err) {
+        console.warn('Admission delete sync notice:', err);
+      }
     }
     return true;
   }

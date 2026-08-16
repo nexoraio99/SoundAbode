@@ -238,23 +238,22 @@ export class InquiryService {
     return inquiries[index];
   }
 
-  public static deleteInquiry(id: string): boolean {
+  public static async deleteInquiry(id: string): Promise<boolean> {
     let inquiries = this.getStoredInquiries();
-    const initialLength = inquiries.length;
     inquiries = inquiries.filter((i) => i.id !== id);
-    if (inquiries.length !== initialLength) {
-      this.saveInquiries(inquiries);
+    this.saveInquiries(inquiries);
 
-      // Sync to MongoDB Atlas backend
-      if (typeof window !== 'undefined') {
-        fetch(`${API_BASE_URL}/inquiries/${id}`, {
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch(`${API_BASE_URL}/inquiries/${id}`, {
           method: 'DELETE',
           headers: AuthService.getAuthHeaders(),
-        }).catch((err) => console.warn('Atlas delete notice:', err));
+        });
+        return res.ok;
+      } catch (err) {
+        console.warn('Atlas delete notice:', err);
       }
-
-      return true;
     }
-    return false;
+    return true;
   }
 }

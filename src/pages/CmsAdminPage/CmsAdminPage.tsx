@@ -517,9 +517,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     setIsBlogModalOpen(false);
   };
 
-  const handleDeleteBlog = (id: string, title: string) => {
+  const handleDeleteBlog = async (id: string, title: string) => {
     if (window.confirm(`Delete article "${title}"?`)) {
-      BlogService.deletePost(id);
+      setPosts((prev) => prev.filter((p) => p.id !== id));
+      await BlogService.deletePost(id);
       refreshData();
     }
   };
@@ -533,10 +534,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     refreshData();
   };
 
-  const handleDeleteInquiry = (id: string) => {
+  const handleDeleteInquiry = async (id: string) => {
     if (window.confirm('Delete this inquiry?')) {
-      InquiryService.deleteInquiry(id);
+      setInquiries((prev) => prev.filter((i) => i.id !== id));
       setSelectedInquiryIds((prev) => prev.filter((item) => item !== id));
+      await InquiryService.deleteInquiry(id);
       refreshData();
     }
   };
@@ -560,11 +562,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     );
   };
 
-  const handleBatchDeleteInquiries = () => {
+  const handleBatchDeleteInquiries = async () => {
     if (selectedInquiryIds.length === 0) return;
     if (window.confirm(`Are you sure you want to delete ${selectedInquiryIds.length} selected lead(s)?`)) {
-      selectedInquiryIds.forEach((id) => InquiryService.deleteInquiry(id));
+      const idsToDelete = [...selectedInquiryIds];
+      setInquiries((prev) => prev.filter((i) => !idsToDelete.includes(i.id)));
       setSelectedInquiryIds([]);
+      await Promise.all(idsToDelete.map((id) => InquiryService.deleteInquiry(id)));
       refreshData();
     }
   };
@@ -585,9 +589,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     refreshData();
   };
 
-  const handleDeleteAdmission = (id: string, formNo: string) => {
+  const handleDeleteAdmission = async (id: string, formNo: string) => {
     if (window.confirm(`Delete submission ${formNo}?`)) {
-      AdmissionService.deleteAdmission(id);
+      setAdmissions((prev) => prev.filter((a) => a.id !== id));
+      await AdmissionService.deleteAdmission(id);
       refreshData();
     }
   };
@@ -804,13 +809,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     setIsAttendanceModalOpen(true);
   };
 
-  const handleDeleteCurrentAttendance = () => {
+  const handleDeleteCurrentAttendance = async () => {
     if (!selectedStudentId) return;
     const targetDate = attendanceFormDate || selectedDateStr;
 
     if (window.confirm(`Are you sure you want to delete this attendance session?`)) {
       if (editingAttendanceId) {
-        AttendanceService.deleteAttendanceRecord(editingAttendanceId);
+        await AttendanceService.deleteAttendanceRecord(editingAttendanceId);
       } else {
         const formatTime = (timeStr: string) => {
           if (!timeStr) return '';
@@ -826,7 +831,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         const records = AttendanceService.getAttendanceForStudent(selectedStudentId, currentUser || undefined);
         const existing = records.find((r) => r.date === targetDate && r.timeSlot === finalSlot);
         if (existing) {
-          AttendanceService.deleteAttendanceRecord(existing.id);
+          await AttendanceService.deleteAttendanceRecord(existing.id);
         }
       }
       setIsAttendanceModalOpen(false);
@@ -911,9 +916,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     refreshData();
   };
 
-  const handleDeleteStudent = (id: string, name: string) => {
+  const handleDeleteStudent = async (id: string, name: string) => {
     if (window.confirm(`Remove student "${name}" from roster?`)) {
-      AttendanceService.deleteStudent(id);
+      setStudents((prev) => prev.filter((s) => s.id !== id));
+      await AttendanceService.deleteStudent(id);
       refreshData();
     }
   };

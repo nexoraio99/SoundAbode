@@ -978,7 +978,10 @@ app.delete('/api/inquiries/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     if (mongoose.connection.readyState === 1) {
-      await InquiryModel.findOneAndDelete({ id });
+      const isObjectId = mongoose.Types.ObjectId.isValid(id);
+      await InquiryModel.deleteMany({
+        $or: [{ id }, ...(isObjectId ? [{ _id: id }] : [])],
+      });
     }
     res.json({ success: true, id });
   } catch (err) {
@@ -1061,7 +1064,10 @@ app.delete('/api/admissions/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     if (mongoose.connection.readyState === 1) {
-      await AdmissionModel.findOneAndDelete({ id });
+      const isObjectId = mongoose.Types.ObjectId.isValid(id);
+      await AdmissionModel.deleteMany({
+        $or: [{ id }, ...(isObjectId ? [{ _id: id }] : [])],
+      });
     }
     res.json({ success: true, id });
   } catch (err) {
@@ -1118,7 +1124,10 @@ app.delete('/api/attendance/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     if (mongoose.connection.readyState === 1) {
-      await AttendanceRecordModel.deleteOne({ id });
+      const isObjectId = mongoose.Types.ObjectId.isValid(id);
+      await AttendanceRecordModel.deleteMany({
+        $or: [{ id }, ...(isObjectId ? [{ _id: id }] : [])],
+      });
       return res.json({ success: true, id });
     }
     res.json({ success: true, id });
@@ -1161,7 +1170,10 @@ app.delete('/api/posts/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     if (mongoose.connection.readyState === 1) {
-      await BlogPostModel.findOneAndDelete({ id });
+      const isObjectId = mongoose.Types.ObjectId.isValid(id);
+      await BlogPostModel.deleteMany({
+        $or: [{ id }, ...(isObjectId ? [{ _id: id }] : [])],
+      });
     }
     res.json({ success: true, id });
   } catch (err) {
@@ -1207,7 +1219,10 @@ app.delete('/api/students/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     if (mongoose.connection.readyState === 1) {
-      await StudentModel.findOneAndDelete({ id });
+      const isObjectId = mongoose.Types.ObjectId.isValid(id);
+      await StudentModel.deleteMany({
+        $or: [{ id }, ...(isObjectId ? [{ _id: id }] : [])],
+      });
     }
     res.json({ success: true, id });
   } catch (err) {
