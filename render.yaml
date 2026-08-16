@@ -24,3 +24,19 @@ services:
         value: https://soundabode.com,https://www.soundabode.com
       - key: GOOGLE_SHEETS_URL
         sync: false
+      - key: SMTP_HOST
+        value: smtp.zoho.com
+      - key: SMTP_PORT
+        value: "465"
+      - key: SMTP_SECURE
+        value: "true"
+      - key: SMTP_USER
+        value: services@soundabode.com
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM_NAME
+        value: Soundabode Studios
+      - key: SMTP_FROM_EMAIL
+        value: services@soundabode.com
+      - key: DEVELOPER_TARGET_EMAIL
+        value: devangdhakate22@gmail.com
