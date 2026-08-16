@@ -330,6 +330,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
     const unsubscribeAttendance = AttendanceService.subscribe(() => {
       setAttendanceVersion((v) => v + 1);
+      setStudents(AttendanceService.getAllStudents());
     });
 
     return () => {
@@ -340,6 +341,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       clearInterval(healthInterval);
     };
   }, []);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      refreshData();
+    }
+  }, [isAuthenticated]);
 
   const [attendanceVersion, setAttendanceVersion] = useState(0);
 
@@ -368,6 +375,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       if (userObj.role === 'teacher') {
         setActiveTab('students');
       }
+      refreshData();
       return;
     }
 

@@ -18,10 +18,10 @@ This guide walks you through deploying the **Soundabode** full-stack web applica
    - `VAIBHAV_PASSCODE`: Secure passcode for Vaibhav account.
    - `GOOGLE_SHEETS_URL`: Your Google Apps Script webhook URL.
 6. Click **Apply**. Render will build and deploy your API web service.
-7. Once deployed, note down your Render Web Service URL (e.g. `https://soundabode-backend-api.onrender.com`).
+7. Once deployed, note down your Render Web Service URL (e.g. `https://soundabode-server.onrender.com`).
 
 ### Option B: Manual Render Web Service Setup
-- **Name**: `soundabode-backend-api`
+- **Name**: `soundabode-server`
 - **Environment**: `Node`
 - **Region**: `Singapore` (or region closest to your audience)
 - **Build Command**: `cd server && npm install`
@@ -40,7 +40,7 @@ This guide walks you through deploying the **Soundabode** full-stack web applica
    - **Build output directory**: `dist`
    - **Root directory**: `/` (Leave empty or set to root)
 4. Add **Environment Variables** under Environment Variables:
-   - `VITE_API_URL`: `https://soundabode-backend-api.onrender.com/api` (Replace with your actual Render API URL)
+   - `VITE_API_URL`: `https://soundabode-server.onrender.com/api` (Replace with your actual Render API URL)
    - `VITE_GOOGLE_SHEETS_URL`: `https://script.google.com/macros/s/.../exec`
 5. Click **Save and Deploy**.
 
@@ -49,7 +49,7 @@ This guide walks you through deploying the **Soundabode** full-stack web applica
 ## Verification & Post-Deployment Checklist
 
 1. **Verify Backend Health**:
-   Visit `https://soundabode-backend-api.onrender.com/api/health` in your browser.
+   Visit `https://soundabode-server.onrender.com/api/health` in your browser.
    Expect response: `{ "status": "ok", "mongodb": "connected", "uriConfigured": true }`.
 
 2. **Verify Frontend Single Page Routing**:
