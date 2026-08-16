@@ -1293,13 +1293,15 @@ function getMailTransporter() {
   const port = Number(process.env.SMTP_PORT) || 465;
   const secure = process.env.SMTP_SECURE !== 'false';
   const user = process.env.SMTP_USER || 'services@soundabode.com';
-  const pass = process.env.SMTP_PASS || '';
+  const pass = (process.env.SMTP_PASS || '').trim();
 
   if (!pass) {
+    console.warn('[SMTP WARNING] process.env.SMTP_PASS is currently empty on this Render instance.');
     return null;
   }
 
   if (!mailTransporter) {
+    console.log(`[SMTP INIT] Initializing Nodemailer transporter for ${user} via ${host}:${port}`);
     mailTransporter = nodemailer.createTransport({
       host,
       port,
