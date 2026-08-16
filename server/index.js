@@ -122,6 +122,7 @@ app.use(
         ALLOWED_ORIGINS.includes('*') ||
         origin.endsWith('.pages.dev') ||
         origin.endsWith('.cloudflare.com') ||
+        origin.includes('soundabode.com') ||
         origin.includes('localhost') ||
         origin.includes('127.0.0.1');
 
@@ -1188,6 +1189,7 @@ app.get('/api/students', requireAuth, async (req, res) => {
 app.post('/api/students', requireAuth, async (req, res) => {
   try {
     const studentData = req.body;
+    if (!studentData.id) studentData.id = `std-${Date.now()}`;
     if (mongoose.connection.readyState === 1) {
       const student = await StudentModel.findOneAndUpdate({ id: studentData.id }, studentData, {
         upsert: true,
