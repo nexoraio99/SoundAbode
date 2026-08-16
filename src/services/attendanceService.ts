@@ -11,12 +11,14 @@ export interface EnrolledStudent {
   enrolledDate: string;
 }
 
+export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'PRACTICE_SESSION' | 'GROUP_SESSION' | 'NA';
+
 export interface AttendanceRecord {
   id: string;
   studentId: string;
   date: string; // YYYY-MM-DD format
   timeSlot: string; // e.g. "11:00 AM - 01:00 PM"
-  status: 'PRESENT' | 'ABSENT' | 'NA';
+  status: AttendanceStatus;
   comment: string;
   markedBy: string; // email or user id
   markedByName: string; // e.g. "Ashu", "Vaibhav", "Soundabode Admin"
@@ -391,7 +393,7 @@ export class AttendanceService {
     studentId: string;
     date: string;
     timeSlot: string;
-    status: 'PRESENT' | 'ABSENT' | 'NA';
+    status: AttendanceStatus;
     comment: string;
     markedBy: string;
     markedByName: string;
@@ -452,6 +454,33 @@ export class AttendanceService {
       this.syncAttendanceToRemote(newRecord);
       return newRecord;
     }
+  }
+
+  public static markBatchGroupAttendance(payload: {
+    studentIds: string[];
+    date: string;
+    timeSlot: string;
+    status: AttendanceStatus;
+    comment: string;
+    markedBy: string;
+    markedByName: string;
+    markedByRole: 'admin' | 'teacher';
+  }): AttendanceRecord[] {
+    const updatedRecords: AttendanceRecord[] = [];
+    payload.studentIds.forEach((studentId) => {
+      const rec = this.markAttendance({
+        studentId,
+        date: payload.date,
+        timeSlot: payload.timeSlot,
+        status: payload.status,
+        comment: payload.comment,
+        markedBy: payload.markedBy,
+        markedByName: payload.markedByName,
+        markedByRole: payload.markedByRole,
+      });
+      updatedRecords.push(rec);
+    });
+    return updatedRecords;
   }
 
   public static async deleteAttendanceRecord(id: string): Promise<boolean> {

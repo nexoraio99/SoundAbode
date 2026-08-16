@@ -1385,7 +1385,7 @@ app.post('/api/issues', async (req, res) => {
       const emailSubject = `[CMS Issue Report] [${issueData.priority}] ${issueData.title}`;
       const emailHtml = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #121316; color: #ffffff; padding: 20px; border-radius: 10px;">
-          <h2 style="color: #ef4444; border-bottom: 1px solid #333; padding-bottom: 10px;">🚨 Soundabode CMS Issue Report</h2>
+          <h2 style="color: #ef4444; border-bottom: 1px solid #333; padding-bottom: 10px;">Soundabode CMS Issue Report</h2>
           <p><strong>Title:</strong> ${escapeHtml(issueData.title)}</p>
           <p><strong>Category:</strong> ${escapeHtml(issueData.category)}</p>
           <p><strong>Priority:</strong> <span style="background: #ef4444; color: #fff; padding: 3px 8px; border-radius: 4px; font-weight: bold;">${escapeHtml(issueData.priority)}</span></p>

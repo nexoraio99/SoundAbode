@@ -4,7 +4,7 @@ import admissionStyles from '../AdmissionPage/AdmissionPage.module.css';
 import SEO from '../../components/common/SEO';
 import { BlogService } from '../../services/blogService';
 import { InquiryService, ContactInquiry } from '../../services/inquiryService';
-import { AttendanceService, EnrolledStudent } from '../../services/attendanceService';
+import { AttendanceService, EnrolledStudent, AttendanceStatus } from '../../services/attendanceService';
 import { AdmissionService, AdmissionSubmission } from '../../services/admissionService';
 import { AuthService, CmsUser } from '../../services/authService';
 import { getApiBaseUrl } from '../../services/apiConfig';
@@ -222,10 +222,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const [attendanceFormDate, setAttendanceFormDate] = useState<string>('2026-08-01');
   const [customTimeStart, setCustomTimeStart] = useState<string>('11:00');
   const [customTimeEnd, setCustomTimeEnd] = useState<string>('13:00');
-  const [attendanceFormStatus, setAttendanceFormStatus] = useState<'PRESENT' | 'ABSENT' | 'NA'>('PRESENT');
+  const [attendanceFormStatus, setAttendanceFormStatus] = useState<AttendanceStatus>('PRESENT');
   const [attendanceFormComment, setAttendanceFormComment] = useState<string>('');
   const [editingAttendanceId, setEditingAttendanceId] = useState<string | null>(null);
   const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
+
+  // Modal states for Group Session Batch Attendance
+  const [isGroupAttendanceModalOpen, setIsGroupAttendanceModalOpen] = useState<boolean>(false);
+  const [groupSessionDate, setGroupSessionDate] = useState<string>('2026-08-01');
+  const [groupCustomTimeStart, setGroupCustomTimeStart] = useState<string>('11:00');
+  const [groupCustomTimeEnd, setGroupCustomTimeEnd] = useState<string>('13:00');
+  const [groupSessionStatus, setGroupSessionStatus] = useState<AttendanceStatus>('GROUP_SESSION');
+  const [groupSessionComment, setGroupSessionComment] = useState<string>('');
+  const [selectedGroupStudentIds, setSelectedGroupStudentIds] = useState<string[]>([]);
+  const [groupStudentSearchQuery, setGroupStudentSearchQuery] = useState<string>('');
+  const [groupSessionSuccessBanner, setGroupSessionSuccessBanner] = useState<string | null>(null);
 
   // Modal states for Lead Message Viewer
   const [expandedLeadMessage, setExpandedLeadMessage] = useState<ContactInquiry | null>(null);
@@ -938,7 +949,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       const existing = records.find((r) => r.date === targetDate && r.timeSlot === targetSlot);
       if (existing) {
         setEditingAttendanceId(existing.id);
-        setAttendanceFormStatus(existing.status);
+        setAttendanceFormStatus(existing.status as AttendanceStatus);
         setAttendanceFormComment(existing.comment);
       } else {
         setEditingAttendanceId(null);
@@ -981,6 +992,78 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       refreshData();
     }
   };
+
+  const handleOpenGroupAttendanceModal = (dateStr?: string) => {
+    setGroupSessionDate(dateStr || selectedDateStr || new Date().toISOString().split('T')[0]);
+    setSelectedGroupStudentIds(students.map((s) => s.id));
+    setGroupSessionStatus('GROUP_SESSION');
+    setGroupSessionComment('');
+    setGroupStudentSearchQuery('');
+    setIsGroupAttendanceModalOpen(true);
+  };
+
+  const handleToggleSelectGroupStudent = (studentId: string) => {
+    setSelectedGroupStudentIds((prev) =>
+      prev.includes(studentId) ? prev.filter((id) => id !== studentId) : [...prev, studentId]
+    );
+  };
+
+  const handleToggleSelectAllGroupStudents = () => {
+    if (selectedGroupStudentIds.length === students.length) {
+      setSelectedGroupStudentIds([]);
+    } else {
+      setSelectedGroupStudentIds(students.map((s) => s.id));
+    }
+  };
+
+  const handleSaveGroupAttendance = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedGroupStudentIds.length === 0) {
+      alert('Please select at least one student for the group session.');
+      return;
+    }
+
+    const formatTime = (timeStr: string) => {
+      if (!timeStr) return '';
+      const [h, m] = timeStr.split(':');
+      const hour = parseInt(h, 10);
+      const ampm = hour >= 12 ? 'PM' : 'AM';
+      const formattedHour = hour % 12 || 12;
+      return `${formattedHour.toString().padStart(2, '0')}:${m} ${ampm}`;
+    };
+
+    const timeSlotStr = groupCustomTimeStart && groupCustomTimeEnd
+      ? `${formatTime(groupCustomTimeStart)} - ${formatTime(groupCustomTimeEnd)}`
+      : '11:00 AM - 01:00 PM';
+
+    const markedByEmail = currentUser?.email || 'admin@soundabode.com';
+    const markedByName = currentUser?.name || 'Soundabode Admin';
+    const markedByRole = currentUser?.role === 'teacher' ? 'teacher' : 'admin';
+
+    AttendanceService.markBatchGroupAttendance({
+      studentIds: selectedGroupStudentIds,
+      date: groupSessionDate,
+      timeSlot: timeSlotStr,
+      status: groupSessionStatus,
+      comment: groupSessionComment.trim(),
+      markedBy: markedByEmail,
+      markedByName: markedByName,
+      markedByRole: markedByRole,
+    });
+
+    setAttendanceVersion((v) => v + 1);
+    setIsGroupAttendanceModalOpen(false);
+    setGroupSessionSuccessBanner(
+      `Group Session attendance marked for ${selectedGroupStudentIds.length} student(s) on ${groupSessionDate}!`
+    );
+    setTimeout(() => setGroupSessionSuccessBanner(null), 5000);
+  };
+
+  const filteredGroupStudents = students.filter((s) => {
+    if (!groupStudentSearchQuery.trim()) return true;
+    const q = groupStudentSearchQuery.toLowerCase();
+    return s.name.toLowerCase().includes(q) || s.course.toLowerCase().includes(q) || s.batch.toLowerCase().includes(q);
+  });
 
   const handleSaveAttendance = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1335,9 +1418,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
   const totalPresent = activeAttendanceRecords.filter((r) => r.status === 'PRESENT').length;
   const totalAbsent = activeAttendanceRecords.filter((r) => r.status === 'ABSENT').length;
-  const totalNa = activeAttendanceRecords.filter((r) => r.status === 'NA').length;
+  const totalPractice = activeAttendanceRecords.filter((r) => r.status === 'PRACTICE_SESSION' || r.status === 'NA').length;
+  const totalGroup = activeAttendanceRecords.filter((r) => r.status === 'GROUP_SESSION').length;
   const totalMarked = activeAttendanceRecords.length;
-  const attendancePercentage = (totalPresent + totalAbsent) > 0 ? Math.round((totalPresent / (totalPresent + totalAbsent)) * 100) : 0;
+  const attendancePercentage = totalMarked > 0 ? Math.round(((totalPresent + totalPractice + totalGroup) / totalMarked) * 100) : 0;
 
   // Calendar Days Calculation for current calendarDate
   const year = calendarDate.getFullYear();
@@ -2326,6 +2410,26 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               {!selectedStudentId ? (
                 /* VIEW A: ENROLLED STUDENTS ROSTER */
                 <div>
+                  {/* SUCCESS NOTIFICATION BANNER */}
+                  {groupSessionSuccessBanner && (
+                    <div style={{
+                      background: 'rgba(56, 189, 248, 0.12)',
+                      border: '1px solid rgba(56, 189, 248, 0.3)',
+                      color: '#38bdf8',
+                      padding: '0.75rem 1rem',
+                      borderRadius: '8px',
+                      marginBottom: '1rem',
+                      fontSize: '0.85rem',
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                      {groupSessionSuccessBanner}
+                    </div>
+                  )}
+
                   <div className={styles.pageHeaderRow}>
                     <div>
                       <h1 className={styles.pageTitle}>Attendance</h1>
@@ -2334,6 +2438,22 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         <span>•</span>
                         <span>Pune Studio Roster</span>
                       </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <button
+                        onClick={() => handleOpenGroupAttendanceModal()}
+                        className={styles.btnPrimary}
+                        style={{ gap: '0.45rem', fontWeight: 600 }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                          <circle cx="9" cy="7" r="4" />
+                          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                        </svg>
+                        Mark Group Session Attendance
+                      </button>
                     </div>
                   </div>
 
@@ -2354,9 +2474,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           {students.map((student) => {
                             const avatar = getAvatarDetails(student.name, student.avatarUrl);
                             const studentRecords = AttendanceService.getAttendanceForStudent(student.id, currentUser || undefined);
-                            const presentCount = studentRecords.filter((r) => r.status === 'PRESENT').length;
+                            const attendedCount = studentRecords.filter((r) => r.status !== 'ABSENT').length;
                             const totalCount = studentRecords.length;
-                            const pct = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
+                            const pct = totalCount > 0 ? Math.round((attendedCount / totalCount) * 100) : 0;
 
                             return (
                               <tr key={student.id}>
@@ -2401,7 +2521,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   </div>
                                 </td>
                                 <td style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>
-                                  {presentCount} Present / {totalCount} Sessions
+                                  {attendedCount} Attended / {totalCount} Sessions
                                 </td>
                                 <td style={{ textAlign: 'right' }}>
                                   <div style={{ display: 'inline-flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
@@ -2438,9 +2558,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     {students.map((student) => {
                       const avatar = getAvatarDetails(student.name, student.avatarUrl);
                       const studentRecords = AttendanceService.getAttendanceForStudent(student.id, currentUser || undefined);
-                      const presentCount = studentRecords.filter((r) => r.status === 'PRESENT').length;
+                      const attendedCount = studentRecords.filter((r) => r.status !== 'ABSENT').length;
                       const totalCount = studentRecords.length;
-                      const pct = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
+                      const pct = totalCount > 0 ? Math.round((attendedCount / totalCount) * 100) : 0;
 
                       return (
                         <div key={student.id} className={styles.mobileDataCard}>
@@ -2477,7 +2597,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             </div>
                             <div className={styles.mobileCardRow}>
                               <span className={styles.mobileCardLabel}>Attendance Sessions</span>
-                              <span className={styles.mobileCardValue}>{presentCount} / {totalCount} Present</span>
+                              <span className={styles.mobileCardValue}>{attendedCount} / {totalCount} Attended</span>
                             </div>
                             <div style={{ marginTop: '0.2rem' }}>
                               <div className={styles.progressBarTrack}>
@@ -2537,11 +2657,24 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                     {/* Actions Row */}
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                      <button onClick={() => handleOpenAttendanceModal(undefined, selectedDateStr)} className={styles.btnPrimary} style={{ gap: '0.4rem' }}>
+                      <button
+                        onClick={() => handleOpenGroupAttendanceModal(selectedDateStr)}
+                        className={styles.btnPrimary}
+                        style={{ gap: '0.4rem', fontWeight: 600 }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                          <circle cx="9" cy="7" r="4" />
+                          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                        </svg>
+                        Group Session
+                      </button>
+                      <button onClick={() => handleOpenAttendanceModal(undefined, selectedDateStr)} className={styles.btnSecondary} style={{ gap: '0.4rem' }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                           <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
                         </svg>
-                        Mark Attendance
+                        Mark Individual
                       </button>
                       <button onClick={() => setIsReportModalOpen(true)} className={styles.btnSecondary} style={{ gap: '0.4rem' }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2554,7 +2687,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   </div>
 
                   {/* STATS OVERVIEW FOR ACTIVE STUDENT */}
-                  <div className={styles.kpiGrid} style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '1.25rem' }}>
+                  <div className={styles.kpiGrid} style={{ gridTemplateColumns: 'repeat(5, 1fr)', marginBottom: '1.25rem' }}>
                     <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
                       <div className={styles.kpiLabelRow}>Rate</div>
                       <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: attendancePercentage >= 80 ? '#34d399' : '#fbbf24' }}>
@@ -2574,9 +2707,15 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       </div>
                     </div>
                     <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
-                      <div className={styles.kpiLabelRow}>N/A</div>
-                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: '#94a3b8' }}>
-                        {totalNa}
+                      <div className={styles.kpiLabelRow}>Practice</div>
+                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: '#c084fc' }}>
+                        {totalPractice}
+                      </div>
+                    </div>
+                    <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
+                      <div className={styles.kpiLabelRow}>Group</div>
+                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: '#38bdf8' }}>
+                        {totalGroup}
                       </div>
                     </div>
                   </div>
@@ -2649,9 +2788,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                       ? styles.dotPresent
                                       : r.status === 'ABSENT'
                                         ? styles.dotAbsent
-                                        : styles.dotNa
+                                        : r.status === 'GROUP_SESSION'
+                                          ? styles.dotGroup
+                                          : styles.dotPractice
                                   }
-                                  title={`${r.timeSlot}: ${r.status}`}
+                                  title={`${r.timeSlot}: ${r.status === 'PRACTICE_SESSION' || r.status === 'NA' ? 'PRACTICE SESSION' : r.status === 'GROUP_SESSION' ? 'GROUP SESSION' : r.status}`}
                                 />
                               ))}
                             </div>
@@ -2696,8 +2837,17 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                               {slotRecords.length > 0 ? (
                                 slotRecords.map((r) => (
                                   <div key={r.id} style={{ fontSize: '0.725rem', marginTop: '3px', lineHeight: '1.3' }}>
-                                    <span style={{ color: r.status === 'PRESENT' ? '#34d399' : '#f87171', fontWeight: 600 }}>
-                                      ● {r.status}
+                                    <span style={{
+                                      color: r.status === 'PRESENT'
+                                        ? '#34d399'
+                                        : r.status === 'ABSENT'
+                                          ? '#f87171'
+                                          : r.status === 'GROUP_SESSION'
+                                            ? '#38bdf8'
+                                            : '#c084fc',
+                                      fontWeight: 600
+                                    }}>
+                                      ● {r.status === 'PRACTICE_SESSION' || r.status === 'NA' ? 'PRACTICE SESSION' : r.status === 'GROUP_SESSION' ? 'GROUP SESSION' : r.status}
                                     </span>
                                     {r.comment ? <span style={{ color: '#94a3b8' }}> ({r.comment})</span> : null}
                                     {!isTeacher && (
@@ -4279,69 +4429,90 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 {/* ATTENDANCE STATUS */}
                 <div className={styles.formGroup}>
                   <label className={styles.formLabel}>Attendance Status</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
                     <button
                       type="button"
                       onClick={() => setAttendanceFormStatus('PRESENT')}
                       style={{
-                        background: attendanceFormStatus === 'PRESENT' ? 'var(--bg-hover)' : 'var(--bg-surface)',
-                        color: 'var(--text-primary)',
-                        border: `1px solid ${attendanceFormStatus === 'PRESENT' ? 'var(--border-strong)' : 'var(--border-subtle)'}`,
-                        padding: '0.45rem',
+                        background: attendanceFormStatus === 'PRESENT' ? 'rgba(52, 211, 153, 0.15)' : 'var(--bg-surface)',
+                        color: attendanceFormStatus === 'PRESENT' ? '#34d399' : 'var(--text-primary)',
+                        border: `1px solid ${attendanceFormStatus === 'PRESENT' ? '#34d399' : 'var(--border-subtle)'}`,
+                        padding: '0.5rem',
                         borderRadius: '6px',
                         fontSize: '0.78rem',
-                        fontWeight: 500,
+                        fontWeight: 600,
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        gap: '0.35rem',
+                        gap: '0.4rem',
                       }}
                     >
-                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--text-success)', display: 'inline-block' }} />
+                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#34d399', display: 'inline-block' }} />
                       PRESENT
                     </button>
                     <button
                       type="button"
                       onClick={() => setAttendanceFormStatus('ABSENT')}
                       style={{
-                        background: attendanceFormStatus === 'ABSENT' ? 'var(--bg-hover)' : 'var(--bg-surface)',
-                        color: 'var(--text-primary)',
-                        border: `1px solid ${attendanceFormStatus === 'ABSENT' ? 'var(--border-strong)' : 'var(--border-subtle)'}`,
-                        padding: '0.45rem',
+                        background: attendanceFormStatus === 'ABSENT' ? 'rgba(248, 113, 113, 0.15)' : 'var(--bg-surface)',
+                        color: attendanceFormStatus === 'ABSENT' ? '#f87171' : 'var(--text-primary)',
+                        border: `1px solid ${attendanceFormStatus === 'ABSENT' ? '#f87171' : 'var(--border-subtle)'}`,
+                        padding: '0.5rem',
                         borderRadius: '6px',
                         fontSize: '0.78rem',
-                        fontWeight: 500,
+                        fontWeight: 600,
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        gap: '0.35rem',
+                        gap: '0.4rem',
                       }}
                     >
-                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--text-danger)', display: 'inline-block' }} />
+                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#f87171', display: 'inline-block' }} />
                       ABSENT
                     </button>
                     <button
                       type="button"
-                      onClick={() => setAttendanceFormStatus('NA')}
+                      onClick={() => setAttendanceFormStatus('PRACTICE_SESSION')}
                       style={{
-                        background: attendanceFormStatus === 'NA' ? 'var(--bg-hover)' : 'var(--bg-surface)',
-                        color: 'var(--text-primary)',
-                        border: `1px solid ${attendanceFormStatus === 'NA' ? 'var(--border-strong)' : 'var(--border-subtle)'}`,
-                        padding: '0.45rem',
+                        background: (attendanceFormStatus === 'PRACTICE_SESSION' || attendanceFormStatus === 'NA') ? 'rgba(192, 132, 252, 0.15)' : 'var(--bg-surface)',
+                        color: (attendanceFormStatus === 'PRACTICE_SESSION' || attendanceFormStatus === 'NA') ? '#c084fc' : 'var(--text-primary)',
+                        border: `1px solid ${attendanceFormStatus === 'PRACTICE_SESSION' || attendanceFormStatus === 'NA' ? '#c084fc' : 'var(--border-subtle)'}`,
+                        padding: '0.5rem',
                         borderRadius: '6px',
                         fontSize: '0.78rem',
-                        fontWeight: 500,
+                        fontWeight: 600,
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        gap: '0.35rem',
+                        gap: '0.4rem',
                       }}
                     >
-                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--text-muted)', display: 'inline-block' }} />
-                      NA
+                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#c084fc', display: 'inline-block' }} />
+                      PRACTICE SESSION
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAttendanceFormStatus('GROUP_SESSION')}
+                      style={{
+                        background: attendanceFormStatus === 'GROUP_SESSION' ? 'rgba(56, 189, 248, 0.15)' : 'var(--bg-surface)',
+                        color: attendanceFormStatus === 'GROUP_SESSION' ? '#38bdf8' : 'var(--text-primary)',
+                        border: `1px solid ${attendanceFormStatus === 'GROUP_SESSION' ? '#38bdf8' : 'var(--border-subtle)'}`,
+                        padding: '0.5rem',
+                        borderRadius: '6px',
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.4rem',
+                      }}
+                    >
+                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#38bdf8', display: 'inline-block' }} />
+                      GROUP SESSION
                     </button>
                   </div>
                 </div>
@@ -4380,6 +4551,228 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   </button>
                   <button type="submit" className={styles.btnPrimary}>
                     Save Attendance Session
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* GROUP SESSION MULTI-STUDENT BATCH ATTENDANCE MODAL */}
+      {isGroupAttendanceModalOpen && (
+        <div className={styles.modalOverlay} onClick={() => setIsGroupAttendanceModalOpen(false)}>
+          <div
+            className={styles.modalCard}
+            style={{ maxWidth: '640px', width: '95%' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <div>
+                <h2 className={styles.modalTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" style={{ color: 'var(--text-primary)' }}>
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                  </svg>
+                  Mark Group Session Attendance
+                </h2>
+                <p style={{ fontSize: '0.775rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
+                  Select multiple students attending this group session to mark their attendance simultaneously.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsGroupAttendanceModalOpen(false)}
+                className={styles.closeBtn}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveGroupAttendance}>
+              <div className={styles.modalBody}>
+                {/* DATE & TIME CONTROLS */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel}>Session Date</label>
+                    <input
+                      type="date"
+                      value={groupSessionDate}
+                      onChange={(e) => setGroupSessionDate(e.target.value)}
+                      className={styles.searchInput}
+                      style={{ width: '100%', maxWidth: 'none' }}
+                      required
+                    />
+                  </div>
+
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel}>Attendance Status</label>
+                    <select
+                      value={groupSessionStatus}
+                      onChange={(e) => setGroupSessionStatus(e.target.value as AttendanceStatus)}
+                      className={styles.searchInput}
+                      style={{ width: '100%', maxWidth: 'none', background: 'var(--bg-surface)' }}
+                    >
+                      <option value="GROUP_SESSION">Group Session</option>
+                      <option value="PRESENT">Present</option>
+                      <option value="PRACTICE_SESSION">Practice Session</option>
+                      <option value="ABSENT">Absent</option>
+                    </select>
+                  </div>
+
+                  <div className={styles.formGroup} style={{ gridColumn: 'span 2' }}>
+                    <label className={styles.formLabel}>Custom Time Slot</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                      <div>
+                        <label className={styles.formLabel} style={{ fontSize: '0.725rem', color: '#8a99ad' }}>Start Time</label>
+                        <input
+                          type="time"
+                          value={groupCustomTimeStart}
+                          onChange={(e) => setGroupCustomTimeStart(e.target.value)}
+                          className={styles.searchInput}
+                          style={{ width: '100%', maxWidth: 'none' }}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className={styles.formLabel} style={{ fontSize: '0.725rem', color: '#8a99ad' }}>End Time</label>
+                        <input
+                          type="time"
+                          value={groupCustomTimeEnd}
+                          onChange={(e) => setGroupCustomTimeEnd(e.target.value)}
+                          className={styles.searchInput}
+                          style={{ width: '100%', maxWidth: 'none' }}
+                          required
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* MULTI-STUDENT SELECTOR HEADER */}
+                <div className={styles.formGroup} style={{ marginBottom: '0.75rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <label className={styles.formLabel} style={{ margin: 0 }}>
+                      Select Present Students ({selectedGroupStudentIds.length} of {students.length} selected)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleToggleSelectAllGroupStudents}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#38bdf8',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {selectedGroupStudentIds.length === students.length ? 'Deselect All' : 'Select All'}
+                    </button>
+                  </div>
+
+                  <input
+                    type="text"
+                    placeholder="Search student by name or course..."
+                    value={groupStudentSearchQuery}
+                    onChange={(e) => setGroupStudentSearchQuery(e.target.value)}
+                    className={styles.searchInput}
+                    style={{ width: '100%', maxWidth: 'none', marginBottom: '0.65rem' }}
+                  />
+
+                  {/* SCROLLABLE STUDENTS CHECKBOX LIST */}
+                  <div
+                    style={{
+                      maxHeight: '190px',
+                      overflowY: 'auto',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '8px',
+                      background: 'var(--bg-surface)',
+                      padding: '0.4rem'
+                    }}
+                  >
+                    {filteredGroupStudents.map((std) => {
+                      const isChecked = selectedGroupStudentIds.includes(std.id);
+                      const avatar = getAvatarDetails(std.name, std.avatarUrl);
+
+                      return (
+                        <label
+                          key={std.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.65rem',
+                            padding: '0.45rem 0.65rem',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            background: isChecked ? 'rgba(56, 189, 248, 0.08)' : 'transparent',
+                            border: `1px solid ${isChecked ? 'rgba(56, 189, 248, 0.3)' : 'transparent'}`,
+                            marginBottom: '3px',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleSelectGroupStudent(std.id)}
+                            style={{ width: '16px', height: '16px', accentColor: '#38bdf8', cursor: 'pointer' }}
+                          />
+
+                          {avatar.avatarUrl ? (
+                            <img src={avatar.avatarUrl} alt={std.name} style={{ width: '26px', height: '26px', borderRadius: '50%' }} />
+                          ) : (
+                            <div className={styles.avatarCircle} style={{ width: '26px', height: '26px', fontSize: '0.7rem', background: avatar.bg }}>
+                              {avatar.initials}
+                            </div>
+                          )}
+
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>{std.name}</div>
+                            <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{std.course} • {std.batch}</div>
+                          </div>
+                        </label>
+                      );
+                    })}
+
+                    {filteredGroupStudents.length === 0 && (
+                      <div style={{ padding: '1rem', textAlign: 'center', fontSize: '0.775rem', color: '#64748b' }}>
+                        No students found matching "{groupStudentSearchQuery}".
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* SESSION COMMENTS / TOPICS */}
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Group Session Topics &amp; Class Comments</label>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g., Ableton Live MIDI Routing &amp; Performance Jam Session"
+                    value={groupSessionComment}
+                    onChange={(e) => setGroupSessionComment(e.target.value)}
+                    className={styles.searchInput}
+                    style={{ width: '100%', maxWidth: 'none', height: 'auto', minHeight: '65px', padding: '0.5rem 0.75rem' }}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.modalFooter} style={{ justifyContent: 'space-between', display: 'flex', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  {selectedGroupStudentIds.length} student(s) selected
+                </span>
+
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button type="button" onClick={() => setIsGroupAttendanceModalOpen(false)} className={styles.btnSecondary}>
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className={styles.btnPrimary}
+                    disabled={selectedGroupStudentIds.length === 0}
+                  >
+                    Save Group Attendance ({selectedGroupStudentIds.length})
                   </button>
                 </div>
               </div>
@@ -4595,8 +4988,18 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                       <td style={{ padding: '0.4rem 0.5rem', fontWeight: 600 }}>{r.date}</td>
                       <td style={{ padding: '0.4rem 0.5rem' }}>{r.timeSlot}</td>
-                      <td style={{ padding: '0.4rem 0.5rem', fontWeight: 700, color: r.status === 'PRESENT' ? '#047857' : '#b91c1c' }}>
-                        {r.status}
+                      <td style={{
+                        padding: '0.4rem 0.5rem',
+                        fontWeight: 700,
+                        color: r.status === 'PRESENT'
+                          ? '#047857'
+                          : r.status === 'ABSENT'
+                            ? '#b91c1c'
+                            : r.status === 'GROUP_SESSION'
+                              ? '#0284c7'
+                              : '#7e22ce'
+                      }}>
+                        {r.status === 'PRACTICE_SESSION' || r.status === 'NA' ? 'PRACTICE SESSION' : r.status === 'GROUP_SESSION' ? 'GROUP SESSION' : r.status}
                       </td>
                       {!isTeacher && (
                         <td style={{ padding: '0.4rem 0.5rem', fontWeight: 600, color: '#e11d48' }}>

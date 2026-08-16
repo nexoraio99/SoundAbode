@@ -943,11 +943,25 @@
   background: #ef4444;
 }
 
+.dotPractice {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: #a855f7;
+}
+
+.dotGroup {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: #38bdf8;
+}
+
 .dotNa {
   width: 6px;
   height: 6px;
   border-radius: var(--radius-full);
-  background: #94a3b8;
+  background: #a855f7;
 }
 
 .timeSlotBox {
