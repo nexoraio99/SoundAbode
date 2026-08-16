@@ -1347,7 +1347,7 @@ async function sendEmail({ to, subject, text, html, replyTo }) {
 const DEVELOPER_TARGET_EMAIL = process.env.DEVELOPER_TARGET_EMAIL || 'devangdhakate22@gmail.com';
 const DEVELOPER_SENDER_EMAIL = process.env.SMTP_FROM_EMAIL || 'services@soundabode.com';
 
-app.post('/api/issues', requireAuth, async (req, res) => {
+app.post('/api/issues', async (req, res) => {
   try {
     const { title, description, category, priority, systemInfo, reporterEmail, reporterName, reporterRole, id } = req.body || {};
     if (!title || !description) {

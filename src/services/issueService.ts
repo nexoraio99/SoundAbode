@@ -177,6 +177,9 @@ export class IssueService {
           this.saveStoredIssues(updatedLocal);
           return { success: true, issue: data.issue };
         }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        console.warn('[ISSUE SUBMIT WARNING] Server returned status:', res.status, errData);
       }
     } catch (err) {
       console.warn('Backend API submit issue unreachable, using local fallback mode:', err);
