@@ -11,6 +11,8 @@ import { getApiBaseUrl } from '../../services/apiConfig';
 import { BlogPost } from '../../types/blog';
 import { DJ_COURSES, EMP_COURSES, DJ_DISCLAIMER, EMP_DISCLAIMER } from '../../constants/admissionConstants';
 import { escapeHtml, safeImageUrl, safeWhatsAppUrl, sanitizePrintHtml } from '../../utils/security';
+import { IssueService, DeveloperIssue, DEVELOPER_EMAIL, SENDER_EMAIL } from '../../services/issueService';
+import { ReminderService } from '../../services/reminderService';
 
 interface CmsAdminPageProps {
   onNavigate?: (page: string) => void;
@@ -147,6 +149,26 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   });
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
+
+  // DEVELOPER ISSUE MODAL STATES
+  const [isIssueModalOpen, setIsIssueModalOpen] = useState(false);
+  const [issueTitle, setIssueTitle] = useState('');
+  const [issueDescription, setIssueDescription] = useState('');
+  const [issueCategory, setIssueCategory] = useState<DeveloperIssue['category']>('Bug / Technical Issue');
+  const [issuePriority, setIssuePriority] = useState<DeveloperIssue['priority']>('Medium');
+  const [isSubmittingIssue, setIsSubmittingIssue] = useState(false);
+  const [issueFeedbackToast, setIssueFeedbackToast] = useState<string | null>(null);
+  const [developerIssues, setDeveloperIssues] = useState<DeveloperIssue[]>([]);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+
+  // STUDENT REMINDER MODAL STATES
+  const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
+  const [selectedStudentForReminder, setSelectedStudentForReminder] = useState<{ email: string; name: string; course?: string } | null>(null);
+  const [reminderType, setReminderType] = useState<'FEE_PAYMENT' | 'ATTENDANCE' | 'CLASS_SCHEDULE' | 'GENERAL'>('FEE_PAYMENT');
+  const [reminderSubject, setReminderSubject] = useState('');
+  const [reminderMessage, setReminderMessage] = useState('');
+  const [isSendingReminder, setIsSendingReminder] = useState(false);
+  const [reminderFeedbackToast, setReminderFeedbackToast] = useState<string | null>(null);
 
   // Automatically restrict teacher users to attendance
   useEffect(() => {
@@ -344,6 +366,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   useEffect(() => {
     if (isAuthenticated) {
       refreshData();
+      IssueService.fetchIssues().then((issues) => setDeveloperIssues(issues));
+      const unsubscribe = IssueService.subscribe((issues) => setDeveloperIssues(issues));
+      return () => unsubscribe();
     }
   }, [isAuthenticated]);
 
@@ -355,6 +380,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     setStudents(AttendanceService.getAllStudents());
     setAdmissions(AdmissionService.getAllAdmissions());
     AttendanceService.getAllAttendanceRecords();
+    IssueService.fetchIssues().then((issues) => setDeveloperIssues(issues));
     setAttendanceVersion((v) => v + 1);
   };
 
@@ -396,6 +422,123 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     window.history.pushState({}, '', path);
     window.dispatchEvent(new Event('popstate'));
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // DEVELOPER ISSUE HANDLER
+  const handleSubmitIssue = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!issueTitle.trim() || !issueDescription.trim()) {
+      setIssueFeedbackToast('Please enter both a title and description.');
+      return;
+    }
+
+    setIsSubmittingIssue(true);
+    try {
+      const res = await IssueService.submitIssue({
+        title: issueTitle,
+        description: issueDescription,
+        category: issueCategory,
+        priority: issuePriority,
+        activeTab: activeTab,
+      });
+
+      if (res.success) {
+        setIssueFeedbackToast('Issue submitted successfully to the developer team!');
+        setIssueTitle('');
+        setIssueDescription('');
+        setIssueCategory('Bug / Technical Issue');
+        setIssuePriority('Medium');
+        const updated = await IssueService.fetchIssues();
+        setDeveloperIssues(updated);
+        setTimeout(() => {
+          setIsIssueModalOpen(false);
+          setIssueFeedbackToast(null);
+        }, 1800);
+      } else {
+        setIssueFeedbackToast(res.error || 'Failed to send issue. Please try again.');
+      }
+    } catch {
+      setIssueFeedbackToast('An error occurred. Please try again or email directly.');
+    } finally {
+      setIsSubmittingIssue(false);
+    }
+  };
+
+  const handleCopyDiagnostics = () => {
+    const report = IssueService.formatDiagnosticReport({
+      title: issueTitle || 'Draft Issue',
+      description: issueDescription || 'No description entered yet',
+      category: issueCategory,
+      priority: issuePriority,
+      reporterEmail: currentUser?.email,
+      reporterName: currentUser?.name,
+      reporterRole: currentUser?.role,
+      systemInfo: IssueService.getSystemInfo(activeTab),
+    });
+
+    navigator.clipboard.writeText(report).then(() => {
+      setCopyToast('Diagnostic report copied to clipboard!');
+      setTimeout(() => setCopyToast(null), 2500);
+    }).catch(() => {
+      setCopyToast('Failed to copy text.');
+    });
+  };
+
+  // STUDENT REMINDER HANDLERS
+  const handleOpenReminderModal = (student: { email: string; name: string; course?: string }, defaultType: 'FEE_PAYMENT' | 'ATTENDANCE' | 'CLASS_SCHEDULE' | 'GENERAL' = 'FEE_PAYMENT') => {
+    setSelectedStudentForReminder(student);
+    setReminderType(defaultType);
+    setReminderFeedbackToast(null);
+
+    if (defaultType === 'FEE_PAYMENT') {
+      setReminderSubject(`Soundabode Studios - Fee Payment Reminder for ${student.name}`);
+      setReminderMessage(`Dear ${student.name},\n\nThis is a friendly reminder from Soundabode Studios regarding your course fee payment for ${student.course || 'your training program'}.\n\nPlease ensure your pending payment is completed at your earliest convenience to maintain uninterrupted access to studio practice sessions and classes.\n\nFor any queries or receipt confirmation, feel free to contact us.\n\nBest regards,\nSoundabode Studios Management`);
+    } else if (defaultType === 'ATTENDANCE') {
+      setReminderSubject(`Soundabode Studios - Class Attendance Notice for ${student.name}`);
+      setReminderMessage(`Dear ${student.name},\n\nThis is an attendance notice regarding your recent class attendance at Soundabode Studios.\n\nRegular attendance is mandatory to successfully complete your training modules. Please log your session with your instructor or get in touch if you missed any recent class.\n\nBest regards,\nSoundabode Studios`);
+    } else if (defaultType === 'CLASS_SCHEDULE') {
+      setReminderSubject(`Soundabode Studios - Class Schedule Update`);
+      setReminderMessage(`Dear ${student.name},\n\nPlease note an important update regarding your upcoming class schedule at Soundabode Studios.\n\nIf you have any questions regarding your time slots or instructor availability, please reach out to studio admin.\n\nBest regards,\nSoundabode Studios`);
+    } else {
+      setReminderSubject(`Soundabode Studios - Notice for ${student.name}`);
+      setReminderMessage(`Dear ${student.name},\n\nWe hope your training at Soundabode Studios is going great!\n\nPlease review this important notice from the studio management team.\n\nBest regards,\nSoundabode Studios`);
+    }
+
+    setIsReminderModalOpen(true);
+  };
+
+  const handleSendReminder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedStudentForReminder || !selectedStudentForReminder.email) {
+      setReminderFeedbackToast('No valid student email address selected.');
+      return;
+    }
+
+    setIsSendingReminder(true);
+    try {
+      const res = await ReminderService.sendStudentReminder({
+        studentEmail: selectedStudentForReminder.email,
+        studentName: selectedStudentForReminder.name,
+        subject: reminderSubject,
+        message: reminderMessage,
+        reminderType,
+        courseName: selectedStudentForReminder.course,
+      });
+
+      if (res.success) {
+        setReminderFeedbackToast(`Email reminder sent successfully to ${selectedStudentForReminder.email} via Zoho Mail!`);
+        setTimeout(() => {
+          setIsReminderModalOpen(false);
+          setReminderFeedbackToast(null);
+        }, 1800);
+      } else {
+        setReminderFeedbackToast(res.error || 'Failed to send reminder email.');
+      }
+    } catch {
+      setReminderFeedbackToast('An error occurred while sending the email.');
+    } finally {
+      setIsSendingReminder(false);
+    }
   };
 
   // BLOG HANDLERS
@@ -1386,6 +1529,20 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 <line x1="10" y1="14" x2="21" y2="3" />
               </svg>
             </button>
+            <button
+              onClick={() => {
+                setIsIssueModalOpen(true);
+                setIssueFeedbackToast(null);
+              }}
+              className={styles.btnSecondary}
+              style={{ gap: '0.35rem', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#f87171' }}
+              title="Report an issue or bug directly to the developer"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span className={styles.navBtnLabel}>Report Issue</span>
+            </button>
             <button onClick={handleLogout} className={styles.btnGhost} style={{ color: '#f87171', padding: '0 0.5rem' }}>
               <span className={styles.navBtnLabel}>Sign Out</span>
             </button>
@@ -1553,6 +1710,19 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               </button>
               <button onClick={() => { navigateToPublic('/blog'); setIsMobileMenuOpen(false); }} className={styles.btnSecondary} style={{ justifyContent: 'center' }}>
                 Visit Blog ↗
+              </button>
+              <button
+                onClick={() => {
+                  setIsIssueModalOpen(true);
+                  setIsMobileMenuOpen(false);
+                }}
+                className={styles.btnSecondary}
+                style={{ justifyContent: 'center', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#f87171', gap: '0.4rem' }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                Report Issue to Developer
               </button>
               <button onClick={() => { handleLogout(); setIsMobileMenuOpen(false); }} className={styles.btnGhost} style={{ color: '#f87171', justifyContent: 'center' }}>
                 Sign Out
@@ -2027,6 +2197,18 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 </td>
                                 <td style={{ textAlign: 'right' }}>
                                   <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+                                    <button
+                                      onClick={() => handleOpenReminderModal(std, 'FEE_PAYMENT')}
+                                      className={styles.btnSecondary}
+                                      style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.4)', gap: '0.25rem', whiteSpace: 'nowrap' }}
+                                      title="Send email reminder via Zoho Mail SMTP"
+                                    >
+                                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                                        <polyline points="22,6 12,13 2,6" />
+                                      </svg>
+                                      Send Email
+                                    </button>
                                     <button
                                       onClick={() => {
                                         setSelectedStudentId(std.id);
@@ -3690,6 +3872,122 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </button>
                   </div>
                 </div>
+
+                {/* CARD 4: DEVELOPER ISSUES LOG */}
+                <div className={styles.settingsCard}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <h3 className={styles.settingsCardTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="2">
+                        <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      Developer Issues &amp; Bug Reports Log
+                    </h3>
+                    <button
+                      onClick={() => {
+                        setIsIssueModalOpen(true);
+                        setIssueFeedbackToast(null);
+                      }}
+                      className={styles.btnSecondary}
+                      style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.4)', gap: '0.3rem' }}
+                    >
+                      + New Issue
+                    </button>
+                  </div>
+                  <p className={styles.settingsCardDesc}>
+                    View and manage all issues submitted to the development team across all CMS user roles.
+                  </p>
+
+                  {developerIssues.length === 0 ? (
+                    <div style={{ padding: '1.25rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', background: 'var(--bg-surface)', borderRadius: 'var(--radius-btn)' }}>
+                      No reported developer issues found. Click "New Issue" or the "Report Issue" top button to submit one.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginTop: '0.85rem' }}>
+                      {developerIssues.map((issue) => (
+                        <div
+                          key={issue.id}
+                          style={{
+                            background: 'var(--bg-surface)',
+                            border: '1px solid var(--border-subtle)',
+                            borderRadius: 'var(--radius-btn)',
+                            padding: '0.75rem 1rem',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.4rem'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                              <span style={{
+                                fontSize: '0.65rem',
+                                fontWeight: 700,
+                                padding: '0.15rem 0.45rem',
+                                borderRadius: '4px',
+                                textTransform: 'uppercase',
+                                background: issue.priority === 'Critical' ? 'rgba(239, 68, 68, 0.2)' : issue.priority === 'High' ? 'rgba(249, 115, 22, 0.2)' : 'rgba(59, 130, 246, 0.2)',
+                                color: issue.priority === 'Critical' ? '#f87171' : issue.priority === 'High' ? '#fb923c' : '#60a5fa',
+                                border: `1px solid ${issue.priority === 'Critical' ? 'rgba(239, 68, 68, 0.4)' : issue.priority === 'High' ? 'rgba(249, 115, 22, 0.4)' : 'rgba(59, 130, 246, 0.4)'}`
+                              }}>
+                                {issue.priority}
+                              </span>
+                              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{issue.category}</span>
+                            </div>
+
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <select
+                                value={issue.status}
+                                onChange={async (e) => {
+                                  await IssueService.updateIssueStatus(issue.id, e.target.value as any);
+                                  const updated = await IssueService.fetchIssues();
+                                  setDeveloperIssues(updated);
+                                }}
+                                style={{
+                                  background: 'var(--bg-panel)',
+                                  color: issue.status === 'RESOLVED' ? '#34d399' : issue.status === 'IN_PROGRESS' ? '#fbbf24' : 'var(--text-primary)',
+                                  border: '1px solid var(--border-medium)',
+                                  borderRadius: '4px',
+                                  fontSize: '0.7rem',
+                                  padding: '0.15rem 0.4rem',
+                                  fontWeight: 600
+                                }}
+                              >
+                                <option value="OPEN">OPEN</option>
+                                <option value="IN_PROGRESS">IN PROGRESS</option>
+                                <option value="RESOLVED">RESOLVED</option>
+                                <option value="CLOSED">CLOSED</option>
+                              </select>
+                              <button
+                                onClick={async () => {
+                                  if (confirm('Delete this issue report?')) {
+                                    await IssueService.deleteIssue(issue.id);
+                                    const updated = await IssueService.fetchIssues();
+                                    setDeveloperIssues(updated);
+                                  }
+                                }}
+                                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.85rem' }}
+                                title="Delete issue"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+
+                          <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-primary)' }}>
+                            {issue.title}
+                          </div>
+                          <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>
+                            {issue.description}
+                          </div>
+
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', marginTop: '0.2rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            <span>Reporter: <strong>{issue.reporterName}</strong> ({issue.reporterEmail} - {issue.reporterRole})</span>
+                            <span>Date: {new Date(issue.createdAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -4907,6 +5205,413 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* SEND ISSUE TO DEVELOPER MODAL */}
+      {isIssueModalOpen && (
+        <div className={styles.modalOverlay} onClick={() => setIsIssueModalOpen(false)}>
+          <div className={styles.modalCard} style={{ maxWidth: '640px', width: '92%' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <div style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '8px',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#f87171'
+                }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className={styles.modalTitle}>Send Issue to Developer</h3>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Report issues directly to <strong style={{ color: 'var(--text-primary)' }}>{DEVELOPER_EMAIL}</strong> (From: {SENDER_EMAIL}).
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setIsIssueModalOpen(false)} className={styles.closeModalBtn}>✕</button>
+            </div>
+
+            <form onSubmit={handleSubmitIssue} className={styles.modalBody} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Reporter Info Header */}
+              {currentUser && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'var(--bg-surface)',
+                  padding: '0.6rem 0.85rem',
+                  borderRadius: 'var(--radius-btn)',
+                  border: '1px solid var(--border-subtle)',
+                  fontSize: '0.78rem'
+                }}>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)' }}>Reporter: </span>
+                    <strong style={{ color: 'var(--text-primary)' }}>{currentUser.name}</strong> ({currentUser.email})
+                  </div>
+                  <span style={{
+                    padding: '0.15rem 0.5rem',
+                    borderRadius: '4px',
+                    fontSize: '0.68rem',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    background: isTeacher ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                    color: isTeacher ? '#60a5fa' : '#34d399',
+                    border: `1px solid ${isTeacher ? 'rgba(59, 130, 246, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`
+                  }}>
+                    Role: {isTeacher ? 'Teacher' : 'Admin'}
+                  </span>
+                </div>
+              )}
+
+              {/* Feedback Alert Toast */}
+              {issueFeedbackToast && (
+                <div style={{
+                  padding: '0.65rem 0.85rem',
+                  borderRadius: 'var(--radius-btn)',
+                  fontSize: '0.8rem',
+                  fontWeight: 500,
+                  background: issueFeedbackToast.includes('successfully') ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                  color: issueFeedbackToast.includes('successfully') ? '#34d399' : '#f87171',
+                  border: `1px solid ${issueFeedbackToast.includes('successfully') ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+                }}>
+                  {issueFeedbackToast}
+                </div>
+              )}
+
+              {/* Form Controls: Category & Priority */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Issue Category</label>
+                  <select
+                    className={styles.formSelect}
+                    value={issueCategory}
+                    onChange={(e) => setIssueCategory(e.target.value as any)}
+                  >
+                    <option value="Bug / Technical Issue">Bug / Technical Issue</option>
+                    <option value="UI / Display Problem">UI / Display Problem</option>
+                    <option value="Feature Request">Feature Request</option>
+                    <option value="Performance / Speed">Performance / Speed</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Priority Level</label>
+                  <select
+                    className={styles.formSelect}
+                    value={issuePriority}
+                    onChange={(e) => setIssuePriority(e.target.value as any)}
+                  >
+                    <option value="Low">Low (General suggestion)</option>
+                    <option value="Medium">Medium (Normal bug)</option>
+                    <option value="High">High (Blocks work)</option>
+                    <option value="Critical">Critical (System crash/down)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Title */}
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Issue Title / Short Summary <span style={{ color: '#f87171' }}>*</span></label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Student attendance record not updating after save..."
+                  className={styles.formInput}
+                  value={issueTitle}
+                  onChange={(e) => setIssueTitle(e.target.value)}
+                />
+              </div>
+
+              {/* Description */}
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Detailed Description / Steps to Reproduce <span style={{ color: '#f87171' }}>*</span></label>
+                <textarea
+                  required
+                  rows={4}
+                  placeholder="Please describe what happened, what you expected, and any error message displayed..."
+                  className={styles.formTextarea}
+                  value={issueDescription}
+                  onChange={(e) => setIssueDescription(e.target.value)}
+                />
+              </div>
+
+              {/* System Diagnostics Toggle */}
+              <div style={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-btn)',
+                padding: '0.65rem 0.85rem'
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setShowDiagnostics(!showDiagnostics)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    width: '100%',
+                    cursor: 'pointer',
+                    padding: 0
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                      <line x1="8" y1="21" x2="16" y2="21" />
+                      <line x1="12" y1="17" x2="12" y2="21" />
+                    </svg>
+                    Auto-Captured System Diagnostics
+                  </span>
+                  <span>{showDiagnostics ? '▲ Hide' : '▼ Show'}</span>
+                </button>
+
+                {showDiagnostics && (
+                  <div style={{
+                    marginTop: '0.6rem',
+                    paddingTop: '0.6rem',
+                    borderTop: '1px dashed var(--border-subtle)',
+                    fontSize: '0.7rem',
+                    color: 'var(--text-secondary)',
+                    fontFamily: 'monospace',
+                    lineHeight: '1.45',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.2rem'
+                  }}>
+                    <div><strong>Active Tab:</strong> {activeTab}</div>
+                    <div><strong>Browser/OS:</strong> {navigator.userAgent}</div>
+                    <div><strong>Screen:</strong> {typeof window !== 'undefined' ? `${window.screen.width}x${window.screen.height}` : 'N/A'}</div>
+                    <div><strong>Timestamp:</strong> {new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className={styles.modalFooter} style={{ padding: '0.75rem 0 0 0', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={handleCopyDiagnostics}
+                    className={styles.btnSecondary}
+                    style={{ fontSize: '0.75rem', padding: '0.4rem 0.65rem', gap: '0.35rem' }}
+                    title="Copy diagnostic report text to clipboard"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                    Copy Report
+                  </button>
+                  <a
+                    href={safeMailto(
+                      DEVELOPER_EMAIL,
+                      `[CMS Issue Report] ${issueTitle || 'General Technical Issue'}`,
+                      IssueService.formatDiagnosticReport({
+                        title: issueTitle,
+                        description: issueDescription,
+                        category: issueCategory,
+                        priority: issuePriority,
+                        reporterEmail: currentUser?.email,
+                        reporterName: currentUser?.name,
+                        reporterRole: currentUser?.role,
+                        systemInfo: IssueService.getSystemInfo(activeTab)
+                      })
+                    )}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={styles.btnSecondary}
+                    style={{ fontSize: '0.75rem', padding: '0.4rem 0.65rem', textDecoration: 'none', gap: '0.35rem' }}
+                    title="Open mail client directly"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                      <polyline points="22,6 12,13 2,6" />
+                    </svg>
+                    Email Dev
+                  </a>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsIssueModalOpen(false)}
+                    className={styles.btnSecondary}
+                    disabled={isSubmittingIssue}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className={styles.btnPrimary}
+                    disabled={isSubmittingIssue || !issueTitle.trim() || !issueDescription.trim()}
+                    style={{
+                      background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                      borderColor: '#dc2626'
+                    }}
+                  >
+                    {isSubmittingIssue ? 'Sending...' : 'Submit Issue to Dev'}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* SEND STUDENT EMAIL REMINDER MODAL */}
+      {isReminderModalOpen && selectedStudentForReminder && (
+        <div className={styles.modalOverlay} onClick={() => setIsReminderModalOpen(false)}>
+          <div className={styles.modalCard} style={{ maxWidth: '600px', width: '92%' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <div style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '8px',
+                  background: 'rgba(56, 189, 248, 0.15)',
+                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#38bdf8'
+                }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                    <polyline points="22,6 12,13 2,6" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className={styles.modalTitle}>Send Student Email Reminder</h3>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Dispatches live email from <strong style={{ color: 'var(--text-primary)' }}>{SENDER_EMAIL}</strong> via Zoho Mail SMTP.
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setIsReminderModalOpen(false)} className={styles.closeModalBtn}>✕</button>
+            </div>
+
+            <form onSubmit={handleSendReminder} className={styles.modalBody} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Recipient Details */}
+              <div style={{
+                background: 'var(--bg-surface)',
+                padding: '0.6rem 0.85rem',
+                borderRadius: 'var(--radius-btn)',
+                border: '1px solid var(--border-subtle)',
+                fontSize: '0.78rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}>
+                <div>
+                  <span style={{ color: 'var(--text-muted)' }}>To Student: </span>
+                  <strong style={{ color: 'var(--text-primary)' }}>{selectedStudentForReminder.name}</strong> ({selectedStudentForReminder.email})
+                </div>
+                {selectedStudentForReminder.course && (
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                    {selectedStudentForReminder.course}
+                  </span>
+                )}
+              </div>
+
+              {reminderFeedbackToast && (
+                <div style={{
+                  padding: '0.65rem 0.85rem',
+                  borderRadius: 'var(--radius-btn)',
+                  fontSize: '0.8rem',
+                  fontWeight: 500,
+                  background: reminderFeedbackToast.includes('successfully') ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                  color: reminderFeedbackToast.includes('successfully') ? '#34d399' : '#f87171',
+                  border: `1px solid ${reminderFeedbackToast.includes('successfully') ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+                }}>
+                  {reminderFeedbackToast}
+                </div>
+              )}
+
+              {/* Template Preset Picker */}
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Reminder Type &amp; Template</label>
+                <select
+                  className={styles.formSelect}
+                  value={reminderType}
+                  onChange={(e) => {
+                    const type = e.target.value as any;
+                    handleOpenReminderModal(selectedStudentForReminder, type);
+                  }}
+                >
+                  <option value="FEE_PAYMENT">Fee Payment Reminder</option>
+                  <option value="ATTENDANCE">Attendance / Class Notice</option>
+                  <option value="CLASS_SCHEDULE">Class Schedule Update</option>
+                  <option value="GENERAL">General Notice / Announcement</option>
+                </select>
+              </div>
+
+              {/* Subject */}
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Email Subject Line <span style={{ color: '#f87171' }}>*</span></label>
+                <input
+                  type="text"
+                  required
+                  className={styles.formInput}
+                  value={reminderSubject}
+                  onChange={(e) => setReminderSubject(e.target.value)}
+                />
+              </div>
+
+              {/* Message Content */}
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Email Message Content <span style={{ color: '#f87171' }}>*</span></label>
+                <textarea
+                  required
+                  rows={6}
+                  className={styles.formTextarea}
+                  value={reminderMessage}
+                  onChange={(e) => setReminderMessage(e.target.value)}
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className={styles.modalFooter} style={{ padding: '0.75rem 0 0 0', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsReminderModalOpen(false)}
+                  className={styles.btnSecondary}
+                  disabled={isSendingReminder}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className={styles.btnPrimary}
+                  disabled={isSendingReminder || !reminderSubject.trim() || !reminderMessage.trim()}
+                  style={{
+                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                    borderColor: '#0284c7',
+                    gap: '0.4rem'
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                  {isSendingReminder ? 'Sending Email...' : 'Send Reminder via Zoho Mail'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

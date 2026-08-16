@@ -4,6 +4,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import dns from 'dns';
 import { randomBytes } from 'crypto';
+import nodemailer from 'nodemailer';
 
 // Graceful optional dependency loading — server starts even if not yet installed.
 // Run `npm install` in /server to activate full security.
@@ -353,11 +354,34 @@ const attendanceRecordSchema = new mongoose.Schema({
   updatedAt: { type: String, default: () => new Date().toISOString() },
 });
 
+const issueSchema = new mongoose.Schema({
+  id: { type: String, required: true },
+  title: { type: String, required: true },
+  description: { type: String, required: true },
+  category: { type: String, default: 'Bug / Technical Issue' },
+  priority: { type: String, default: 'Medium' },
+  reporterEmail: { type: String, default: '' },
+  reporterName: { type: String, default: '' },
+  reporterRole: { type: String, default: '' },
+  systemInfo: {
+    userAgent: { type: String, default: '' },
+    screenResolution: { type: String, default: '' },
+    activeTab: { type: String, default: '' },
+    url: { type: String, default: '' },
+    timestamp: { type: String, default: '' }
+  },
+  status: { type: String, enum: ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'], default: 'OPEN' },
+  developerNotes: { type: String, default: '' },
+  createdAt: { type: String, default: () => new Date().toISOString() },
+  updatedAt: { type: String, default: () => new Date().toISOString() }
+});
+
 const InquiryModel = mongoose.model('Inquiry', inquirySchema);
 const BlogPostModel = mongoose.model('BlogPost', blogPostSchema);
 const StudentModel = mongoose.model('Student', studentSchema);
 const AdmissionModel = mongoose.model('Admission', admissionSchema);
 const AttendanceRecordModel = mongoose.model('AttendanceRecord', attendanceRecordSchema);
+const IssueModel = mongoose.model('Issue', issueSchema);
 
 const INITIAL_STUDENT_SEED = [
   {
@@ -1243,6 +1267,227 @@ app.delete('/api/students/:id', requireAuth, async (req, res) => {
       const result = await StudentModel.deleteMany({ $or: queryConditions });
       console.log(`[DELETE] Deleted ${result.deletedCount} student(s) matching id/email/name: ${id} / ${email || ''} / ${name || ''}`);
       return res.json({ success: true, deletedCount: result.deletedCount, id });
+    }
+    res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── DEVELOPER ISSUES ENDPOINTS ──────────────────────────────────────────────
+app.get('/api/issues', requireAuth, async (req, res) => {
+  try {
+    if (isConnected) {
+      const issues = await IssueModel.find().sort({ createdAt: -1 }).lean();
+      return res.json({ success: true, issues });
+    }
+    res.json({ success: true, issues: [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── ZOHO MAIL SMTP TRANSPORTER ──────────────────────────────────────────────
+let mailTransporter = null;
+
+function getMailTransporter() {
+  const host = process.env.SMTP_HOST || 'smtp.zoho.com';
+  const port = Number(process.env.SMTP_PORT) || 465;
+  const secure = process.env.SMTP_SECURE !== 'false';
+  const user = process.env.SMTP_USER || 'services@soundabode.com';
+  const pass = process.env.SMTP_PASS || '';
+
+  if (!pass) {
+    return null;
+  }
+
+  if (!mailTransporter) {
+    mailTransporter = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: { user, pass },
+      tls: { rejectUnauthorized: false }
+    });
+  }
+  return mailTransporter;
+}
+
+async function sendEmail({ to, subject, text, html, replyTo }) {
+  const transporter = getMailTransporter();
+  const fromEmail = process.env.SMTP_FROM_EMAIL || 'services@soundabode.com';
+  const fromName = process.env.SMTP_FROM_NAME || 'Soundabode Studios';
+
+  if (!transporter) {
+    console.warn(`[SMTP NOTICE] Email to ${to} queued/logged locally. (Set SMTP_PASS in server/.env to enable live Zoho Mail sending)`);
+    return { success: false, mode: 'local_logged', reason: 'SMTP_PASS not set in environment' };
+  }
+
+  try {
+    const info = await transporter.sendMail({
+      from: `"${fromName}" <${fromEmail}>`,
+      to,
+      subject,
+      text,
+      html: html || text,
+      replyTo: replyTo || fromEmail,
+    });
+    console.log(`[SMTP SUCCESS] Sent email to ${to} [MessageID: ${info.messageId}]`);
+    return { success: true, messageId: info.messageId };
+  } catch (err) {
+    console.error(`[SMTP ERROR] Failed sending to ${to}:`, err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+const DEVELOPER_TARGET_EMAIL = process.env.DEVELOPER_TARGET_EMAIL || 'devangdhakate22@gmail.com';
+const DEVELOPER_SENDER_EMAIL = process.env.SMTP_FROM_EMAIL || 'services@soundabode.com';
+
+app.post('/api/issues', requireAuth, async (req, res) => {
+  try {
+    const { title, description, category, priority, systemInfo, reporterEmail, reporterName, reporterRole, id } = req.body || {};
+    if (!title || !description) {
+      return res.status(400).json({ error: 'Title and description are required.' });
+    }
+
+    const issueId = id || `issue_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const user = req.sessionUser || {};
+
+    const issueData = {
+      id: issueId,
+      title: String(title).trim(),
+      description: String(description).trim(),
+      category: category || 'Bug / Technical Issue',
+      priority: priority || 'Medium',
+      reporterEmail: reporterEmail || user.email || '',
+      reporterName: reporterName || user.name || '',
+      reporterRole: reporterRole || user.role || '',
+      systemInfo: systemInfo || {},
+      status: 'OPEN',
+      createdAt: new Date().toISOString()
+    };
+
+    console.log(`[DEVELOPER ISSUE DISPATCH] Target: ${DEVELOPER_TARGET_EMAIL} | From: ${DEVELOPER_SENDER_EMAIL} | Issue: "${issueData.title}" by ${issueData.reporterName} (${issueData.reporterEmail})`);
+
+    // Dispatch automated email via Zoho Mail SMTP
+    const emailSubject = `[CMS Issue Report] [${issueData.priority}] ${issueData.title}`;
+    const emailHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #121316; color: #ffffff; padding: 20px; border-radius: 10px;">
+        <h2 style="color: #ef4444; border-bottom: 1px solid #333; padding-bottom: 10px;">🚨 Soundabode CMS Issue Report</h2>
+        <p><strong>Title:</strong> ${escapeHtml(issueData.title)}</p>
+        <p><strong>Category:</strong> ${escapeHtml(issueData.category)}</p>
+        <p><strong>Priority:</strong> <span style="background: #ef4444; color: #fff; padding: 3px 8px; border-radius: 4px; font-weight: bold;">${escapeHtml(issueData.priority)}</span></p>
+        <p><strong>Reporter:</strong> ${escapeHtml(issueData.reporterName)} (${escapeHtml(issueData.reporterEmail)}) — <em>Role: ${escapeHtml(issueData.reporterRole)}</em></p>
+        <hr style="border-color: #333;" />
+        <h3 style="color: #cbd5e1;">Issue Details:</h3>
+        <div style="background: #191b1f; padding: 12px; border-radius: 6px; white-space: pre-wrap; color: #f1f5f9;">${escapeHtml(issueData.description)}</div>
+        <h3 style="color: #cbd5e1; margin-top: 15px;">System Diagnostics:</h3>
+        <div style="background: #191b1f; padding: 10px; border-radius: 6px; font-family: monospace; font-size: 12px; color: #94a3b8;">
+          Active Tab: ${escapeHtml(issueData.systemInfo?.activeTab || 'N/A')}<br />
+          Browser: ${escapeHtml(issueData.systemInfo?.userAgent || 'N/A')}<br />
+          Screen: ${escapeHtml(issueData.systemInfo?.screenResolution || 'N/A')}<br />
+          Timestamp: ${escapeHtml(issueData.systemInfo?.timestamp || new Date().toISOString())}
+        </div>
+      </div>
+    `;
+
+    const emailResult = await sendEmail({
+      to: DEVELOPER_TARGET_EMAIL,
+      subject: emailSubject,
+      text: issueData.description,
+      html: emailHtml,
+      replyTo: issueData.reporterEmail || undefined,
+    });
+
+    if (isConnected) {
+      const saved = await IssueModel.create(issueData);
+      console.log(`[DEVELOPER ISSUE] Created MongoDB issue record ${saved.id}`);
+      return res.json({ success: true, issue: saved, sentTo: DEVELOPER_TARGET_EMAIL, sentFrom: DEVELOPER_SENDER_EMAIL, emailStatus: emailResult });
+    }
+
+    res.json({ success: true, issue: issueData, sentTo: DEVELOPER_TARGET_EMAIL, sentFrom: DEVELOPER_SENDER_EMAIL, emailStatus: emailResult });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── STUDENT EMAIL REMINDERS ENDPOINT ──────────────────────────────────────
+app.post('/api/students/send-reminder', requireAuth, async (req, res) => {
+  try {
+    const { studentEmail, studentName, subject, message, reminderType, courseName } = req.body || {};
+    if (!studentEmail || !subject || !message) {
+      return res.status(400).json({ error: 'Student email, subject, and message are required.' });
+    }
+
+    const typeTitle = reminderType === 'FEE_PAYMENT' ? 'Fee Payment Reminder'
+      : reminderType === 'ATTENDANCE' ? 'Class Attendance Notice'
+      : reminderType === 'CLASS_SCHEDULE' ? 'Class Schedule Update'
+      : 'Studio Announcement';
+
+    const htmlBody = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #08090a; color: #ffffff; padding: 24px; border-radius: 12px; border: 1px solid #222;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <h2 style="color: #e11d48; margin: 0; font-size: 24px; letter-spacing: 1px;">SOUNDABODE STUDIOS</h2>
+          <p style="color: #94a3b8; font-size: 13px; margin-top: 4px;">${escapeHtml(typeTitle)}</p>
+        </div>
+
+        <p style="font-size: 15px; color: #f1f5f9;">Dear <strong>${escapeHtml(studentName || 'Student')}</strong>,</p>
+
+        <div style="background: #121316; border-left: 4px solid #e11d48; padding: 16px; margin: 16px 0; border-radius: 4px; color: #e2e8f0; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(message)}</div>
+
+        ${courseName ? `<p style="font-size: 13px; color: #94a3b8;"><strong>Course:</strong> ${escapeHtml(courseName)}</p>` : ''}
+
+        <hr style="border-color: #222; margin: 24px 0;" />
+        <div style="font-size: 12px; color: #64748b; text-align: center; line-height: 1.5;">
+          <strong>Soundabode Studios & Academy</strong><br />
+          Shop 218, Vision 9 Mall, Pimple Saudagar, Pune – 411017<br />
+          Phone: +91 9975016189 | Email: <a href="mailto:services@soundabode.com" style="color: #e11d48;">services@soundabode.com</a>
+        </div>
+      </div>
+    `;
+
+    const emailResult = await sendEmail({
+      to: String(studentEmail).trim(),
+      subject: String(subject).trim(),
+      text: String(message),
+      html: htmlBody,
+    });
+
+    console.log(`[STUDENT REMINDER] Sent ${reminderType || 'GENERAL'} reminder to ${studentEmail} by ${req.sessionUser?.name || 'Admin'}`);
+    return res.json({
+      success: true,
+      message: `Reminder email dispatched to ${studentEmail}`,
+      emailResult,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/issues/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, developerNotes } = req.body || {};
+
+    if (isConnected) {
+      const updated = await IssueModel.findOneAndUpdate(
+        { $or: [{ id }, { _id: mongoose.Types.ObjectId.isValid(id) ? id : null }] },
+        { $set: { ...(status ? { status } : {}), ...(developerNotes !== undefined ? { developerNotes } : {}), updatedAt: new Date().toISOString() } },
+        { new: true }
+      );
+      return res.json({ success: true, issue: updated });
+    }
+    res.json({ success: true, id, status, developerNotes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/issues/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (isConnected) {
+      await IssueModel.deleteOne({ $or: [{ id }, { _id: mongoose.Types.ObjectId.isValid(id) ? id : null }] });
     }
     res.json({ success: true, id });
   } catch (err) {
