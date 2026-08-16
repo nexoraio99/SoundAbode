@@ -251,7 +251,7 @@ export class AttendanceService {
     }
   }
 
-  private static syncAttendanceToRemote(record: AttendanceRecord): void {
+  private static async syncAttendanceToRemote(record: AttendanceRecord): Promise<void> {
     if (typeof window !== 'undefined') {
       const student = this.getStudentById(record.studentId);
       const payload = {
@@ -262,28 +262,49 @@ export class AttendanceService {
         course: student?.course || '',
         batch: student?.batch || '',
       };
-      fetch(`${API_BASE_URL}/attendance`, {
-        method: 'POST',
-        headers: AuthService.getAuthHeaders(),
-        body: JSON.stringify(payload),
-      }).catch((err) => console.warn('Attendance remote sync notice:', err));
+      try {
+        const res = await fetch(`${API_BASE_URL}/attendance`, {
+          method: 'POST',
+          headers: AuthService.getAuthHeaders(),
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          console.warn('Attendance remote sync failed:', res.status, await res.text().catch(() => ''));
+        }
+      } catch (err) {
+        console.warn('Attendance remote sync notice:', err);
+      }
     }
   }
 
-  public static getAllAttendanceRecords(): AttendanceRecord[] {
+  /**
+   * Fetches latest attendance from remote MongoDB and syncs to localStorage.
+   * Call this explicitly when you want to refresh from server (not on every render).
+   */
+  public static async fetchAndSyncFromRemote(): Promise<AttendanceRecord[]> {
     if (typeof window !== 'undefined') {
-      fetch(`${API_BASE_URL}/attendance`, {
-        headers: AuthService.getAuthHeaders(),
-      })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((remoteRecords) => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/attendance`, {
+          headers: AuthService.getAuthHeaders(),
+        });
+        if (res.ok) {
+          const remoteRecords = await res.json();
           if (Array.isArray(remoteRecords)) {
-            const cleanRecords = remoteRecords.filter((r) => !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id));
+            const cleanRecords = remoteRecords.filter(
+              (r: AttendanceRecord) => r && !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id)
+            );
             this.saveAttendance(cleanRecords);
+            return cleanRecords;
           }
-        })
-        .catch(() => {});
+        }
+      } catch (err) {
+        console.warn('Attendance remote fetch failed:', err);
+      }
     }
+    return this.getStoredAttendance();
+  }
+
+  public static getAllAttendanceRecords(): AttendanceRecord[] {
     return this.getStoredAttendance();
   }
 

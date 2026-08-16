@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import styles from './CmsAdminPage.module.css';
 import admissionStyles from '../AdmissionPage/AdmissionPage.module.css';
 import SEO from '../../components/common/SEO';
@@ -237,6 +237,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const [selectedGroupStudentIds, setSelectedGroupStudentIds] = useState<string[]>([]);
   const [groupStudentSearchQuery, setGroupStudentSearchQuery] = useState<string>('');
   const [groupSessionSuccessBanner, setGroupSessionSuccessBanner] = useState<string | null>(null);
+  const [attendanceSubTab, setAttendanceSubTab] = useState<'roster' | 'group'>('roster');
+  const [groupTabSearchQuery, setGroupTabSearchQuery] = useState<string>('');
 
   // Modal states for Lead Message Viewer
   const [expandedLeadMessage, setExpandedLeadMessage] = useState<ContactInquiry | null>(null);
@@ -359,6 +361,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         }
         return prev;
       });
+
+      // Keep attendance synced with remote MongoDB
+      AttendanceService.fetchAndSyncFromRemote();
     }, 15000);
 
     const unsubscribeAttendance = AttendanceService.subscribe(() => {
@@ -390,7 +395,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     setInquiries(InquiryService.getAllInquiries());
     setStudents(AttendanceService.getAllStudents());
     setAdmissions(AdmissionService.getAllAdmissions());
-    AttendanceService.getAllAttendanceRecords();
+    // Trigger async remote sync — when it completes, saveAttendance fires notifyChange which bumps attendanceVersion via subscription
+    AttendanceService.fetchAndSyncFromRemote();
     IssueService.fetchIssues().then((issues) => setDeveloperIssues(issues));
     setAttendanceVersion((v) => v + 1);
   };
@@ -919,25 +925,17 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     const targetSlot = slot || selectedTimeSlot || '11:00 AM - 01:00 PM';
 
     setAttendanceFormDate(targetDate);
-    setSelectedTimeSlot(targetSlot);
 
-    if (targetSlot && targetSlot.includes('-')) {
-      const parts = targetSlot.split('-').map((s) => s.trim());
-      if (parts.length === 2) {
-        const convert12to24 = (time12: string, default24: string) => {
-          const match = time12.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-          if (!match) return default24;
-          let hour = parseInt(match[1], 10);
-          const min = match[2];
-          const ampm = match[3].toUpperCase();
-          if (ampm === 'PM' && hour < 12) hour += 12;
-          if (ampm === 'AM' && hour === 12) hour = 0;
-          return `${hour.toString().padStart(2, '0')}:${min}`;
-        };
-        setCustomTimeStart(convert12to24(parts[0], '11:00'));
-        setCustomTimeEnd(convert12to24(parts[1], '13:00'));
-      }
-    }
+    const convert12to24 = (time12: string, default24: string) => {
+      const match = time12.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+      if (!match) return default24;
+      let hour = parseInt(match[1], 10);
+      const min = match[2];
+      const ampm = match[3].toUpperCase();
+      if (ampm === 'PM' && hour < 12) hour += 12;
+      if (ampm === 'AM' && hour === 12) hour = 0;
+      return `${hour.toString().padStart(2, '0')}:${min}`;
+    };
 
     if (!selectedStudentId && students.length > 0) {
       setSelectedStudentId(students[0].id);
@@ -946,18 +944,52 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     const currentStudentId = selectedStudentId || (students.length > 0 ? students[0].id : '');
     if (currentStudentId) {
       const records = AttendanceService.getAttendanceForStudent(currentStudentId, currentUser || undefined);
-      const existing = records.find((r) => r.date === targetDate && r.timeSlot === targetSlot);
+
+      // If a specific slot was clicked, do exact match. If no slot (calendar day click), find first record for that date.
+      let existing: typeof records[0] | undefined;
+      if (slot) {
+        existing = records.find((r) => r.date === targetDate && r.timeSlot === slot);
+      } else {
+        existing = records.find((r) => r.date === targetDate);
+      }
+
       if (existing) {
         setEditingAttendanceId(existing.id);
         setAttendanceFormStatus(existing.status as AttendanceStatus);
         setAttendanceFormComment(existing.comment);
+        // Use the ACTUAL time slot from the existing record to populate the time picker
+        const recordSlot = existing.timeSlot || targetSlot;
+        setSelectedTimeSlot(recordSlot);
+        if (recordSlot && recordSlot.includes('-')) {
+          const parts = recordSlot.split('-').map((s) => s.trim());
+          if (parts.length === 2) {
+            setCustomTimeStart(convert12to24(parts[0], '11:00'));
+            setCustomTimeEnd(convert12to24(parts[1], '13:00'));
+          }
+        }
       } else {
         setEditingAttendanceId(null);
         setAttendanceFormStatus('PRESENT');
         setAttendanceFormComment('');
+        setSelectedTimeSlot(targetSlot);
+        if (targetSlot && targetSlot.includes('-')) {
+          const parts = targetSlot.split('-').map((s) => s.trim());
+          if (parts.length === 2) {
+            setCustomTimeStart(convert12to24(parts[0], '11:00'));
+            setCustomTimeEnd(convert12to24(parts[1], '13:00'));
+          }
+        }
       }
     } else {
       setEditingAttendanceId(null);
+      setSelectedTimeSlot(targetSlot);
+      if (targetSlot && targetSlot.includes('-')) {
+        const parts = targetSlot.split('-').map((s) => s.trim());
+        if (parts.length === 2) {
+          setCustomTimeStart(convert12to24(parts[0], '11:00'));
+          setCustomTimeEnd(convert12to24(parts[1], '13:00'));
+        }
+      }
     }
     setIsAttendanceModalOpen(true);
   };
@@ -966,10 +998,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     if (!selectedStudentId) return;
     const targetDate = attendanceFormDate || selectedDateStr;
 
-    if (window.confirm(`Are you sure you want to delete this attendance session?`)) {
+    if (window.confirm(`Are you sure you want to delete this attendance record?`)) {
       if (editingAttendanceId) {
+        // Delete the specific record we're editing
         await AttendanceService.deleteAttendanceRecord(editingAttendanceId);
       } else {
+        // No editingAttendanceId — try to find matching record by date + constructed slot
         const formatTime = (timeStr: string) => {
           if (!timeStr) return '';
           const [h, m] = timeStr.split(':');
@@ -982,7 +1016,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           ? `${formatTime(customTimeStart)} - ${formatTime(customTimeEnd)}`
           : '11:00 AM - 01:00 PM';
         const records = AttendanceService.getAttendanceForStudent(selectedStudentId, currentUser || undefined);
-        const existing = records.find((r) => r.date === targetDate && r.timeSlot === finalSlot);
+        // Try exact slot match first, then fallback to any record on that date
+        const existing = records.find((r) => r.date === targetDate && r.timeSlot === finalSlot)
+          || records.find((r) => r.date === targetDate);
         if (existing) {
           await AttendanceService.deleteAttendanceRecord(existing.id);
         }
@@ -994,10 +1030,22 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   };
 
   const handleOpenGroupAttendanceModal = (dateStr?: string) => {
-    setGroupSessionDate(dateStr || selectedDateStr || new Date().toISOString().split('T')[0]);
-    setSelectedGroupStudentIds(students.map((s) => s.id));
+    const targetDate = dateStr || selectedDateStr || new Date().toISOString().split('T')[0];
+    setGroupSessionDate(targetDate);
+
+    const existingGroupRecords = AttendanceService.getAllAttendanceRecords().filter(
+      (r) => r.date === targetDate && r.status === 'GROUP_SESSION'
+    );
+
+    if (existingGroupRecords.length > 0) {
+      const existingIds = Array.from(new Set(existingGroupRecords.map((r) => r.studentId)));
+      setSelectedGroupStudentIds(existingIds);
+    } else {
+      setSelectedGroupStudentIds(students.map((s) => s.id));
+    }
+
     setGroupSessionStatus('GROUP_SESSION');
-    setGroupSessionComment('');
+    setGroupSessionComment(existingGroupRecords[0]?.comment || '');
     setGroupStudentSearchQuery('');
     setIsGroupAttendanceModalOpen(true);
   };
@@ -1415,6 +1463,108 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const activeAttendanceRecords = (selectedStudentId && attendanceVersion >= 0)
     ? AttendanceService.getAttendanceForStudent(selectedStudentId, currentUser || undefined)
     : [];
+
+  const allAttendanceRecords = (attendanceVersion >= 0)
+    ? AttendanceService.getAllAttendanceRecords()
+    : [];
+
+  const getGroupSessionDetails = (dateStr: string, slotStr?: string) => {
+    const matchingRecords = allAttendanceRecords.filter((r) => {
+      if (r.date !== dateStr) return false;
+      if (slotStr && r.timeSlot !== slotStr) return false;
+      return r.status === 'GROUP_SESSION';
+    });
+
+    const studentIds = Array.from(new Set(matchingRecords.map((r) => r.studentId)));
+    const attendingStudents = studentIds
+      .map((id) => students.find((s) => s.id === id))
+      .filter((s): s is EnrolledStudent => Boolean(s));
+
+    return {
+      records: matchingRecords,
+      count: attendingStudents.length,
+      students: attendingStudents,
+    };
+  };
+
+  const groupSessionsList = useMemo(() => {
+    const groupRecords = allAttendanceRecords.filter((r) => r.status === 'GROUP_SESSION');
+    const sessionMap = new Map<string, {
+      id: string;
+      date: string;
+      timeSlot: string;
+      markedBy: string;
+      markedByName: string;
+      comment: string;
+      updatedAt: string;
+      studentIds: string[];
+      students: EnrolledStudent[];
+    }>();
+
+    groupRecords.forEach((r) => {
+      const key = `${r.date}___${r.timeSlot}`;
+      if (!sessionMap.has(key)) {
+        const student = students.find((s) => s.id === r.studentId);
+        sessionMap.set(key, {
+          id: key,
+          date: r.date,
+          timeSlot: r.timeSlot,
+          markedBy: r.markedBy,
+          markedByName: r.markedByName,
+          comment: r.comment,
+          updatedAt: r.updatedAt,
+          studentIds: [r.studentId],
+          students: student ? [student] : [],
+        });
+      } else {
+        const existing = sessionMap.get(key)!;
+        if (!existing.studentIds.includes(r.studentId)) {
+          existing.studentIds.push(r.studentId);
+          const student = students.find((s) => s.id === r.studentId);
+          if (student) existing.students.push(student);
+        }
+        if (!existing.comment && r.comment) {
+          existing.comment = r.comment;
+        }
+      }
+    });
+
+    return Array.from(sessionMap.values()).sort((a, b) => b.date.localeCompare(a.date));
+  }, [allAttendanceRecords, students]);
+
+  const filteredGroupSessionsList = useMemo(() => {
+    if (!groupTabSearchQuery.trim()) return groupSessionsList;
+    const q = groupTabSearchQuery.toLowerCase();
+    return groupSessionsList.filter((gs: (typeof groupSessionsList)[0]) => {
+      const dateMatch = gs.date.includes(q);
+      const slotMatch = gs.timeSlot.toLowerCase().includes(q);
+      const commentMatch = gs.comment.toLowerCase().includes(q);
+      const studentMatch = gs.students.some(
+        (s: EnrolledStudent) => s.name.toLowerCase().includes(q) || s.course.toLowerCase().includes(q) || s.batch.toLowerCase().includes(q)
+      );
+      return dateMatch || slotMatch || commentMatch || studentMatch;
+    });
+  }, [groupSessionsList, groupTabSearchQuery]);
+
+  const handleDeleteGroupSession = async (dateStr: string, timeSlotStr: string) => {
+    if (window.confirm(`Are you sure you want to delete the group session on ${dateStr} (${timeSlotStr})?`)) {
+      const targetRecords = allAttendanceRecords.filter(
+        (r) => r.date === dateStr && r.timeSlot === timeSlotStr && r.status === 'GROUP_SESSION'
+      );
+      for (const rec of targetRecords) {
+        await AttendanceService.deleteAttendanceRecord(rec.id);
+      }
+      refreshData();
+    }
+  };
+
+  const handleEditGroupSession = (session: { date: string; timeSlot: string; studentIds: string[]; comment?: string }) => {
+    setGroupSessionDate(session.date);
+    setSelectedGroupStudentIds(session.studentIds);
+    setGroupSessionStatus('GROUP_SESSION');
+    setGroupSessionComment(session.comment || '');
+    setIsGroupAttendanceModalOpen(true);
+  };
 
   const totalPresent = activeAttendanceRecords.filter((r) => r.status === 'PRESENT').length;
   const totalAbsent = activeAttendanceRecords.filter((r) => r.status === 'ABSENT').length;
@@ -2407,29 +2557,290 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           {/* TAB 2: STUDENT ATTENDANCE FEATURE */}
           {activeTab === 'attendance' && (
             <div>
-              {!selectedStudentId ? (
-                /* VIEW A: ENROLLED STUDENTS ROSTER */
+              {/* SUCCESS NOTIFICATION BANNER */}
+              {groupSessionSuccessBanner && (
+                <div style={{
+                  background: 'rgba(56, 189, 248, 0.12)',
+                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                  color: '#38bdf8',
+                  padding: '0.75rem 1rem',
+                  borderRadius: '8px',
+                  marginBottom: '1rem',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  {groupSessionSuccessBanner}
+                </div>
+              )}
+
+              {/* SUB-TAB NAVIGATION SWITCHER */}
+              {!selectedStudentId && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: '1.25rem',
+                  borderBottom: '1px solid var(--border-subtle)',
+                  paddingBottom: '0.75rem',
+                  gap: '0.75rem',
+                  flexWrap: 'wrap'
+                }}>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => setAttendanceSubTab('roster')}
+                      style={{
+                        background: attendanceSubTab === 'roster' ? 'var(--bg-surface-elevated)' : 'transparent',
+                        color: attendanceSubTab === 'roster' ? 'var(--text-primary)' : 'var(--text-muted)',
+                        border: attendanceSubTab === 'roster' ? '1px solid var(--border-medium)' : '1px solid transparent',
+                        padding: '0.45rem 0.9rem',
+                        borderRadius: '8px',
+                        fontSize: '0.825rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.45rem',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 4 4v2" />
+                        <circle cx="12" cy="7" r="4" />
+                      </svg>
+                      Individual Students ({students.length})
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setAttendanceSubTab('group')}
+                      style={{
+                        background: attendanceSubTab === 'group' ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
+                        color: attendanceSubTab === 'group' ? '#38bdf8' : 'var(--text-muted)',
+                        border: attendanceSubTab === 'group' ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid transparent',
+                        padding: '0.45rem 0.9rem',
+                        borderRadius: '8px',
+                        fontSize: '0.825rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.45rem',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                      </svg>
+                      Group Sessions ({groupSessionsList.length})
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => handleOpenGroupAttendanceModal()}
+                    className={styles.btnPrimary}
+                    style={{ gap: '0.45rem', fontWeight: 600, fontSize: '0.8rem' }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                      <circle cx="9" cy="7" r="4" />
+                      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                    </svg>
+                    Mark Group Session
+                  </button>
+                </div>
+              )}
+
+              {/* VIEW CONDITIONAL: GROUP TAB VS ROSTER VS STUDENT CALENDAR */}
+              {attendanceSubTab === 'group' && !selectedStudentId ? (
+                /* VIEW C: GROUP SESSIONS LOG & MANAGEMENT TAB */
                 <div>
-                  {/* SUCCESS NOTIFICATION BANNER */}
-                  {groupSessionSuccessBanner && (
-                    <div style={{
-                      background: 'rgba(56, 189, 248, 0.12)',
-                      border: '1px solid rgba(56, 189, 248, 0.3)',
-                      color: '#38bdf8',
-                      padding: '0.75rem 1rem',
-                      borderRadius: '8px',
-                      marginBottom: '1rem',
-                      fontSize: '0.85rem',
-                      fontWeight: 600,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem'
-                    }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                      {groupSessionSuccessBanner}
+                  <div className={styles.pageHeaderRow} style={{ marginBottom: '1rem' }}>
+                    <div>
+                      <h1 className={styles.pageTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.2">
+                          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                          <circle cx="9" cy="7" r="4" />
+                          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                        </svg>
+                        Group Sessions
+                      </h1>
+                      <div className={styles.pageMetaBadge}>
+                        <span>{groupSessionsList.length} total group sessions recorded</span>
+                        <span>•</span>
+                        <span>Soundabode Studio Batches</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* GROUP SESSION STATS KPIS */}
+                  <div className={styles.kpiGrid} style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '1.25rem' }}>
+                    <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
+                      <div className={styles.kpiLabelRow}>Total Sessions</div>
+                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: '#38bdf8' }}>
+                        {groupSessionsList.length}
+                      </div>
+                    </div>
+                    <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
+                      <div className={styles.kpiLabelRow}>Total Attendees</div>
+                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: '#34d399' }}>
+                        {groupSessionsList.reduce((acc: number, s: (typeof groupSessionsList)[0]) => acc + s.studentIds.length, 0)}
+                      </div>
+                    </div>
+                    <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
+                      <div className={styles.kpiLabelRow}>Avg Attendees/Session</div>
+                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: '#fbbf24' }}>
+                        {groupSessionsList.length > 0
+                          ? (groupSessionsList.reduce((acc: number, s: (typeof groupSessionsList)[0]) => acc + s.studentIds.length, 0) / groupSessionsList.length).toFixed(1)
+                          : '0'}
+                      </div>
+                    </div>
+                    <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
+                      <div className={styles.kpiLabelRow}>Latest Session</div>
+                      <div className={styles.kpiValue} style={{ fontSize: '1.1rem', color: 'var(--text-primary)', marginTop: '4px' }}>
+                        {groupSessionsList.length > 0 ? groupSessionsList[0].date : 'N/A'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SEARCH BAR FOR GROUP SESSIONS */}
+                  <div className={styles.filterBar} style={{ marginBottom: '1.25rem' }}>
+                    <div className={styles.searchBox} style={{ width: '100%', maxWidth: '380px' }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="11" cy="11" r="8" />
+                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                      </svg>
+                      <input
+                        type="text"
+                        placeholder="Search by student name, date, or topics covered..."
+                        value={groupTabSearchQuery}
+                        onChange={(e) => setGroupTabSearchQuery(e.target.value)}
+                        className={styles.searchInput}
+                      />
+                    </div>
+                  </div>
+
+                  {/* GROUP SESSIONS TABLE */}
+                  {filteredGroupSessionsList.length === 0 ? (
+                    <div className={styles.tableCard} style={{ padding: '2.5rem', textAlign: 'center', color: '#8a99ad' }}>
+                      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ margin: '0 auto 0.75rem auto', opacity: 0.5 }}>
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                      </svg>
+                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
+                        No Group Sessions Found
+                      </div>
+                      <div style={{ fontSize: '0.8rem' }}>
+                        {groupTabSearchQuery ? 'No group sessions match your search query.' : 'Click "Mark Group Session" above to record your first group session!'}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className={styles.desktopTableContainer}>
+                      <div className={styles.tableCard}>
+                        <table className={styles.dataTable}>
+                          <thead>
+                            <tr>
+                              <th>Date &amp; Time Slot</th>
+                              <th>Attendees Count</th>
+                              <th>Attending Students</th>
+                              <th>Marked By</th>
+                              <th>Session Comments</th>
+                              <th style={{ textAlign: 'right' }}>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredGroupSessionsList.map((gs: (typeof groupSessionsList)[0]) => (
+                              <tr key={gs.id}>
+                                <td>
+                                  <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.85rem' }}>{gs.date}</div>
+                                  <div style={{ fontSize: '0.725rem', color: '#38bdf8', fontWeight: 600 }}>{gs.timeSlot}</div>
+                                </td>
+                                <td>
+                                  <span style={{
+                                    background: 'rgba(56, 189, 248, 0.15)',
+                                    color: '#38bdf8',
+                                    border: '1px solid rgba(56, 189, 248, 0.3)',
+                                    padding: '3px 10px',
+                                    borderRadius: '12px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700
+                                  }}>
+                                    👥 {gs.studentIds.length} Student{gs.studentIds.length === 1 ? '' : 's'}
+                                  </span>
+                                </td>
+                                <td>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', maxWidth: '340px' }}>
+                                    {gs.students.map((s: EnrolledStudent) => (
+                                      <span
+                                        key={s.id}
+                                        onClick={() => handleOpenStudentCalendar(s.id)}
+                                        style={{
+                                          fontSize: '0.725rem',
+                                          background: 'var(--bg-surface)',
+                                          color: 'var(--text-primary)',
+                                          border: '1px solid var(--border-subtle)',
+                                          padding: '2px 8px',
+                                          borderRadius: '10px',
+                                          fontWeight: 500,
+                                          cursor: 'pointer',
+                                        }}
+                                        title={`Click to view ${s.name}'s calendar`}
+                                      >
+                                        {s.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </td>
+                                <td>
+                                  <div style={{ fontSize: '0.775rem', fontWeight: 600, color: '#e11d48' }}>
+                                    {gs.markedByName || 'Staff'}
+                                  </div>
+                                </td>
+                                <td>
+                                  <div style={{ fontSize: '0.775rem', color: 'var(--text-secondary)', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {gs.comment || 'N/A'}
+                                  </div>
+                                </td>
+                                <td style={{ textAlign: 'right' }}>
+                                  <div style={{ display: 'inline-flex', gap: '0.4rem' }}>
+                                    <button
+                                      onClick={() => handleEditGroupSession(gs)}
+                                      className={styles.btnSecondary}
+                                      style={{ height: '28px', fontSize: '0.75rem', padding: '0 0.6rem' }}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteGroupSession(gs.date, gs.timeSlot)}
+                                      className={styles.btnDestructive}
+                                      style={{ height: '28px', fontSize: '0.75rem', padding: '0 0.6rem' }}
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
-
+                </div>
+              ) : !selectedStudentId ? (
+                /* VIEW A: ENROLLED STUDENTS ROSTER */
+                <div>
                   <div className={styles.pageHeaderRow}>
                     <div>
                       <h1 className={styles.pageTitle}>Attendance</h1>
@@ -2780,21 +3191,29 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             <span className={styles.calendarDayNumber}>{item.day}</span>
 
                             <div className={styles.calendarDotsRow}>
-                              {dayRecords.map((r) => (
-                                <span
-                                  key={r.id}
-                                  className={
-                                    r.status === 'PRESENT'
-                                      ? styles.dotPresent
-                                      : r.status === 'ABSENT'
-                                        ? styles.dotAbsent
-                                        : r.status === 'GROUP_SESSION'
-                                          ? styles.dotGroup
-                                          : styles.dotPractice
-                                  }
-                                  title={`${r.timeSlot}: ${r.status === 'PRACTICE_SESSION' || r.status === 'NA' ? 'PRACTICE SESSION' : r.status === 'GROUP_SESSION' ? 'GROUP SESSION' : r.status}`}
-                                />
-                              ))}
+                              {dayRecords.map((r) => {
+                                const groupInfo = r.status === 'GROUP_SESSION' ? getGroupSessionDetails(item.dateStr, r.timeSlot) : null;
+                                const isGroup = r.status === 'GROUP_SESSION';
+                                const groupTitle = groupInfo && groupInfo.count > 0
+                                  ? `GROUP SESSION (${groupInfo.count} Present: ${groupInfo.students.map((s) => s.name).join(', ')})`
+                                  : 'GROUP SESSION';
+
+                                return (
+                                  <span
+                                    key={r.id}
+                                    className={
+                                      r.status === 'PRESENT'
+                                        ? styles.dotPresent
+                                        : r.status === 'ABSENT'
+                                          ? styles.dotAbsent
+                                          : r.status === 'GROUP_SESSION'
+                                            ? styles.dotGroup
+                                            : styles.dotPractice
+                                    }
+                                    title={`${r.timeSlot}: ${r.status === 'PRACTICE_SESSION' || r.status === 'NA' ? 'PRACTICE SESSION' : isGroup ? groupTitle : r.status}`}
+                                  />
+                                );
+                              })}
                             </div>
                           </div>
                         );
@@ -2825,6 +3244,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         const slotRecords = activeAttendanceRecords.filter(
                           (r) => r.date === selectedDateStr && r.timeSlot === slot
                         );
+                        const slotGroupInfo = getGroupSessionDetails(selectedDateStr, slot);
 
                         return (
                           <div
@@ -2835,28 +3255,87 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             <div style={{ width: '100%' }}>
                               <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>{slot}</div>
                               {slotRecords.length > 0 ? (
-                                slotRecords.map((r) => (
-                                  <div key={r.id} style={{ fontSize: '0.725rem', marginTop: '3px', lineHeight: '1.3' }}>
-                                    <span style={{
-                                      color: r.status === 'PRESENT'
-                                        ? '#34d399'
-                                        : r.status === 'ABSENT'
-                                          ? '#f87171'
-                                          : r.status === 'GROUP_SESSION'
-                                            ? '#38bdf8'
-                                            : '#c084fc',
-                                      fontWeight: 600
-                                    }}>
-                                      ● {r.status === 'PRACTICE_SESSION' || r.status === 'NA' ? 'PRACTICE SESSION' : r.status === 'GROUP_SESSION' ? 'GROUP SESSION' : r.status}
-                                    </span>
-                                    {r.comment ? <span style={{ color: '#94a3b8' }}> ({r.comment})</span> : null}
-                                    {!isTeacher && (
-                                      <span style={{ fontSize: '0.675rem', background: 'var(--bg-surface)', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)', padding: '1px 5px', borderRadius: '4px', marginLeft: '6px', fontWeight: 500 }}>
-                                        By {r.markedByName || 'Staff'}
+                                slotRecords.map((r) => {
+                                  const isGroup = r.status === 'GROUP_SESSION';
+                                  const count = slotGroupInfo.count;
+
+                                  return (
+                                    <div key={r.id} style={{ fontSize: '0.725rem', marginTop: '3px', lineHeight: '1.4' }}>
+                                      <span style={{
+                                        color: r.status === 'PRESENT'
+                                          ? '#34d399'
+                                          : r.status === 'ABSENT'
+                                            ? '#f87171'
+                                            : r.status === 'GROUP_SESSION'
+                                              ? '#38bdf8'
+                                              : '#c084fc',
+                                        fontWeight: 600
+                                      }}>
+                                        ● {r.status === 'PRACTICE_SESSION' || r.status === 'NA'
+                                            ? 'PRACTICE SESSION'
+                                            : isGroup
+                                              ? `GROUP SESSION (${count > 0 ? `${count} Student${count === 1 ? '' : 's'} Present` : 'Group Session'})`
+                                              : r.status}
                                       </span>
-                                    )}
+                                      {r.comment ? <span style={{ color: '#94a3b8' }}> ({r.comment})</span> : null}
+                                      {!isTeacher && (
+                                        <span style={{ fontSize: '0.675rem', background: 'var(--bg-surface)', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)', padding: '1px 5px', borderRadius: '4px', marginLeft: '6px', fontWeight: 500 }}>
+                                          By {r.markedByName || 'Staff'}
+                                        </span>
+                                      )}
+
+                                      {/* LIST ATTENDING STUDENTS IF GROUP SESSION */}
+                                      {isGroup && slotGroupInfo.students.length > 0 && (
+                                        <div style={{ marginTop: '5px', background: 'rgba(56, 189, 248, 0.08)', padding: '5px 8px', borderRadius: '6px', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
+                                          <div style={{ fontSize: '0.675rem', fontWeight: 700, color: '#38bdf8', marginBottom: '3px' }}>
+                                            Present ({count}):
+                                          </div>
+                                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
+                                            {slotGroupInfo.students.map((st) => (
+                                              <span
+                                                key={st.id}
+                                                style={{
+                                                  fontSize: '0.65rem',
+                                                  background: 'var(--bg-surface)',
+                                                  color: 'var(--text-primary)',
+                                                  border: '1px solid var(--border-subtle)',
+                                                  padding: '1px 5px',
+                                                  borderRadius: '4px',
+                                                  fontWeight: 500,
+                                                }}
+                                              >
+                                                {st.name}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })
+                              ) : slotGroupInfo.count > 0 ? (
+                                <div style={{ fontSize: '0.725rem', marginTop: '3px' }}>
+                                  <span style={{ color: '#38bdf8', fontWeight: 600 }}>
+                                    ● GROUP SESSION ({slotGroupInfo.count} Student{slotGroupInfo.count === 1 ? '' : 's'} Present)
+                                  </span>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '4px' }}>
+                                    {slotGroupInfo.students.map((st) => (
+                                      <span
+                                        key={st.id}
+                                        style={{
+                                          fontSize: '0.65rem',
+                                          background: 'rgba(56, 189, 248, 0.1)',
+                                          color: '#38bdf8',
+                                          border: '1px solid rgba(56, 189, 248, 0.2)',
+                                          padding: '1px 5px',
+                                          borderRadius: '4px',
+                                        }}
+                                      >
+                                        {st.name}
+                                      </span>
+                                    ))}
                                   </div>
-                                ))
+                                </div>
                               ) : (
                                 <div style={{ fontSize: '0.725rem', color: '#8a99ad', marginTop: '2px' }}>
                                   Unmarked • Click to edit
@@ -4517,6 +4996,81 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   </div>
                 </div>
 
+                {/* GROUP SESSION ATTENDEES SUMMARY BOX */}
+                {attendanceFormStatus === 'GROUP_SESSION' && (() => {
+                  const targetModalDate = attendanceFormDate || selectedDateStr;
+                  const modalGroupDetails = getGroupSessionDetails(targetModalDate);
+                  return (
+                    <div
+                      style={{
+                        background: 'rgba(56, 189, 248, 0.08)',
+                        border: '1px solid rgba(56, 189, 248, 0.25)',
+                        borderRadius: '8px',
+                        padding: '0.75rem 0.85rem',
+                        marginBottom: '1rem',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.2">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                            <circle cx="9" cy="7" r="4" />
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                          </svg>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#38bdf8' }}>
+                            Group Session ({modalGroupDetails.count} Student{modalGroupDetails.count === 1 ? '' : 's'} Present)
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAttendanceModalOpen(false);
+                            handleOpenGroupAttendanceModal(targetModalDate);
+                          }}
+                          style={{
+                            background: 'rgba(56, 189, 248, 0.2)',
+                            border: '1px solid #38bdf8',
+                            color: '#38bdf8',
+                            borderRadius: '4px',
+                            padding: '2px 8px',
+                            fontSize: '0.725rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          View / Edit Group Attendees
+                        </button>
+                      </div>
+
+                      {modalGroupDetails.students.length > 0 ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.35rem' }}>
+                          {modalGroupDetails.students.map((st) => (
+                            <span
+                              key={st.id}
+                              style={{
+                                fontSize: '0.725rem',
+                                background: 'var(--bg-surface)',
+                                color: 'var(--text-primary)',
+                                border: '1px solid var(--border-subtle)',
+                                padding: '2px 8px',
+                                borderRadius: '10px',
+                                fontWeight: 500,
+                              }}
+                            >
+                              {st.name}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '0.725rem', color: '#94a3b8' }}>
+                          No other students linked to this group session yet. Click "View / Edit Group Attendees" to add students.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* CLASS COMMENTS / MENTOR NOTES */}
                 <div className={styles.formGroup}>
                   <label className={styles.formLabel}>Class Comments &amp; Topics Covered</label>
@@ -4532,7 +5086,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               </div>
 
               <div className={styles.modalFooter} style={{ justifyContent: 'space-between', width: '100%', display: 'flex', alignItems: 'center' }}>
-                {editingAttendanceId ? (
+                {editingAttendanceId || (selectedStudentId && activeAttendanceRecords.some((r) => r.date === (attendanceFormDate || selectedDateStr))) ? (
                   <button
                     type="button"
                     onClick={handleDeleteCurrentAttendance}

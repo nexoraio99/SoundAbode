@@ -346,7 +346,7 @@ const attendanceRecordSchema = new mongoose.Schema({
   batch: { type: String, default: '' },
   date: { type: String, required: true },
   timeSlot: { type: String, default: '11:00 AM - 01:00 PM' },
-  status: { type: String, enum: ['PRESENT', 'ABSENT', 'NA'], default: 'PRESENT' },
+  status: { type: String, enum: ['PRESENT', 'ABSENT', 'PRACTICE_SESSION', 'GROUP_SESSION', 'NA'], default: 'PRESENT' },
   comment: { type: String, default: '' },
   markedBy: { type: String, required: true },
   markedByName: { type: String, default: 'Staff' },
@@ -1119,10 +1119,16 @@ app.post('/api/attendance', async (req, res) => {
     if (!recordData.updatedAt) recordData.updatedAt = new Date().toISOString();
 
     if (mongoose.connection.readyState === 1) {
+      const query = {
+        $or: [
+          { id: recordData.id },
+          { studentId: recordData.studentId, date: recordData.date, timeSlot: recordData.timeSlot }
+        ]
+      };
       const record = await AttendanceRecordModel.findOneAndUpdate(
-        { id: recordData.id },
+        query,
         recordData,
-        { upsert: true, new: true }
+        { upsert: true, new: true, setDefaultsOnInsert: true }
       );
       return res.status(201).json(record);
     }
