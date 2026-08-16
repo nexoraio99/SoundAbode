@@ -35,6 +35,7 @@ try {
 }
 
 const app = express();
+app.set('trust proxy', 1);
 app.disable('x-powered-by');
 let PORT = parseInt(process.env.PORT || '3001', 10);
 
