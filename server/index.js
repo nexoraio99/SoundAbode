@@ -974,14 +974,22 @@ app.patch('/api/inquiries/:id', requireAuth, async (req, res) => {
   }
 });
 
+function buildDeleteQuery(id) {
+  const cleanId = String(id || '').trim();
+  const conditions = [{ id: cleanId }];
+  if (mongoose.Types.ObjectId.isValid(cleanId)) {
+    conditions.push({ _id: new mongoose.Types.ObjectId(cleanId) });
+    conditions.push({ _id: cleanId });
+  }
+  return { $or: conditions };
+}
+
 app.delete('/api/inquiries/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     if (mongoose.connection.readyState === 1) {
-      const isObjectId = mongoose.Types.ObjectId.isValid(id);
-      await InquiryModel.deleteMany({
-        $or: [{ id }, ...(isObjectId ? [{ _id: id }] : [])],
-      });
+      const result = await InquiryModel.deleteMany(buildDeleteQuery(id));
+      console.log(`[DELETE] Deleted ${result.deletedCount} inquiry(ies) matching ${id}`);
     }
     res.json({ success: true, id });
   } catch (err) {
@@ -1064,10 +1072,8 @@ app.delete('/api/admissions/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     if (mongoose.connection.readyState === 1) {
-      const isObjectId = mongoose.Types.ObjectId.isValid(id);
-      await AdmissionModel.deleteMany({
-        $or: [{ id }, ...(isObjectId ? [{ _id: id }] : [])],
-      });
+      const result = await AdmissionModel.deleteMany(buildDeleteQuery(id));
+      console.log(`[DELETE] Deleted ${result.deletedCount} admission(s) matching ${id}`);
     }
     res.json({ success: true, id });
   } catch (err) {
@@ -1124,11 +1130,9 @@ app.delete('/api/attendance/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     if (mongoose.connection.readyState === 1) {
-      const isObjectId = mongoose.Types.ObjectId.isValid(id);
-      await AttendanceRecordModel.deleteMany({
-        $or: [{ id }, ...(isObjectId ? [{ _id: id }] : [])],
-      });
-      return res.json({ success: true, id });
+      const result = await AttendanceRecordModel.deleteMany(buildDeleteQuery(id));
+      console.log(`[DELETE] Deleted ${result.deletedCount} attendance record(s) matching ${id}`);
+      return res.json({ success: true, deletedCount: result.deletedCount, id });
     }
     res.json({ success: true, id });
   } catch (err) {
@@ -1170,10 +1174,8 @@ app.delete('/api/posts/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     if (mongoose.connection.readyState === 1) {
-      const isObjectId = mongoose.Types.ObjectId.isValid(id);
-      await BlogPostModel.deleteMany({
-        $or: [{ id }, ...(isObjectId ? [{ _id: id }] : [])],
-      });
+      const result = await BlogPostModel.deleteMany(buildDeleteQuery(id));
+      console.log(`[DELETE] Deleted ${result.deletedCount} blog post(s) matching ${id}`);
     }
     res.json({ success: true, id });
   } catch (err) {
@@ -1218,11 +1220,29 @@ app.post('/api/students', requireAuth, async (req, res) => {
 app.delete('/api/students/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
+    const { email, name } = req.query;
     if (mongoose.connection.readyState === 1) {
-      const isObjectId = mongoose.Types.ObjectId.isValid(id);
-      await StudentModel.deleteMany({
-        $or: [{ id }, ...(isObjectId ? [{ _id: id }] : [])],
-      });
+      const cleanId = String(id || '').trim();
+      const queryConditions = [
+        { id: cleanId },
+        { name: cleanId },
+        { email: cleanId },
+      ];
+
+      if (email && typeof email === 'string') {
+        queryConditions.push({ email: email.trim() });
+      }
+      if (name && typeof name === 'string') {
+        queryConditions.push({ name: name.trim() });
+      }
+      if (mongoose.Types.ObjectId.isValid(cleanId)) {
+        queryConditions.push({ _id: new mongoose.Types.ObjectId(cleanId) });
+        queryConditions.push({ _id: cleanId });
+      }
+
+      const result = await StudentModel.deleteMany({ $or: queryConditions });
+      console.log(`[DELETE] Deleted ${result.deletedCount} student(s) matching id/email/name: ${id} / ${email || ''} / ${name || ''}`);
+      return res.json({ success: true, deletedCount: result.deletedCount, id });
     }
     res.json({ success: true, id });
   } catch (err) {

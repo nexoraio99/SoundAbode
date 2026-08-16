@@ -277,14 +277,7 @@ export class AttendanceService {
         .then((remoteRecords) => {
           if (Array.isArray(remoteRecords)) {
             const cleanRecords = remoteRecords.filter((r) => !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id));
-            const currentLocal = this.getStoredAttendance();
-            const remoteIds = new Set(cleanRecords.map((r: AttendanceRecord) => r.id));
-            const unsyncedLocal = currentLocal.filter((r) => !remoteIds.has(r.id) && !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id));
-
-            unsyncedLocal.forEach((r) => this.syncAttendanceToRemote(r));
-
-            const merged = [...unsyncedLocal, ...cleanRecords];
-            this.saveAttendance(merged);
+            this.saveAttendance(cleanRecords);
           }
         })
         .catch(() => {});
@@ -299,17 +292,10 @@ export class AttendanceService {
       })
         .then((res) => (res.ok ? res.json() : null))
         .then((remoteStudents) => {
-          if (Array.isArray(remoteStudents) && remoteStudents.length > 0) {
+          if (Array.isArray(remoteStudents)) {
             const mockIds = ['std-101', 'std-201', 'std-202', 'std-203', 'std-204', 'std-205', 'std-206', 'std-207', 'std-208', 'std-209', 'std-210', 'std-211', 'std-212', 'std-213', 'std-214', 'std-215', 'std-216', 'std-217', 'std-218'];
             const cleanRemote = remoteStudents.filter((s: EnrolledStudent) => s && !mockIds.includes(s.id));
-            const currentLocal = this.getStoredStudents();
-            const remoteIds = new Set(cleanRemote.map((s: EnrolledStudent) => s.id));
-            const unsyncedLocal = currentLocal.filter((s) => !remoteIds.has(s.id) && !mockIds.includes(s.id));
-
-            unsyncedLocal.forEach((s) => this.syncStudentToRemote(s));
-
-            const merged = [...unsyncedLocal, ...cleanRemote];
-            this.saveStudents(merged);
+            this.saveStudents(cleanRemote);
             this.notifyChange(this.getStoredAttendance());
           }
         })
@@ -346,13 +332,22 @@ export class AttendanceService {
 
   public static async deleteStudent(id: string): Promise<boolean> {
     let students = this.getStoredStudents();
+    const targetStudent = students.find((s) => s.id === id);
     students = students.filter((s) => s.id !== id);
     this.saveStudents(students);
     this.notifyChange(this.getStoredAttendance());
 
     if (typeof window !== 'undefined') {
       try {
-        const res = await fetch(`${API_BASE_URL}/students/${id}`, {
+        const queryParams = new URLSearchParams();
+        if (targetStudent?.email) queryParams.append('email', targetStudent.email);
+        if (targetStudent?.name) queryParams.append('name', targetStudent.name);
+        const qStr = queryParams.toString();
+        const deleteUrl = qStr
+          ? `${API_BASE_URL}/students/${encodeURIComponent(id)}?${qStr}`
+          : `${API_BASE_URL}/students/${encodeURIComponent(id)}`;
+
+        const res = await fetch(deleteUrl, {
           method: 'DELETE',
           headers: AuthService.getAuthHeaders(),
         });

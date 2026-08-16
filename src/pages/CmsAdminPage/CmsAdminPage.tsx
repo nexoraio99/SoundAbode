@@ -2045,11 +2045,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                     </button>
                                     <button
                                       onClick={() => handleDeleteStudent(std.id, std.name)}
-                                      className={styles.btnGhost}
-                                      style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.35rem', color: 'var(--text-muted)' }}
-                                      title="Remove student"
+                                      className={styles.btnDestructive}
+                                      style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem', whiteSpace: 'nowrap' }}
+                                      title="Permanently delete student from roster & MongoDB"
                                     >
-                                      ✕
+                                      Delete
                                     </button>
                                   </div>
                                 </td>
