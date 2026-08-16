@@ -1291,6 +1291,10 @@ app.get('/api/issues', requireAuth, async (req, res) => {
 let mailTransporter = null;
 
 function getMailTransporter() {
+  if (!process.env.SMTP_PASS) {
+    dotenv.config();
+  }
+
   const host = process.env.SMTP_HOST || 'smtp.zoho.com';
   const port = Number(process.env.SMTP_PORT) || 465;
   const secure = process.env.SMTP_SECURE !== 'false';
