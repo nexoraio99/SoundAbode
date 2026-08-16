@@ -363,13 +363,7 @@ const issueSchema = new mongoose.Schema({
   reporterEmail: { type: String, default: '' },
   reporterName: { type: String, default: '' },
   reporterRole: { type: String, default: '' },
-  systemInfo: {
-    userAgent: { type: String, default: '' },
-    screenResolution: { type: String, default: '' },
-    activeTab: { type: String, default: '' },
-    url: { type: String, default: '' },
-    timestamp: { type: String, default: '' }
-  },
+  systemInfo: { type: mongoose.Schema.Types.Mixed, default: {} },
   status: { type: String, enum: ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'], default: 'OPEN' },
   developerNotes: { type: String, default: '' },
   createdAt: { type: String, default: () => new Date().toISOString() },
@@ -1373,45 +1367,62 @@ app.post('/api/issues', async (req, res) => {
 
     console.log(`[DEVELOPER ISSUE DISPATCH] Target: ${DEVELOPER_TARGET_EMAIL} | From: ${DEVELOPER_SENDER_EMAIL} | Issue: "${issueData.title}" by ${issueData.reporterName} (${issueData.reporterEmail})`);
 
-    // Dispatch automated email via Zoho Mail SMTP
-    const emailSubject = `[CMS Issue Report] [${issueData.priority}] ${issueData.title}`;
-    const emailHtml = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #121316; color: #ffffff; padding: 20px; border-radius: 10px;">
-        <h2 style="color: #ef4444; border-bottom: 1px solid #333; padding-bottom: 10px;">🚨 Soundabode CMS Issue Report</h2>
-        <p><strong>Title:</strong> ${escapeHtml(issueData.title)}</p>
-        <p><strong>Category:</strong> ${escapeHtml(issueData.category)}</p>
-        <p><strong>Priority:</strong> <span style="background: #ef4444; color: #fff; padding: 3px 8px; border-radius: 4px; font-weight: bold;">${escapeHtml(issueData.priority)}</span></p>
-        <p><strong>Reporter:</strong> ${escapeHtml(issueData.reporterName)} (${escapeHtml(issueData.reporterEmail)}) — <em>Role: ${escapeHtml(issueData.reporterRole)}</em></p>
-        <hr style="border-color: #333;" />
-        <h3 style="color: #cbd5e1;">Issue Details:</h3>
-        <div style="background: #191b1f; padding: 12px; border-radius: 6px; white-space: pre-wrap; color: #f1f5f9;">${escapeHtml(issueData.description)}</div>
-        <h3 style="color: #cbd5e1; margin-top: 15px;">System Diagnostics:</h3>
-        <div style="background: #191b1f; padding: 10px; border-radius: 6px; font-family: monospace; font-size: 12px; color: #94a3b8;">
-          Active Tab: ${escapeHtml(issueData.systemInfo?.activeTab || 'N/A')}<br />
-          Browser: ${escapeHtml(issueData.systemInfo?.userAgent || 'N/A')}<br />
-          Screen: ${escapeHtml(issueData.systemInfo?.screenResolution || 'N/A')}<br />
-          Timestamp: ${escapeHtml(issueData.systemInfo?.timestamp || new Date().toISOString())}
+    // Dispatch automated email via Zoho Mail SMTP safely
+    let emailResult = { success: false, reason: 'Not executed' };
+    try {
+      const emailSubject = `[CMS Issue Report] [${issueData.priority}] ${issueData.title}`;
+      const emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #121316; color: #ffffff; padding: 20px; border-radius: 10px;">
+          <h2 style="color: #ef4444; border-bottom: 1px solid #333; padding-bottom: 10px;">🚨 Soundabode CMS Issue Report</h2>
+          <p><strong>Title:</strong> ${escapeHtml(issueData.title)}</p>
+          <p><strong>Category:</strong> ${escapeHtml(issueData.category)}</p>
+          <p><strong>Priority:</strong> <span style="background: #ef4444; color: #fff; padding: 3px 8px; border-radius: 4px; font-weight: bold;">${escapeHtml(issueData.priority)}</span></p>
+          <p><strong>Reporter:</strong> ${escapeHtml(issueData.reporterName)} (${escapeHtml(issueData.reporterEmail)}) — <em>Role: ${escapeHtml(issueData.reporterRole)}</em></p>
+          <hr style="border-color: #333;" />
+          <h3 style="color: #cbd5e1;">Issue Details:</h3>
+          <div style="background: #191b1f; padding: 12px; border-radius: 6px; white-space: pre-wrap; color: #f1f5f9;">${escapeHtml(issueData.description)}</div>
+          <h3 style="color: #cbd5e1; margin-top: 15px;">System Diagnostics:</h3>
+          <div style="background: #191b1f; padding: 10px; border-radius: 6px; font-family: monospace; font-size: 12px; color: #94a3b8;">
+            Active Tab: ${escapeHtml(issueData.systemInfo?.activeTab || 'N/A')}<br />
+            Browser: ${escapeHtml(issueData.systemInfo?.userAgent || 'N/A')}<br />
+            Screen: ${escapeHtml(issueData.systemInfo?.screenResolution || 'N/A')}<br />
+            Timestamp: ${escapeHtml(issueData.systemInfo?.timestamp || new Date().toISOString())}
+          </div>
         </div>
-      </div>
-    `;
+      `;
 
-    const emailResult = await sendEmail({
-      to: DEVELOPER_TARGET_EMAIL,
-      subject: emailSubject,
-      text: issueData.description,
-      html: emailHtml,
-      replyTo: issueData.reporterEmail || undefined,
-    });
-
-    if (isConnected) {
-      const saved = await IssueModel.create(issueData);
-      console.log(`[DEVELOPER ISSUE] Created MongoDB issue record ${saved.id}`);
-      return res.json({ success: true, issue: saved, sentTo: DEVELOPER_TARGET_EMAIL, sentFrom: DEVELOPER_SENDER_EMAIL, emailStatus: emailResult });
+      emailResult = await sendEmail({
+        to: DEVELOPER_TARGET_EMAIL,
+        subject: emailSubject,
+        text: issueData.description,
+        html: emailHtml,
+        replyTo: issueData.reporterEmail || undefined,
+      });
+    } catch (emailErr) {
+      console.error('[DEVELOPER ISSUE EMAIL ERROR]', emailErr.message);
+      emailResult = { success: false, error: emailErr.message };
     }
 
-    res.json({ success: true, issue: issueData, sentTo: DEVELOPER_TARGET_EMAIL, sentFrom: DEVELOPER_SENDER_EMAIL, emailStatus: emailResult });
+    let savedIssue = issueData;
+    if (isConnected) {
+      try {
+        savedIssue = await IssueModel.create(issueData);
+        console.log(`[DEVELOPER ISSUE] Saved MongoDB issue record ${savedIssue.id}`);
+      } catch (dbErr) {
+        console.error('[DEVELOPER ISSUE DB SAVE ERROR]', dbErr.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      issue: savedIssue,
+      sentTo: DEVELOPER_TARGET_EMAIL,
+      sentFrom: DEVELOPER_SENDER_EMAIL,
+      emailStatus: emailResult
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[DEVELOPER ISSUE SERVER ERROR]', err);
+    res.status(500).json({ error: err.message || 'Internal Server Error' });
   }
 });
 
