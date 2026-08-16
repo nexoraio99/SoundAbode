@@ -115,7 +115,9 @@ export class InquiryService {
 
   public static getAllInquiries(): ContactInquiry[] {
     if (typeof window !== 'undefined') {
-      fetch(`${API_BASE_URL}/inquiries`)
+      fetch(`${API_BASE_URL}/inquiries`, {
+        headers: AuthService.getAuthHeaders(),
+      })
         .then((res) => (res.ok ? res.json() : null))
         .then((remoteInquiries) => {
           if (Array.isArray(remoteInquiries)) {

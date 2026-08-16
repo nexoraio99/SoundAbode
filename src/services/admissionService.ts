@@ -128,7 +128,9 @@ export class AdmissionService {
     const local = this.getStoredAdmissions();
 
     if (typeof window !== 'undefined') {
-      fetch(`${API_BASE_URL}/admissions`)
+      fetch(`${API_BASE_URL}/admissions`, {
+        headers: AuthService.getAuthHeaders(),
+      })
         .then((res) => (res.ok ? res.json() : null))
         .then((remoteAdmissions) => {
           if (Array.isArray(remoteAdmissions)) {

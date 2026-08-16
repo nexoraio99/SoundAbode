@@ -239,6 +239,16 @@ export class AttendanceService {
     }
   }
 
+  private static syncStudentToRemote(student: EnrolledStudent): void {
+    if (typeof window !== 'undefined') {
+      fetch(`${API_BASE_URL}/students`, {
+        method: 'POST',
+        headers: AuthService.getAuthHeaders(),
+        body: JSON.stringify(student),
+      }).catch((err) => console.warn('Student remote sync notice:', err));
+    }
+  }
+
   private static syncAttendanceToRemote(record: AttendanceRecord): void {
     if (typeof window !== 'undefined') {
       const student = this.getStudentById(record.studentId);
@@ -260,12 +270,21 @@ export class AttendanceService {
 
   public static getAllAttendanceRecords(): AttendanceRecord[] {
     if (typeof window !== 'undefined') {
-      fetch(`${API_BASE_URL}/attendance`)
+      fetch(`${API_BASE_URL}/attendance`, {
+        headers: AuthService.getAuthHeaders(),
+      })
         .then((res) => (res.ok ? res.json() : null))
         .then((remoteRecords) => {
           if (Array.isArray(remoteRecords)) {
             const cleanRecords = remoteRecords.filter((r) => !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id));
-            this.saveAttendance(cleanRecords);
+            const currentLocal = this.getStoredAttendance();
+            const remoteIds = new Set(cleanRecords.map((r: AttendanceRecord) => r.id));
+            const unsyncedLocal = currentLocal.filter((r) => !remoteIds.has(r.id) && !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id));
+
+            unsyncedLocal.forEach((r) => this.syncAttendanceToRemote(r));
+
+            const merged = [...unsyncedLocal, ...cleanRecords];
+            this.saveAttendance(merged);
           }
         })
         .catch(() => {});
@@ -275,11 +294,23 @@ export class AttendanceService {
 
   public static getAllStudents(): EnrolledStudent[] {
     if (typeof window !== 'undefined') {
-      fetch(`${API_BASE_URL}/students`)
+      fetch(`${API_BASE_URL}/students`, {
+        headers: AuthService.getAuthHeaders(),
+      })
         .then((res) => (res.ok ? res.json() : null))
         .then((remoteStudents) => {
           if (Array.isArray(remoteStudents) && remoteStudents.length > 0) {
-            localStorage.setItem(STUDENTS_STORAGE_KEY, JSON.stringify(remoteStudents));
+            const mockIds = ['std-101', 'std-201', 'std-202', 'std-203', 'std-204', 'std-205', 'std-206', 'std-207', 'std-208', 'std-209', 'std-210', 'std-211', 'std-212', 'std-213', 'std-214', 'std-215', 'std-216', 'std-217', 'std-218'];
+            const cleanRemote = remoteStudents.filter((s: EnrolledStudent) => s && !mockIds.includes(s.id));
+            const currentLocal = this.getStoredStudents();
+            const remoteIds = new Set(cleanRemote.map((s: EnrolledStudent) => s.id));
+            const unsyncedLocal = currentLocal.filter((s) => !remoteIds.has(s.id) && !mockIds.includes(s.id));
+
+            unsyncedLocal.forEach((s) => this.syncStudentToRemote(s));
+
+            const merged = [...unsyncedLocal, ...cleanRemote];
+            this.saveStudents(merged);
+            this.notifyChange(this.getStoredAttendance());
           }
         })
         .catch(() => {});
@@ -299,6 +330,7 @@ export class AttendanceService {
     };
     const updated = [newStudent, ...students];
     this.saveStudents(updated);
+    this.syncStudentToRemote(newStudent);
     return newStudent;
   }
 
@@ -308,6 +340,7 @@ export class AttendanceService {
     if (index === -1) return undefined;
     students[index] = { ...students[index], ...payload };
     this.saveStudents(students);
+    this.syncStudentToRemote(students[index]);
     return students[index];
   }
 
