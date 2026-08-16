@@ -142,16 +142,16 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   // Active tab & Mobile menu drawer
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     const user = AuthService.getCurrentUser();
-    if (user?.role === 'teacher') return 'students';
+    if (user?.role === 'teacher') return 'attendance';
     return 'overview';
   });
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
 
-  // Automatically restrict teacher users to students/attendance
+  // Automatically restrict teacher users to attendance
   useEffect(() => {
-    if (isTeacher && !['students', 'attendance'].includes(activeTab)) {
-      setActiveTab('students');
+    if (isTeacher && activeTab !== 'attendance') {
+      setActiveTab('attendance');
     }
   }, [isTeacher, activeTab]);
 
@@ -373,7 +373,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       setIsAuthenticated(true);
       setAuthError('');
       if (userObj.role === 'teacher') {
-        setActiveTab('students');
+        setActiveTab('attendance');
       }
       refreshData();
       return;
@@ -1477,14 +1477,16 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 </button>
               )}
 
-              <button
-                onClick={() => { setActiveTab('students'); setIsMobileMenuOpen(false); }}
-                className={`${styles.sidebarBtn} ${activeTab === 'students' ? styles.sidebarBtnActive : ''}`}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>
-                Students
-                <span className={styles.badgeCount}>{students.length}</span>
-              </button>
+              {!isTeacher && (
+                <button
+                  onClick={() => { setActiveTab('students'); setIsMobileMenuOpen(false); }}
+                  className={`${styles.sidebarBtn} ${activeTab === 'students' ? styles.sidebarBtnActive : ''}`}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>
+                  Students
+                  <span className={styles.badgeCount}>{students.length}</span>
+                </button>
+              )}
 
               {!isTeacher && (
                 <button
@@ -1578,19 +1580,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
             </button>
           )}
 
-          <button
-            onClick={() => setActiveTab('students')}
-            className={`${styles.sidebarBtn} ${activeTab === 'students' ? styles.sidebarBtnActive : ''}`}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
-            Students
-            <span className={styles.badgeCount}>{students.length}</span>
-          </button>
+          {!isTeacher && (
+            <button
+              onClick={() => setActiveTab('students')}
+              className={`${styles.sidebarBtn} ${activeTab === 'students' ? styles.sidebarBtnActive : ''}`}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              Students
+              <span className={styles.badgeCount}>{students.length}</span>
+            </button>
+          )}
 
           {!isTeacher && (
             <button
@@ -1916,7 +1920,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           )}
 
           {/* TAB: STUDENT DIRECTORY */}
-          {activeTab === 'students' && (
+          {!isTeacher && activeTab === 'students' && (
             <div>
               <div className={styles.pageHeaderRow}>
                 <div>
