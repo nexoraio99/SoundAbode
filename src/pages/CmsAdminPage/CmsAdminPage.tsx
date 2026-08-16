@@ -309,7 +309,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       setAdmissions(updatedAdmissions);
     });
 
-    // Lightweight 2.5s polling fallback to ensure zero-lag synchronization
+    // Periodic polling fallback to ensure zero-lag synchronization (every 15s)
     const pollInterval = setInterval(() => {
       const latestInquiries = InquiryService.getAllInquiries();
       setInquiries((prev) => {
@@ -326,11 +326,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         }
         return prev;
       });
-    }, 2500);
+    }, 15000);
 
     const unsubscribeAttendance = AttendanceService.subscribe(() => {
       setAttendanceVersion((v) => v + 1);
-      setStudents(AttendanceService.getAllStudents());
     });
 
     return () => {

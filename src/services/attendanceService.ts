@@ -296,7 +296,6 @@ export class AttendanceService {
             const mockIds = ['std-101', 'std-201', 'std-202', 'std-203', 'std-204', 'std-205', 'std-206', 'std-207', 'std-208', 'std-209', 'std-210', 'std-211', 'std-212', 'std-213', 'std-214', 'std-215', 'std-216', 'std-217', 'std-218'];
             const cleanRemote = remoteStudents.filter((s: EnrolledStudent) => s && !mockIds.includes(s.id));
             this.saveStudents(cleanRemote);
-            this.notifyChange(this.getStoredAttendance());
           }
         })
         .catch(() => {});
@@ -363,7 +362,6 @@ export class AttendanceService {
     studentId: string,
     user?: { email?: string; role?: string; name?: string }
   ): AttendanceRecord[] {
-    this.getAllAttendanceRecords();
     const records = this.getStoredAttendance();
     const studentRecords = records.filter((r) => r.studentId === studentId);
 
