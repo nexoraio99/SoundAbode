@@ -2579,34 +2579,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
               {/* SUB-TAB NAVIGATION SWITCHER */}
               {!selectedStudentId && (
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  marginBottom: '1.25rem',
-                  borderBottom: '1px solid var(--border-subtle)',
-                  paddingBottom: '0.75rem',
-                  gap: '0.75rem',
-                  flexWrap: 'wrap'
-                }}>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <div className={styles.attendanceSubTabNav}>
+                  <div className={styles.attendanceSubTabBtns}>
                     <button
                       type="button"
                       onClick={() => setAttendanceSubTab('roster')}
-                      style={{
-                        background: attendanceSubTab === 'roster' ? 'var(--bg-surface-elevated)' : 'transparent',
-                        color: attendanceSubTab === 'roster' ? 'var(--text-primary)' : 'var(--text-muted)',
-                        border: attendanceSubTab === 'roster' ? '1px solid var(--border-medium)' : '1px solid transparent',
-                        padding: '0.45rem 0.9rem',
-                        borderRadius: '8px',
-                        fontSize: '0.825rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.45rem',
-                        transition: 'all 0.15s ease',
-                      }}
+                      className={`${styles.attendanceSubTabBtn} ${attendanceSubTab === 'roster' ? styles.attendanceSubTabBtnActive : ''}`}
                     >
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 4 4v2" />
@@ -2618,20 +2596,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     <button
                       type="button"
                       onClick={() => setAttendanceSubTab('group')}
-                      style={{
-                        background: attendanceSubTab === 'group' ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
-                        color: attendanceSubTab === 'group' ? '#38bdf8' : 'var(--text-muted)',
-                        border: attendanceSubTab === 'group' ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid transparent',
-                        padding: '0.45rem 0.9rem',
-                        borderRadius: '8px',
-                        fontSize: '0.825rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.45rem',
-                        transition: 'all 0.15s ease',
-                      }}
+                      className={`${styles.attendanceSubTabBtn} ${attendanceSubTab === 'group' ? styles.attendanceSubTabBtnGroup : ''}`}
                     >
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -2683,7 +2648,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   </div>
 
                   {/* GROUP SESSION STATS KPIS */}
-                  <div className={styles.kpiGrid} style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '1.25rem' }}>
+                  <div className={styles.kpiGridGroup}>
                     <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
                       <div className={styles.kpiLabelRow}>Total Sessions</div>
                       <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: '#38bdf8' }}>
@@ -2746,6 +2711,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       </div>
                     </div>
                   ) : (
+                    <>
                     <div className={styles.desktopTableContainer}>
                       <div className={styles.tableCard}>
                         <table className={styles.dataTable}>
@@ -2836,6 +2802,81 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         </table>
                       </div>
                     </div>
+
+                    {/* GROUP SESSIONS MOBILE CARD LIST */}
+                    <div className={styles.mobileCardList}>
+                      {filteredGroupSessionsList.map((gs: (typeof groupSessionsList)[0]) => (
+                        <div key={gs.id} className={styles.mobileDataCard}>
+                          <div className={styles.mobileCardHeader}>
+                            <div className={styles.mobileCardTitleBox}>
+                              <div>
+                                <div className={styles.mobileCardTitle}>{gs.date}</div>
+                                <div className={styles.mobileCardSubText} style={{ color: '#38bdf8', fontWeight: 600 }}>{gs.timeSlot}</div>
+                              </div>
+                            </div>
+                            <span className={styles.badge} style={{
+                              background: 'rgba(56, 189, 248, 0.15)',
+                              color: '#38bdf8',
+                              border: '1px solid rgba(56, 189, 248, 0.3)',
+                              fontSize: '0.7rem'
+                            }}>
+                              {gs.studentIds.length} Student{gs.studentIds.length === 1 ? '' : 's'}
+                            </span>
+                          </div>
+
+                          <div className={styles.mobileCardBody}>
+                            <div className={styles.mobileCardRow}>
+                              <span className={styles.mobileCardLabel}>Marked By</span>
+                              <span className={styles.mobileCardValue} style={{ color: '#e11d48', fontWeight: 600 }}>{gs.markedByName || 'Staff'}</span>
+                            </div>
+                            {gs.comment && (
+                              <div className={styles.mobileCardRow}>
+                                <span className={styles.mobileCardLabel}>Comments</span>
+                                <span className={styles.mobileCardValue} style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gs.comment}</span>
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '0.25rem' }}>
+                              {gs.students.map((s: EnrolledStudent) => (
+                                <span
+                                  key={s.id}
+                                  onClick={() => handleOpenStudentCalendar(s.id)}
+                                  style={{
+                                    fontSize: '0.7rem',
+                                    background: 'var(--bg-surface)',
+                                    color: 'var(--text-primary)',
+                                    border: '1px solid var(--border-subtle)',
+                                    padding: '2px 8px',
+                                    borderRadius: '10px',
+                                    fontWeight: 500,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  {s.name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className={styles.mobileCardActions}>
+                            <button
+                              onClick={() => handleEditGroupSession(gs)}
+                              className={styles.btnSecondary}
+                              style={{ height: '34px', fontSize: '0.775rem' }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteGroupSession(gs.date, gs.timeSlot)}
+                              className={styles.btnDestructive}
+                              style={{ height: '34px', fontSize: '0.775rem', border: '1px solid var(--border-medium)' }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    </>
                   )}
                 </div>
               ) : !selectedStudentId ? (
@@ -2851,7 +2892,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <div className={styles.attendanceHeaderActions}>
                       <button
                         onClick={() => handleOpenGroupAttendanceModal()}
                         className={styles.btnPrimary}
@@ -3067,7 +3108,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </div>
 
                     {/* Actions Row */}
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <div className={styles.attendanceHeaderActions}>
                       <button
                         onClick={() => handleOpenGroupAttendanceModal(selectedDateStr)}
                         className={styles.btnPrimary}
@@ -3098,7 +3139,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   </div>
 
                   {/* STATS OVERVIEW FOR ACTIVE STUDENT */}
-                  <div className={styles.kpiGrid} style={{ gridTemplateColumns: 'repeat(5, 1fr)', marginBottom: '1.25rem' }}>
+                  <div className={styles.kpiGridStudentStats}>
                     <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
                       <div className={styles.kpiLabelRow}>Rate</div>
                       <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: attendancePercentage >= 80 ? '#34d399' : '#fbbf24' }}>
@@ -3223,7 +3264,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                   {/* TIME SLOTS INSPECTOR FOR SELECTED DATE */}
                   <div className={styles.tableCard} style={{ marginTop: '1.25rem', padding: '1.25rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
+                    <div className={styles.timeSlotInspectorHeader}>
                       <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
                         Time Slots for {selectedDateStr}
                       </h3>
@@ -3239,7 +3280,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       </button>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.85rem' }}>
+                    <div className={styles.timeSlotGrid}>
                       {['11:00 AM - 01:00 PM', '02:00 PM - 04:00 PM', '04:00 PM - 06:00 PM'].map((slot) => {
                         const slotRecords = activeAttendanceRecords.filter(
                           (r) => r.date === selectedDateStr && r.timeSlot === slot
