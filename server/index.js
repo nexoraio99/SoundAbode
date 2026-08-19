@@ -416,12 +416,28 @@ const issueSchema = new mongoose.Schema({
   updatedAt: { type: String, default: () => new Date().toISOString() }
 });
 
+const feeReceiptSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  receiptNo: { type: String, required: true },
+  studentName: { type: String, required: true },
+  courseName: { type: String, default: '' },
+  amount: { type: Number, required: true, default: 0 },
+  paymentMode: { type: String, default: 'Cash' },
+  periodFrom: { type: String, default: '' },
+  periodTo: { type: String, default: '' },
+  date: { type: String, default: () => new Date().toISOString().split('T')[0] },
+  comment: { type: String, default: '' },
+  createdAt: { type: String, default: () => new Date().toISOString() },
+  updatedAt: { type: String, default: () => new Date().toISOString() },
+});
+
 const InquiryModel = mongoose.model('Inquiry', inquirySchema);
 const BlogPostModel = mongoose.model('BlogPost', blogPostSchema);
 const StudentModel = mongoose.model('Student', studentSchema);
 const AdmissionModel = mongoose.model('Admission', admissionSchema);
 const AttendanceRecordModel = mongoose.model('AttendanceRecord', attendanceRecordSchema);
 const IssueModel = mongoose.model('Issue', issueSchema);
+const FeeReceiptModel = mongoose.model('FeeReceipt', feeReceiptSchema);
 
 const INITIAL_STUDENT_SEED = [
   {
@@ -1338,6 +1354,78 @@ app.delete('/api/students/:id', requireAuth, async (req, res) => {
   }
 });
 
+// ─── FEES & RECEIPTS ENDPOINTS ────────────────────────────────────────────────
+app.get('/api/fees', requireAuth, async (req, res) => {
+  try {
+    if (mongoose.connection.readyState === 1) {
+      const receipts = await FeeReceiptModel.find().sort({ createdAt: -1, date: -1 });
+      return res.json(receipts);
+    }
+    res.json([]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/fees', requireAuth, async (req, res) => {
+  try {
+    const feeData = req.body;
+    if (!feeData.id) feeData.id = `fee-${Date.now()}`;
+    if (!feeData.createdAt) feeData.createdAt = new Date().toISOString();
+    feeData.updatedAt = new Date().toISOString();
+
+    if (mongoose.connection.readyState === 1) {
+      const saved = await FeeReceiptModel.findOneAndUpdate(
+        { id: feeData.id },
+        feeData,
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      const result = saved.toObject ? saved.toObject() : saved;
+      broadcastLiveEvent('FEE_RECEIPT_CREATED', result);
+      return res.status(201).json(result);
+    }
+    broadcastLiveEvent('FEE_RECEIPT_CREATED', feeData);
+    res.status(201).json(feeData);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/fees/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    updates.updatedAt = new Date().toISOString();
+
+    if (mongoose.connection.readyState === 1) {
+      const updated = await FeeReceiptModel.findOneAndUpdate({ id }, updates, { new: true });
+      const result = updated ? (updated.toObject ? updated.toObject() : updated) : { id, ...updates };
+      broadcastLiveEvent('FEE_RECEIPT_UPDATED', result);
+      return res.json(result);
+    }
+    broadcastLiveEvent('FEE_RECEIPT_UPDATED', { id, ...updates });
+    res.json({ id, ...updates });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/fees/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (mongoose.connection.readyState === 1) {
+      const result = await FeeReceiptModel.deleteMany(buildDeleteQuery(id));
+      console.log(`[DELETE] Deleted ${result.deletedCount} fee receipt(s) matching ${id}`);
+      broadcastLiveEvent('FEE_RECEIPT_DELETED', { id });
+    } else {
+      broadcastLiveEvent('FEE_RECEIPT_DELETED', { id });
+    }
+    res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── DEVELOPER ISSUES ENDPOINTS ──────────────────────────────────────────────
 app.get('/api/issues', requireAuth, async (req, res) => {
   try {
@@ -1665,6 +1753,12 @@ function printStartupDashboard(port) {
   console.log('  GET    /api/posts                   [PUBLIC] -> Fetch Published Blog Articles');
   console.log('  POST   /api/posts                   [AUTH]   -> Create or Update Blog Article');
   console.log('  DELETE /api/posts/:id               [AUTH]   -> Delete Blog Article');
+  console.log('');
+  console.log('  --- FEES & RECEIPTS ---');
+  console.log('  GET    /api/fees                    [AUTH]   -> Fetch All Fee Receipts');
+  console.log('  POST   /api/fees                    [AUTH]   -> Create / Save Fee Receipt');
+  console.log('  PATCH  /api/fees/:id                [AUTH]   -> Update Fee Receipt');
+  console.log('  DELETE /api/fees/:id                [AUTH]   -> Delete Fee Receipt');
   console.log('');
   console.log('  --- STUDENT MANAGEMENT ---');
   console.log('  GET    /api/students                [AUTH]   -> Fetch Enrolled Students List');
