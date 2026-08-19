@@ -1,4 +1,4 @@
-import React, { useEffect, useState, lazy, Suspense } from 'react';
+import React, { useEffect, useRef, useState, lazy, Suspense } from 'react';
 import Preloader from './components/common/Preloader';
 import Footer from './components/common/Footer';
 import CookieConsentBanner from './components/common/CookieConsentBanner';
@@ -63,6 +63,18 @@ const getRouteFromLocation = (): { page: RoutePage; slug?: string } => {
 
 export const App: React.FC = () => {
   const [currentRoute, setCurrentRoute] = useState(getRouteFromLocation);
+  const hasTrackedInitialPageView = useRef(false);
+
+  // The base Pixel snippet in index.html tracks the first load. Because this is
+  // a single-page app, track each subsequent client-side navigation as well.
+  useEffect(() => {
+    if (!hasTrackedInitialPageView.current) {
+      hasTrackedInitialPageView.current = true;
+      return;
+    }
+    const fbq = (window as Window & { fbq?: (...args: unknown[]) => void }).fbq;
+    fbq?.('track', 'PageView');
+  }, [currentRoute.page, currentRoute.slug]);
 
   useEffect(() => {
     const syncRoute = () => {

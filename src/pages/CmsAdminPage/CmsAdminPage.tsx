@@ -4823,33 +4823,67 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       {/* FULL LEAD MESSAGE MODAL */}
       {expandedLeadMessage && (
         <div className={styles.modalOverlay}>
-          <div className={styles.modalCard} style={{ maxWidth: '500px' }}>
+          <div className={`${styles.modalCard} ${styles.leadDetailModal}`} role="dialog" aria-modal="true" aria-labelledby="lead-detail-title">
             <div className={styles.modalHeader}>
-              <h2 className={styles.modalTitle}>Prospect Inquiry Details</h2>
-              <button onClick={() => setExpandedLeadMessage(null)} className={styles.closeModalBtn}>
+              <div>
+                <p className={styles.leadDetailEyebrow}>Prospect inquiry</p>
+                <h2 id="lead-detail-title" className={styles.modalTitle}>Lead details</h2>
+              </div>
+              <button onClick={() => setExpandedLeadMessage(null)} className={styles.closeModalBtn} aria-label="Close lead details">
                 ✕
               </button>
             </div>
 
-            <div className={styles.modalBody}>
-              <div>
-                <div style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)' }}>{expandedLeadMessage.name}</div>
-                <div style={{ fontSize: '0.8rem', color: '#8a99ad', marginTop: '2px' }}>
-                  {expandedLeadMessage.email} • {expandedLeadMessage.phone}
+            <div className={`${styles.modalBody} ${styles.leadDetailBody}`}>
+              <section className={styles.leadProfile} aria-label="Prospect contact information">
+                {(() => {
+                  const avatar = getAvatarDetails(expandedLeadMessage.name);
+                  return <div className={styles.leadAvatar} style={{ background: avatar.bg, borderColor: avatar.border }}>{avatar.initials}</div>;
+                })()}
+                <div className={styles.leadProfileInfo}>
+                  <h3>{expandedLeadMessage.name}</h3>
+                  <span className={`${styles.badge} ${styles[`badge${expandedLeadMessage.status.charAt(0)}${expandedLeadMessage.status.slice(1).toLowerCase()}` as keyof typeof styles] || ''}`}>
+                    <span className={styles.statusDot} /> {expandedLeadMessage.status.toLowerCase()}
+                  </span>
                 </div>
-              </div>
+              </section>
 
-              <div style={{ background: 'var(--bg-surface)', padding: '0.85rem', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', marginBottom: '0.35rem' }}>
-                  INTERESTED PROGRAM: {expandedLeadMessage.courseInterest}
-                </div>
-                <div style={{ fontSize: '0.85rem', color: '#f1f5f9', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
-                  "{expandedLeadMessage.message}"
-                </div>
-              </div>
+              <section className={styles.leadContactGrid} aria-label="Contact methods">
+                <a className={styles.leadContactCard} href={safeMailto(expandedLeadMessage.email)}>
+                  <span className={styles.leadContactLabel}>Email</span>
+                  <span className={styles.leadContactValue}>{expandedLeadMessage.email || 'Not provided'}</span>
+                </a>
+                <a className={styles.leadContactCard} href={expandedLeadMessage.phone ? `tel:${expandedLeadMessage.phone.replace(/\D/g, '')}` : '#'}>
+                  <span className={styles.leadContactLabel}>Phone</span>
+                  <span className={styles.leadContactValue}>{expandedLeadMessage.phone || 'Not provided'}</span>
+                </a>
+              </section>
+
+              <section className={styles.leadProgramCard}>
+                <span className={styles.leadSectionLabel}>Interested program</span>
+                <strong>{expandedLeadMessage.courseInterest || 'Not specified'}</strong>
+                <span className={styles.leadSubmittedAt}>
+                  Received {new Date(expandedLeadMessage.submittedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                </span>
+              </section>
+
+              <section className={styles.leadMessageCard}>
+                <span className={styles.leadSectionLabel}>Message</span>
+                <p>{expandedLeadMessage.message?.trim() || 'No message was included with this inquiry.'}</p>
+              </section>
             </div>
 
             <div className={styles.modalFooter}>
+              {expandedLeadMessage.phone && (
+                <a
+                  href={safeWhatsAppUrl(expandedLeadMessage.phone, `Hello ${expandedLeadMessage.name}, this is Soundabode Studios regarding your inquiry about ${expandedLeadMessage.courseInterest || 'our courses'}.`)}
+                  className={styles.btnPrimary}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  WhatsApp prospect
+                </a>
+              )}
               <button onClick={() => setExpandedLeadMessage(null)} className={styles.btnSecondary}>
                 Close
               </button>

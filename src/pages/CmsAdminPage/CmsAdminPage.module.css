@@ -824,6 +824,133 @@
   gap: 0.65rem;
 }
 
+/* PROSPECT INQUIRY DETAIL */
+.leadDetailModal {
+  max-width: 620px;
+}
+
+.leadDetailEyebrow {
+  margin: 0 0 0.2rem;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.leadDetailBody {
+  gap: 1.25rem;
+}
+
+.leadProfile {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.leadAvatar {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.leadProfileInfo {
+  min-width: 0;
+}
+
+.leadProfileInfo h3 {
+  margin: 0 0 0.4rem;
+  color: var(--text-primary);
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.leadContactGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.leadContactCard {
+  min-width: 0;
+  padding: 0.75rem 0.8rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-btn);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.leadContactCard:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-medium);
+}
+
+.leadContactLabel, .leadSectionLabel {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.leadContactValue {
+  display: block;
+  overflow: hidden;
+  margin-top: 0.3rem;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leadProgramCard, .leadMessageCard {
+  padding: 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-btn);
+}
+
+.leadProgramCard {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.38rem;
+  background: linear-gradient(135deg, rgba(225, 29, 72, 0.1), var(--bg-surface));
+}
+
+.leadProgramCard strong {
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+
+.leadSubmittedAt {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.leadMessageCard {
+  background: var(--bg-surface);
+}
+
+.leadMessageCard p {
+  margin: 0.55rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.87rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 /* SETTINGS CONSTRAINED CONTAINER */
 .settingsContainer {
   max-width: 800px;
@@ -1371,6 +1498,10 @@
   .modalBody {
     padding: 1rem;
     gap: 1rem;
+  }
+
+  .leadContactGrid {
+    grid-template-columns: 1fr;
   }
 
   .formRow {
