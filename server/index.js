@@ -726,7 +726,7 @@ async function autoSeedIfEmpty() {
 
 // AUTH ENDPOINTS
 const PRESET_USERS = {
-  'admin@soundabode.com': { name: 'Soundabode Admin', role: 'admin', passEnv: 'ADMIN_PASSCODE' },
+  'abhinav@soundabode.com': { name: 'Soundabode Admin', role: 'admin', passEnv: 'ADMIN_PASSCODE' },
   'ashu@soundabode.com': { name: 'Ashu', role: 'teacher', passEnv: 'ASHU_PASSCODE' },
   'vaibhav@soundabode.com': { name: 'Vaibhav', role: 'teacher', passEnv: 'VAIBHAV_PASSCODE' },
 };
@@ -1702,7 +1702,7 @@ function printStartupDashboard(port) {
   console.log(`  Google Sheets    : ${sheetsConfigured ? '[OK] Connected Webhook Target' : '[WARN] Not Configured or Invalid URL'}`);
 
   console.log('\n[PRESET USER ACCOUNTS & AUTHENTICATION]');
-  console.log(`  1. admin@soundabode.com   [Role: admin]   Passcode ENV: ${adminPassSet ? '[OK] ADMIN_PASSCODE set' : '[WARN] Default / Missing'}`);
+  console.log(`  1. abhinav@soundabode.com [Role: admin]   Passcode ENV: ${adminPassSet ? '[OK] ADMIN_PASSCODE set' : '[WARN] Default / Missing'}`);
   console.log(`  2. ashu@soundabode.com    [Role: teacher] Passcode ENV: ${ashuPassSet ? '[OK] ASHU_PASSCODE set' : '[WARN] Default / Missing'}`);
   console.log(`  3. vaibhav@soundabode.com [Role: teacher] Passcode ENV: ${vaibhavPassSet ? '[OK] VAIBHAV_PASSCODE set' : '[WARN] Default / Missing'}`);
 

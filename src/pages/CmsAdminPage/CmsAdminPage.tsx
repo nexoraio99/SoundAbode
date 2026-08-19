@@ -1061,7 +1061,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       ? `${formatTime(groupCustomTimeStart)} - ${formatTime(groupCustomTimeEnd)}`
       : '11:00 AM - 01:00 PM';
 
-    const markedByEmail = currentUser?.email || 'admin@soundabode.com';
+    const markedByEmail = currentUser?.email || 'abhinav@soundabode.com';
     const markedByName = currentUser?.name || 'Soundabode Admin';
     const markedByRole = currentUser?.role === 'teacher' ? 'teacher' : 'admin';
 
@@ -1106,7 +1106,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       ? `${formatTime(customTimeStart)} - ${formatTime(customTimeEnd)}`
       : '11:00 AM - 01:00 PM';
 
-    const markerEmail = currentUser?.email || (isTeacher ? 'teacher@soundabode.com' : 'admin@soundabode.com');
+    const markerEmail = currentUser?.email || (isTeacher ? 'teacher@soundabode.com' : 'abhinav@soundabode.com');
     const markerName = currentUser?.name || (isTeacher ? 'Teacher' : 'Soundabode Admin');
     const markerRole = isTeacher ? 'teacher' : 'admin';
 
