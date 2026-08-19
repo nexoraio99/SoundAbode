@@ -26,6 +26,7 @@ type RoutePage =
   | 'home'
   | 'contact'
   | 'blog'
+  | 'blog-article'
   | 'courses'
   | 'course-detail'
   | 'about'
@@ -48,6 +49,7 @@ const getRouteFromLocation = (): { page: RoutePage; slug?: string } => {
   if (path === '/admission-emp' || path === '/admission/emp' || path === '/emp-admission') return { page: 'admission-emp' };
   if (path === '/about' || hash === '#about') return { page: 'about' };
   if (path === '/contact' || hash === '#contact') return { page: 'contact' };
+  if (path.startsWith('/blog/')) return { page: 'blog-article', slug: path.split('/').pop() || '' };
   if (path === '/blog' || hash === '#blog') return { page: 'blog' };
   if (path === '/terms' || path === '/terms-and-conditions' || hash === '#terms') return { page: 'terms' };
   if (path === '/privacy' || path === '/privacy-policy' || hash === '#privacy') return { page: 'privacy' };
@@ -138,6 +140,13 @@ export const App: React.FC = () => {
           window.history.pushState({}, '', '/contact');
           window.dispatchEvent(new Event('popstate'));
           setCurrentRoute({ page: 'contact' });
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else if (lowerHref.startsWith('/blog/')) {
+          e.preventDefault();
+          const slug = href.split('/').pop() || '';
+          window.history.pushState({}, '', href);
+          window.dispatchEvent(new Event('popstate'));
+          setCurrentRoute({ page: 'blog-article', slug });
           window.scrollTo({ top: 0, behavior: 'smooth' });
         } else if (href === '/blog' || href === '#blog') {
           e.preventDefault();
@@ -232,8 +241,8 @@ export const App: React.FC = () => {
           <AboutPage onNavigateHome={() => navigateTo('home')} />
         ) : currentRoute.page === 'contact' ? (
           <ContactPage onNavigateHome={() => navigateTo('home')} />
-        ) : currentRoute.page === 'blog' ? (
-          <BlogPage onNavigateHome={() => navigateTo('home')} />
+        ) : currentRoute.page === 'blog' || currentRoute.page === 'blog-article' ? (
+          <BlogPage onNavigateHome={() => navigateTo('home')} articleSlug={currentRoute.page === 'blog-article' ? currentRoute.slug : undefined} />
         ) : currentRoute.page === 'terms' ||
           currentRoute.page === 'privacy' ||
           currentRoute.page === 'refund-policy' ||

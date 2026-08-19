@@ -547,6 +547,21 @@ export class BlogService {
     return this.getStoredPosts();
   }
 
+  /** Fetch the published post catalogue so readers on any device see admin posts. */
+  public static async fetchRemotePosts(): Promise<BlogPost[]> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/posts`);
+      if (!response.ok) return this.getStoredPosts();
+      const remotePosts = await response.json();
+      if (!Array.isArray(remotePosts) || remotePosts.length === 0) return this.getStoredPosts();
+      const posts = remotePosts.map((post) => this.normalizePost(post));
+      this.savePosts(posts);
+      return posts;
+    } catch {
+      return this.getStoredPosts();
+    }
+  }
+
   public static getFeaturedPosts(): BlogPost[] {
     const posts = this.getStoredPosts();
     return posts.filter((post) => post.isFeatured);

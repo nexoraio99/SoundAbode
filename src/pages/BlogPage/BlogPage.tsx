@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import styles from './BlogPage.module.css';
 import Navbar from '../../components/common/Navbar';
 import Footer from '../../components/common/Footer';
@@ -9,33 +9,48 @@ import { safeImageUrl, sanitizeHtml } from '../../utils/security';
 
 interface BlogPageProps {
   onNavigateHome?: () => void;
+  articleSlug?: string;
 }
 
-export const BlogPage: React.FC<BlogPageProps> = ({ onNavigateHome }) => {
+export const BlogPage: React.FC<BlogPageProps> = ({ onNavigateHome, articleSlug }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('ALL');
-  const [selectedPost, setSelectedPost] = useState<BlogPost | null>(null);
+  const [posts, setPosts] = useState<BlogPost[]>(() => BlogService.getAllPosts());
+  const [isLoadingPosts, setIsLoadingPosts] = useState(true);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const [newsletterEmail, setNewsletterEmail] = useState('');
   const [newsletterSubmitted, setNewsletterSubmitted] = useState(false);
 
 
+  useEffect(() => {
+    BlogService.fetchRemotePosts()
+      .then(setPosts)
+      .finally(() => setIsLoadingPosts(false));
+  }, []);
+
+  const selectedPost = articleSlug ? posts.find((post) => post.slug === articleSlug) || null : null;
+
   // Filtered posts based on category and search query
   const filteredPosts = useMemo(() => {
-    return BlogService.searchPosts(searchQuery, activeCategory);
-  }, [searchQuery, activeCategory]);
+    return posts.filter((post) => {
+      const matchesCategory = !activeCategory || activeCategory === 'ALL' || post.category === activeCategory;
+      const query = searchQuery.trim().toLowerCase();
+      const matchesSearch = !query || post.title.toLowerCase().includes(query) || post.excerpt.toLowerCase().includes(query) || Boolean(post.tags?.some((tag) => tag.toLowerCase().includes(query)));
+      return matchesCategory && matchesSearch;
+    });
+  }, [posts, searchQuery, activeCategory]);
 
   const featuredPosts = useMemo(() => {
-    return BlogService.getFeaturedPosts();
-  }, []);
+    return posts.filter((post) => post.isFeatured);
+  }, [posts]);
 
   const heroPost = useMemo(() => {
     return featuredPosts[0] || filteredPosts[0];
   }, [featuredPosts, filteredPosts]);
 
   const latestSidebarPosts = useMemo(() => {
-    return BlogService.getLatestPosts(4);
-  }, []);
+    return posts.slice(0, 4);
+  }, [posts]);
 
   const categories = ['ALL', 'PRODUCTION', 'DJING', 'GENERAL', 'ACADEMY NEWS', 'GEAR & TECH'];
 
@@ -105,6 +120,52 @@ export const BlogPage: React.FC<BlogPageProps> = ({ onNavigateHome }) => {
           url: 'https://soundabode.com',
         },
       };
+
+  if (articleSlug) {
+    return (
+      <div className={styles.pageContainer}>
+        <SEO
+          title={selectedPost ? `${selectedPost.metaTitle || selectedPost.title} | Soundabode Blog` : 'Article not found | Soundabode Blog'}
+          description={selectedPost?.metaDescription || selectedPost?.excerpt || 'The requested Soundabode blog article is unavailable.'}
+          keywords={selectedPost?.focusKeyword || 'Soundabode Blog'}
+          canonical={selectedPost ? selectedPost.canonicalUrl || `https://soundabode.com/blog/${selectedPost.slug}` : `https://soundabode.com/blog/${articleSlug}`}
+          ogImage={selectedPost?.ogImage || selectedPost?.coverImage}
+          ogType="article"
+          noindex={!selectedPost || selectedPost.noIndex || false}
+          schema={blogSchema}
+        />
+        <Navbar activePage="blog" onNavigate={(page) => { if (page !== 'blog' && onNavigateHome) onNavigateHome(); }} />
+        <main className={styles.articlePage}>
+          {isLoadingPosts && !selectedPost ? (
+            <p className={styles.articleLoading}>Loading article…</p>
+          ) : selectedPost ? (
+            <article className={styles.articleReader}>
+              <a href="/blog" className={styles.backToBlog}>← All articles</a>
+              <span className={styles.categoryLabel}>{selectedPost.category}</span>
+              <h1 className={styles.articlePageTitle}>{selectedPost.title}</h1>
+              <p className={styles.articlePageExcerpt}>{selectedPost.excerpt}</p>
+              <div className={styles.modalMetaLine}>
+                <span>By {selectedPost.author?.name || 'Soundabode Editorial'}</span>
+                <span>•</span>
+                <span>{selectedPost.publishedAt}</span>
+                <span>•</span>
+                <span>{selectedPost.readTimeMinutes} min read</span>
+              </div>
+              <img className={styles.articleHeroImage} src={safeImageUrl(selectedPost.coverImage)} alt={selectedPost.title} />
+              <div className={styles.articleHTML} dangerouslySetInnerHTML={{ __html: sanitizeHtml(selectedPost.content || '') }} />
+            </article>
+          ) : (
+            <section className={styles.articleNotFound}>
+              <h1>Article not found</h1>
+              <p>This article may have been removed or the link is incorrect.</p>
+              <a href="/blog" className={styles.readLink}>Browse all articles →</a>
+            </section>
+          )}
+        </main>
+        <Footer />
+      </div>
+    );
+  }
 
   return (
     <div className={styles.pageContainer}>
@@ -187,7 +248,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({ onNavigateHome }) => {
         {/* FEATURED EDITORIAL HERO STORY */}
         {heroPost && !searchQuery && activeCategory === 'ALL' && (
           <section className={styles.featuredSection}>
-            <div className={styles.featuredGrid} onClick={() => setSelectedPost(heroPost)}>
+            <a className={styles.featuredGrid} href={`/blog/${encodeURIComponent(heroPost.slug)}`}>
               <div className={styles.featuredImgCol}>
                 <img
                   src={safeImageUrl(heroPost.coverImage)}
@@ -216,7 +277,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({ onNavigateHome }) => {
                   <span className={styles.arrow}>&rarr;</span>
                 </div>
               </div>
-            </div>
+            </a>
           </section>
         )}
 
@@ -257,11 +318,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({ onNavigateHome }) => {
             ) : (
               <div className={styles.feedGrid}>
                 {filteredPosts.map((post) => (
-                  <article
-                    key={post.id}
-                    className={styles.card}
-                    onClick={() => setSelectedPost(post)}
-                  >
+                  <a key={post.id} className={styles.card} href={`/blog/${encodeURIComponent(post.slug)}`}>
                     <div className={styles.cardMedia}>
                       <img
                         src={safeImageUrl(post.coverImage)}
@@ -281,7 +338,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({ onNavigateHome }) => {
                         <span>{post.readTimeMinutes} min read</span>
                       </div>
                     </div>
-                  </article>
+                  </a>
                 ))}
               </div>
             )}
@@ -294,17 +351,13 @@ export const BlogPage: React.FC<BlogPageProps> = ({ onNavigateHome }) => {
               <h4 className={styles.sidebarHeading}>Trending Guides</h4>
               <div className={styles.trendingList}>
                 {latestSidebarPosts.map((post, index) => (
-                  <div
-                    key={post.id}
-                    className={styles.trendingItem}
-                    onClick={() => setSelectedPost(post)}
-                  >
+                  <a key={post.id} className={styles.trendingItem} href={`/blog/${encodeURIComponent(post.slug)}`}>
                     <span className={styles.trendingNum}>0{index + 1}</span>
                     <div className={styles.trendingInfo}>
                       <span className={styles.trendingDate}>{post.publishedAt}</span>
                       <h5 className={styles.trendingTitle}>{post.title}</h5>
                     </div>
-                  </div>
+                  </a>
                 ))}
               </div>
             </div>
@@ -367,42 +420,6 @@ export const BlogPage: React.FC<BlogPageProps> = ({ onNavigateHome }) => {
           </div>
         </section>
       </div>
-
-      {/* Reader Modal */}
-      {selectedPost && (
-        <div className={styles.modalOverlay} onClick={() => setSelectedPost(null)}>
-          <div className={styles.modalBody} onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              className={styles.closeBtn}
-              onClick={() => setSelectedPost(null)}
-              aria-label="Close article"
-            >
-              &times;
-            </button>
-            <div className={styles.modalHeaderImg}>
-              <img src={safeImageUrl(selectedPost.coverImage)} alt={selectedPost.title} />
-            </div>
-            <div className={styles.modalMainContent}>
-              <span className={styles.categoryLabel}>{selectedPost.category}</span>
-              <h1 className={styles.modalPostTitle}>{selectedPost.title}</h1>
-              <div className={styles.modalMetaLine}>
-                <span>By {selectedPost.author?.name || 'Soundabode Editorial'}</span>
-                <span>&bull;</span>
-                <span>{selectedPost.publishedAt}</span>
-                <span>&bull;</span>
-                <span>{selectedPost.readTimeMinutes} min read</span>
-              </div>
-              <div
-                className={styles.articleHTML}
-                dangerouslySetInnerHTML={{
-                  __html: sanitizeHtml(selectedPost.content || '')
-                }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
 
       <Footer />
     </div>
