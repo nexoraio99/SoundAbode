@@ -6,16 +6,32 @@
 
     <script>
       // Auto-recover from stale JS module cache errors after new deployments
-      window.addEventListener('error', function (e) {
-        if (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
-          const key = 'soundabode_reload_ts';
-          const last = parseInt(sessionStorage.getItem(key) || '0', 10);
-          if (Date.now() - last > 5000) {
+      (function() {
+        function triggerReload() {
+          var key = 'soundabode_reload_ts';
+          var last = parseInt(sessionStorage.getItem(key) || '0', 10);
+          if (Date.now() - last > 3000) {
             sessionStorage.setItem(key, Date.now().toString());
-            window.location.reload();
+            var url = new URL(window.location.href);
+            url.searchParams.set('_v', Date.now().toString());
+            window.location.replace(url.toString());
           }
         }
-      }, true);
+        window.addEventListener('error', function (e) {
+          if (
+            (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) ||
+            (e.message && (e.message.indexOf('module script') !== -1 || e.message.indexOf('dynamically imported module') !== -1 || e.message.indexOf('MIME type') !== -1))
+          ) {
+            triggerReload();
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function (e) {
+          var reason = (e && e.reason && (e.reason.message || String(e.reason))) || '';
+          if (reason.indexOf('dynamically imported module') !== -1 || reason.indexOf('module script') !== -1 || reason.indexOf('text/html') !== -1) {
+            triggerReload();
+          }
+        });
+      })();
     </script>
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
