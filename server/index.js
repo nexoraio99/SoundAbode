@@ -400,6 +400,19 @@ const attendanceRecordSchema = new mongoose.Schema({
   updatedAt: { type: String, default: () => new Date().toISOString() },
 });
 
+const feeReceiptSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  receiptNo: { type: String, required: true },
+  studentName: { type: String, required: true },
+  courseName: { type: String, default: '' },
+  amount: { type: Number, required: true, min: 0 },
+  paymentMode: { type: String, default: 'Cash' },
+  periodFrom: { type: String, default: '' },
+  periodTo: { type: String, default: '' },
+  date: { type: String, required: true },
+  comment: { type: String, default: '' },
+}, { timestamps: true });
+
 const issueSchema = new mongoose.Schema({
   id: { type: String, required: true },
   title: { type: String, required: true },
@@ -421,6 +434,7 @@ const BlogPostModel = mongoose.model('BlogPost', blogPostSchema);
 const StudentModel = mongoose.model('Student', studentSchema);
 const AdmissionModel = mongoose.model('Admission', admissionSchema);
 const AttendanceRecordModel = mongoose.model('AttendanceRecord', attendanceRecordSchema);
+const FeeReceiptModel = mongoose.model('FeeReceipt', feeReceiptSchema);
 const IssueModel = mongoose.model('Issue', issueSchema);
 
 const INITIAL_STUDENT_SEED = [
@@ -1158,6 +1172,71 @@ app.delete('/api/admissions/:id', requireAuth, async (req, res) => {
       broadcastLiveEvent('ADMISSION_DELETED', { id });
     }
     res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── FEE RECEIPTS ──────────────────────────────────────────────────────────────
+// MongoDB is the shared source of truth, so receipts created on one device are
+// visible to every administrator after the next refresh.
+app.get('/api/fees', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: 'MongoDB is unavailable.' });
+    }
+    const receipts = await FeeReceiptModel.find().sort({ date: -1, createdAt: -1 });
+    res.json(receipts);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/fees', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: 'MongoDB is unavailable. Receipt was not saved.' });
+    }
+    const receiptData = req.body || {};
+    if (!receiptData.id) receiptData.id = `fee-${Date.now()}`;
+    const receipt = await FeeReceiptModel.findOneAndUpdate(
+      { id: receiptData.id },
+      receiptData,
+      { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+    );
+    broadcastLiveEvent('FEE_RECEIPT_SAVED', receipt);
+    res.status(201).json(receipt);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/fees/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: 'MongoDB is unavailable. Receipt was not updated.' });
+    }
+    const updates = { ...(req.body || {}) };
+    delete updates.id;
+    const receipt = await FeeReceiptModel.findOneAndUpdate(
+      buildDeleteQuery(req.params.id), updates, { new: true, runValidators: true }
+    );
+    if (!receipt) return res.status(404).json({ error: 'Receipt not found.' });
+    broadcastLiveEvent('FEE_RECEIPT_SAVED', receipt);
+    res.json(receipt);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/fees/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: 'MongoDB is unavailable. Receipt was not deleted.' });
+    }
+    const result = await FeeReceiptModel.deleteMany(buildDeleteQuery(req.params.id));
+    broadcastLiveEvent('FEE_RECEIPT_DELETED', { id: req.params.id });
+    res.json({ success: true, deletedCount: result.deletedCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
