@@ -13,7 +13,6 @@ import { DJ_COURSES, EMP_COURSES, DJ_DISCLAIMER, EMP_DISCLAIMER } from '../../co
 import { escapeHtml, safeImageUrl, safeWhatsAppUrl, sanitizePrintHtml } from '../../utils/security';
 import { IssueService, DeveloperIssue, DEVELOPER_EMAIL, SENDER_EMAIL } from '../../services/issueService';
 import { ReminderService } from '../../services/reminderService';
-import { FeeService, FeeReceipt } from '../../services/feeService';
 
 interface CmsAdminPageProps {
   onNavigate?: (page: string) => void;
@@ -66,7 +65,27 @@ const numberToWords = (num: number): string => {
   return toWords(Math.round(num));
 };
 
+interface FeeReceipt {
+  id: string;
+  receiptNo: string;
+  studentName: string;
+  courseName: string;
+  amount: number;
+  paymentMode: string;
+  periodFrom: string;
+  periodTo: string;
+  date: string;
+  comment: string;
+}
 
+const FEES_STORAGE_KEY = 'soundabode_cms_fees';
+
+const loadFees = (): FeeReceipt[] => {
+  try { return JSON.parse(localStorage.getItem(FEES_STORAGE_KEY) || '[]'); } catch { return []; }
+};
+const saveFees = (receipts: FeeReceipt[]) => {
+  localStorage.setItem(FEES_STORAGE_KEY, JSON.stringify(receipts));
+};
 
 // Helper: Deterministic avatar color and initials from name
 const getAvatarDetails = (name: string, customAvatarUrl?: string) => {
@@ -254,7 +273,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   });
 
   // FEES STATE
-  const [fees, setFees] = useState<FeeReceipt[]>(() => FeeService.getAllFees());
+  const [fees, setFees] = useState<FeeReceipt[]>(loadFees);
   const [isFeeModalOpen, setIsFeeModalOpen] = useState(false);
   const [editingFeeId, setEditingFeeId] = useState<string | null>(null);
   const [feeSearch, setFeeSearch] = useState('');
@@ -325,11 +344,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       setAdmissions(updatedAdmissions);
     });
 
-    // Real-time Fee Receipts subscription
-    const unsubscribeFees = FeeService.subscribe((updatedFees) => {
-      setFees(updatedFees);
-    });
-
     // Periodic polling fallback to ensure zero-lag synchronization (every 5s)
     const pollInterval = setInterval(() => {
       const latestInquiries = InquiryService.getAllInquiries();
@@ -348,14 +362,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         return prev;
       });
 
-      const latestFees = FeeService.getAllFees();
-      setFees((prev) => {
-        if (JSON.stringify(prev) !== JSON.stringify(latestFees)) {
-          return latestFees;
-        }
-        return prev;
-      });
-
       // Keep attendance synced with remote MongoDB
       AttendanceService.fetchAndSyncFromRemote();
     }, 5000);
@@ -367,7 +373,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     return () => {
       unsubscribeInquiries();
       unsubscribeAdmissions();
-      unsubscribeFees();
       unsubscribeAttendance();
       clearInterval(pollInterval);
       clearInterval(healthInterval);
@@ -390,7 +395,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     setInquiries(InquiryService.getAllInquiries());
     setStudents(AttendanceService.getAllStudents());
     setAdmissions(AdmissionService.getAllAdmissions());
-    setFees(FeeService.getAllFees());
     // Trigger async remote sync — when it completes, saveAttendance fires notifyChange which bumps attendanceVersion via subscription
     AttendanceService.fetchAndSyncFromRemote();
     IssueService.fetchIssues().then((issues) => setDeveloperIssues(issues));
@@ -1190,11 +1194,19 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   };
 
   // FEES HANDLERS
+  const getNextReceiptNo = (existingFees: FeeReceipt[]): string => {
+    if (existingFees.length === 0) return '001';
+    const nums = existingFees.map((f) => parseInt(f.receiptNo, 10)).filter(Boolean);
+    const max = nums.length > 0 ? Math.max(...nums) : 0;
+    return String(max + 1).padStart(3, '0');
+  };
+
   const handleOpenNewFeeModal = () => {
     setEditingFeeId(null);
+    const currentFees = loadFees();
     setFeeFormData({
       ...defaultFeeForm(),
-      receiptNo: FeeService.getNextReceiptNo(fees),
+      receiptNo: getNextReceiptNo(currentFees),
     });
     setIsFeeModalOpen(true);
   };
@@ -1215,25 +1227,19 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     setIsFeeModalOpen(true);
   };
 
-  const handleSaveFee = async (e: React.FormEvent) => {
+  const handleSaveFee = (e: React.FormEvent) => {
     e.preventDefault();
     const amt = parseFloat(feeFormData.amount) || 0;
-    const finalReceiptNo = feeFormData.receiptNo.trim() || FeeService.getNextReceiptNo(fees);
-    
+    const currentFees = loadFees();
+    const finalReceiptNo = feeFormData.receiptNo.trim() || getNextReceiptNo(currentFees);
     if (editingFeeId) {
-      const updatedReceipt: FeeReceipt = {
-        id: editingFeeId,
-        receiptNo: finalReceiptNo,
-        studentName: feeFormData.studentName,
-        courseName: feeFormData.courseName,
-        amount: amt,
-        paymentMode: feeFormData.paymentMode,
-        periodFrom: feeFormData.periodFrom,
-        periodTo: feeFormData.periodTo,
-        date: feeFormData.date,
-        comment: feeFormData.comment,
-      };
-      await FeeService.saveFee(updatedReceipt);
+      const updated = currentFees.map((r) =>
+        r.id === editingFeeId
+          ? { ...r, ...feeFormData, receiptNo: finalReceiptNo, amount: amt }
+          : r
+      );
+      saveFees(updated);
+      setFees(updated);
     } else {
       const newReceipt: FeeReceipt = {
         id: `fee-${Date.now()}`,
@@ -1247,16 +1253,18 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         date: feeFormData.date,
         comment: feeFormData.comment,
       };
-      await FeeService.saveFee(newReceipt);
+      const updated = [newReceipt, ...currentFees];
+      saveFees(updated);
+      setFees(updated);
     }
-    setFees(FeeService.getAllFees());
     setIsFeeModalOpen(false);
   };
 
-  const handleDeleteFee = async (id: string, receiptNo: string) => {
+  const handleDeleteFee = (id: string, receiptNo: string) => {
     if (window.confirm(`Delete Receipt #${receiptNo}? This cannot be undone.`)) {
-      await FeeService.deleteFee(id);
-      setFees(FeeService.getAllFees());
+      const updated = fees.filter((r) => r.id !== id);
+      saveFees(updated);
+      setFees(updated);
     }
   };
 

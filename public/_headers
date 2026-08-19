@@ -7,15 +7,14 @@
   Permissions-Policy: camera=(), microphone=(), geolocation=()
   Content-Security-Policy: default-src 'self'; connect-src 'self' ws: wss: https: http: https://*.onrender.com https://soundabode-server.onrender.com https://soundabodev2-server.onrender.com https://cdn.socket.io https://soundabode.com https://www.soundabode.com https://script.google.com https://script.googleusercontent.com https://raw.githubusercontent.com https://*.githubusercontent.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com https://*.clarity.ms https://cloudflareinsights.com https://static.cloudflareinsights.com https://*.facebook.com https://*.facebook.net https://www.google.com https://www.googleadservices.com; media-src 'self' data: blob: https: https://raw.githubusercontent.com https://*.githubusercontent.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https: https://images.unsplash.com https://images.pexels.com https://raw.githubusercontent.com; frame-src 'self' https:;
 
-/
-  Cache-Control: no-cache, no-store, must-revalidate
 
-/index.html
+
+
+# Always revalidate HTML document to prevent stale script module MIME type errors
+/*.html
   Cache-Control: no-cache, no-store, must-revalidate
 
 # Cache static hashed assets permanently
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
-
-
 
