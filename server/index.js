@@ -726,7 +726,7 @@ async function autoSeedIfEmpty() {
 
 // AUTH ENDPOINTS
 const PRESET_USERS = {
-  'abhinav@soundabode.com': { name: 'Soundabode Admin', role: 'admin', passEnv: 'ADMIN_PASSCODE' },
+  'abhinav@soundabode.com': { name: 'Abhinav', role: 'admin', passEnv: 'ADMIN_PASSCODE' },
   'ashu@soundabode.com': { name: 'Ashu', role: 'teacher', passEnv: 'ASHU_PASSCODE' },
   'vaibhav@soundabode.com': { name: 'Vaibhav', role: 'teacher', passEnv: 'VAIBHAV_PASSCODE' },
 };

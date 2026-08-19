@@ -1062,7 +1062,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       : '11:00 AM - 01:00 PM';
 
     const markedByEmail = currentUser?.email || 'abhinav@soundabode.com';
-    const markedByName = currentUser?.name || 'Soundabode Admin';
+    const markedByName = currentUser?.name || 'Abhinav';
     const markedByRole = currentUser?.role === 'teacher' ? 'teacher' : 'admin';
 
     AttendanceService.markBatchGroupAttendance({
@@ -1107,7 +1107,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       : '11:00 AM - 01:00 PM';
 
     const markerEmail = currentUser?.email || (isTeacher ? 'teacher@soundabode.com' : 'abhinav@soundabode.com');
-    const markerName = currentUser?.name || (isTeacher ? 'Teacher' : 'Soundabode Admin');
+    const markerName = currentUser?.name || (isTeacher ? 'Teacher' : 'Abhinav');
     const markerRole = isTeacher ? 'teacher' : 'admin';
 
     AttendanceService.markAttendance({
