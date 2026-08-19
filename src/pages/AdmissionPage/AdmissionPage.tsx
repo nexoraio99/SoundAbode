@@ -42,14 +42,53 @@ export const AdmissionPage: React.FC<AdmissionPageProps> = ({ formType, onNaviga
       setErrorMessage('Please select an image file (JPG, PNG, WEBP) for the photo.');
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setErrorMessage('Photo file size should be less than 5MB.');
+    if (file.size > 10 * 1024 * 1024) {
+      setErrorMessage('Photo file size should be less than 10MB.');
       return;
     }
+
     const reader = new FileReader();
     reader.onload = (evt) => {
-      const res = evt.target?.result as string;
-      if (res) setPhotoUrl(res);
+      const rawDataUrl = evt.target?.result as string;
+      if (!rawDataUrl) return;
+
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 600;
+        const MAX_HEIGHT = 800;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height = Math.round((height * MAX_WIDTH) / width);
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width = Math.round((width * MAX_HEIGHT) / height);
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/jpeg', 0.88);
+          setPhotoUrl(compressed);
+        } else {
+          setPhotoUrl(rawDataUrl);
+        }
+      };
+      img.onerror = () => {
+        setPhotoUrl(rawDataUrl);
+      };
+      img.src = rawDataUrl;
     };
     reader.readAsDataURL(file);
   };

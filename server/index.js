@@ -139,8 +139,52 @@ app.use(
   })
 );
 
-// Body size limit — prevents JSON body DoS attacks
-app.use(express.json({ limit: '1mb' }));
+// Body size limit — allows photo uploads (compressed passport photos ~50-200KB, max limit 15MB)
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ limit: '15mb', extended: true }));
+
+// ─── Real-Time Server-Sent Events (SSE) Live Stream ───────────────────────────
+const sseClients = new Set();
+
+function broadcastLiveEvent(type, data) {
+  const message = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(message);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
+// Live SSE endpoint for CMS Admin real-time updates
+app.get('/api/live-stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable proxy buffering (Nginx/Render)
+  res.flushHeaders?.();
+
+  // Send initial ping to confirm connection
+  res.write(`event: connected\ndata: ${JSON.stringify({ timestamp: new Date().toISOString() })}\n\n`);
+
+  sseClients.add(res);
+
+  // Keep-alive heartbeat every 20s
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': heartbeat\n\n');
+    } catch {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
+    }
+  }, 20000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    sseClients.delete(res);
+  });
+});
 
 // Rate limit on the auth endpoint — max 10 attempts per IP per 15 minutes
 const authLimiter = rateLimit
@@ -330,8 +374,10 @@ const admissionSchema = new mongoose.Schema({
   courseOpted: { type: String, default: '' },
   tenure: { type: String, default: '' },
   fee: { type: String, default: '' },
+  paymentOption: { type: String, enum: ['Full Payment', '2 Easy Instalments', ''], default: '' },
   agreedToTerms: { type: Boolean, default: true },
   signatureName: { type: String, default: '' },
+  photoUrl: { type: String, default: '' },
   submittedAt: { type: String, default: () => new Date().toISOString() },
   status: { type: String, enum: ['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'], default: 'NEW' },
 });
@@ -1042,15 +1088,28 @@ app.post('/api/admissions', async (req, res) => {
       source: `Official Admission Form (${admissionData.formType || 'DJ/EMP'})`,
     });
 
+    // Attempt MongoDB save
     if (mongoose.connection.readyState === 1) {
-      const admission = await AdmissionModel.findOneAndUpdate(
-        { id: admissionData.id },
-        admissionData,
-        { upsert: true, new: true }
-      );
-      return res.status(201).json(admission);
+      try {
+        const admission = await AdmissionModel.findOneAndUpdate(
+          { id: admissionData.id },
+          admissionData,
+          { upsert: true, new: true }
+        );
+        const result = { ...admission.toObject(), mongoSaved: true };
+        broadcastLiveEvent('ADMISSION_CREATED', result);
+        return res.status(201).json(result);
+      } catch (dbErr) {
+        console.error('[ERROR] [Admissions] MongoDB save failed for', admissionData.id, ':', dbErr.message);
+        broadcastLiveEvent('ADMISSION_CREATED', { ...admissionData, mongoSaved: false });
+        return res.status(201).json({ ...admissionData, mongoSaved: false, dbError: dbErr.message });
+      }
     }
-    res.status(201).json(admissionData);
+
+    // MongoDB is not connected — log a clear warning
+    console.warn('[WARN] [Admissions] MongoDB is DISCONNECTED (readyState:', mongoose.connection.readyState, '). Admission', admissionData.id, 'was NOT saved to database. Only Google Sheets received this submission.');
+    broadcastLiveEvent('ADMISSION_CREATED', { ...admissionData, mongoSaved: false });
+    res.status(201).json({ ...admissionData, mongoSaved: false, dbError: 'MongoDB unavailable' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1078,8 +1137,10 @@ app.patch('/api/admissions/:id', requireAuth, async (req, res) => {
           { upsert: true, new: true }
         );
       }
+      broadcastLiveEvent('ADMISSION_UPDATED', updated);
       return res.json(updated);
     }
+    broadcastLiveEvent('ADMISSION_UPDATED', { id, ...updates });
     res.json({ id, ...updates });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1092,6 +1153,9 @@ app.delete('/api/admissions/:id', requireAuth, async (req, res) => {
     if (mongoose.connection.readyState === 1) {
       const result = await AdmissionModel.deleteMany(buildDeleteQuery(id));
       console.log(`[DELETE] Deleted ${result.deletedCount} admission(s) matching ${id}`);
+      broadcastLiveEvent('ADMISSION_DELETED', { id });
+    } else {
+      broadcastLiveEvent('ADMISSION_DELETED', { id });
     }
     res.json({ success: true, id });
   } catch (err) {

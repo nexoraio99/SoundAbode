@@ -42,6 +42,62 @@ if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
   }
 }
 
+// ─── Real-Time Live SSE Stream Initialization ────────────────────────────────
+let liveEventSource: EventSource | null = null;
+
+function initLiveStream() {
+  if (typeof window === 'undefined' || !('EventSource' in window)) return;
+  if (liveEventSource) return;
+
+  try {
+    const sseUrl = `${API_BASE_URL}/live-stream`;
+    liveEventSource = new EventSource(sseUrl);
+
+    liveEventSource.addEventListener('ADMISSION_CREATED', (e) => {
+      try {
+        const item = JSON.parse(e.data);
+        if (item && item.id) {
+          AdmissionService.handleIncomingLiveAdmission(item);
+        }
+      } catch (err) {
+        console.warn('SSE ADMISSION_CREATED parse error:', err);
+      }
+    });
+
+    liveEventSource.addEventListener('ADMISSION_UPDATED', (e) => {
+      try {
+        const item = JSON.parse(e.data);
+        if (item && item.id) {
+          AdmissionService.handleIncomingLiveUpdate(item);
+        }
+      } catch (err) {
+        console.warn('SSE ADMISSION_UPDATED parse error:', err);
+      }
+    });
+
+    liveEventSource.addEventListener('ADMISSION_DELETED', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data && data.id) {
+          AdmissionService.handleIncomingLiveDelete(data.id);
+        }
+      } catch (err) {
+        console.warn('SSE ADMISSION_DELETED parse error:', err);
+      }
+    });
+
+    liveEventSource.onerror = () => {
+      // EventSource automatically reconnects on error
+    };
+  } catch (err) {
+    console.warn('Failed to initialize SSE stream:', err);
+  }
+}
+
+if (typeof window !== 'undefined') {
+  initLiveStream();
+}
+
 type AdmissionListener = (admissions: AdmissionSubmission[]) => void;
 
 export class AdmissionService {
@@ -68,6 +124,38 @@ export class AdmissionService {
       }
     }
     return result;
+  }
+
+  public static handleIncomingLiveAdmission(newAdm: AdmissionSubmission): void {
+    if (!newAdm || !newAdm.id || this.isMockAdmission(newAdm)) return;
+    const current = this.getStoredAdmissions();
+    const exists = current.some((a) => a.id === newAdm.id || (a.formNo && a.formNo === newAdm.formNo));
+    if (!exists) {
+      const merged = [newAdm, ...current];
+      merged.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+      this.saveAdmissions(merged);
+    }
+  }
+
+  public static handleIncomingLiveUpdate(updatedAdm: AdmissionSubmission): void {
+    if (!updatedAdm || !updatedAdm.id) return;
+    const current = this.getStoredAdmissions();
+    const index = current.findIndex((a) => a.id === updatedAdm.id);
+    if (index !== -1) {
+      current[index] = { ...current[index], ...updatedAdm };
+      this.saveAdmissions(current);
+    } else {
+      this.handleIncomingLiveAdmission(updatedAdm);
+    }
+  }
+
+  public static handleIncomingLiveDelete(id: string): void {
+    if (!id) return;
+    const current = this.getStoredAdmissions();
+    const filtered = current.filter((a) => a.id !== id);
+    if (filtered.length !== current.length) {
+      this.saveAdmissions(filtered);
+    }
   }
 
   private static getStoredAdmissions(): AdmissionSubmission[] {
@@ -217,26 +305,49 @@ export class AdmissionService {
     const updated = [newAdmission, ...admissions];
     this.saveAdmissions(updated);
 
-    // Sync to backend API if available (which handles Google Sheets forwarding)
+    // Build the Google Sheets payload once for reuse
+    const sheetsPayload = {
+      source: `Official Admission Application (${newAdmission.formType})`,
+      formNo: newAdmission.formNo,
+      name: `${newAdmission.firstName} ${newAdmission.lastName}`,
+      email: newAdmission.email,
+      phone: newAdmission.cellPhone,
+      courseInterest: newAdmission.courseOpted,
+      message: `Father: ${newAdmission.fatherName} | Aadhar: ${newAdmission.aadharNo} | Tenure: ${newAdmission.tenure} | Fee: ₹${newAdmission.fee} | Payment: ${newAdmission.paymentOption} | Address: ${newAdmission.address}`,
+      submittedAt: newAdmission.submittedAt,
+    };
+
+    // Always send to Google Sheets as a safety net (client-side)
+    GoogleSheetsService.submitToGoogleSheets(sheetsPayload);
+
+    // Sync to backend API (which saves to MongoDB + also forwards to Google Sheets)
     if (typeof window !== 'undefined') {
       fetch(`${API_BASE_URL}/admissions`, {
         method: 'POST',
         headers: AuthService.getAuthHeaders(),
         body: JSON.stringify(newAdmission),
-      }).catch((err) => {
-        console.warn('Backend sync notice:', err);
-        // Fallback to client-side Google Sheets submission if backend is unreachable
-        GoogleSheetsService.submitToGoogleSheets({
-          source: `Official Admission Application (${newAdmission.formType})`,
-          formNo: newAdmission.formNo,
-          name: `${newAdmission.firstName} ${newAdmission.lastName}`,
-          email: newAdmission.email,
-          phone: newAdmission.cellPhone,
-          courseInterest: newAdmission.courseOpted,
-          message: `Father: ${newAdmission.fatherName} | Aadhar: ${newAdmission.aadharNo} | Tenure: ${newAdmission.tenure} | Fee: ₹${newAdmission.fee} | Payment: ${newAdmission.paymentOption} | Address: ${newAdmission.address}`,
-          submittedAt: newAdmission.submittedAt,
+      })
+        .then((res) => res.ok ? res.json() : Promise.reject(new Error(`Server responded with ${res.status}`)))
+        .then((data) => {
+          if (data && data.mongoSaved === false) {
+            console.error(
+              '⚠️ CRITICAL: Admission form was received by server but MongoDB save FAILED!',
+              'Form:', newAdmission.formNo,
+              'Student:', newAdmission.firstName, newAdmission.lastName,
+              'Reason:', data.dbError || 'Unknown'
+            );
+          } else {
+            console.log('✅ Admission synced to backend & MongoDB successfully:', newAdmission.formNo);
+          }
+        })
+        .catch((err) => {
+          console.error(
+            '⚠️ CRITICAL: Backend is UNREACHABLE — admission NOT saved to MongoDB!',
+            'Form:', newAdmission.formNo,
+            'Student:', newAdmission.firstName, newAdmission.lastName,
+            'Error:', err.message
+          );
         });
-      });
     }
 
     return newAdmission;

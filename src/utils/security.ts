@@ -25,12 +25,12 @@ export const safeImageUrl = (url?: string): string => {
   if (!trimmed) return '';
 
   // Reject dangerous pseudo-protocols
-  if (/^(javascript|vbscript|data:(?!image\/(png|jpeg|jpg|webp|gif|avif))):/i.test(trimmed)) {
+  if (/^(javascript|vbscript|data:(?!image\/(png|jpeg|jpg|webp|gif|avif|bmp|svg\+xml))):/i.test(trimmed)) {
     return '';
   }
 
   // Allow safe image base64 data URLs
-  if (/^data:image\/(png|jpeg|jpg|webp|gif|avif);base64,[A-Za-z0-9+/=]+$/i.test(trimmed)) {
+  if (/^data:image\/(png|jpeg|jpg|webp|gif|avif|bmp|svg\+xml)(;[a-z0-9-]+=[a-z0-9-]+)*;base64,[\sA-Za-z0-9+/=]+$/i.test(trimmed)) {
     return trimmed;
   }
 

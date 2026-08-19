@@ -344,7 +344,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       setAdmissions(updatedAdmissions);
     });
 
-    // Periodic polling fallback to ensure zero-lag synchronization (every 15s)
+    // Periodic polling fallback to ensure zero-lag synchronization (every 5s)
     const pollInterval = setInterval(() => {
       const latestInquiries = InquiryService.getAllInquiries();
       setInquiries((prev) => {
@@ -364,7 +364,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
       // Keep attendance synced with remote MongoDB
       AttendanceService.fetchAndSyncFromRemote();
-    }, 15000);
+    }, 5000);
 
     const unsubscribeAttendance = AttendanceService.subscribe(() => {
       setAttendanceVersion((v) => v + 1);
@@ -893,11 +893,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               <strong>VISION 9 MALL, SHOP 218</strong>, PIMPLE SAUDAGAR, PUNE – 411017<br />
               PH: 9975016189 | EMAIL: SERVICES@SOUNDABODE.COM | WWW.SOUNDABODE.COM
             </div>
-            <div>
-              <span class="softwarePill">ABLETON LIVE</span>
-              <span class="softwarePill">NATIVE INSTRUMENTS</span>
-              <span class="softwarePill">WAVES ACCESS</span>
-            </div>
+
           </div>
 
           <script>
@@ -1309,7 +1305,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     .sig-footer { margin-top: 28px; display: flex; justify-content: flex-end; text-align: center; position: relative; }
     .sig-box { font-size: 11px; color: #475569; position: relative; display: inline-block; padding: 0 10px; }
     .sig-line { width: 140px; border-bottom: 1.5px solid #1e293b; margin: 0 auto 6px; height: 30px; }
-    .sig-stamp { position: absolute; top: -15px; right: 0; width: 80px; height: auto; opacity: 0.88; transform: rotate(-8deg); pointer-events: none; }
   </style>
 </head>
 <body>
@@ -1367,7 +1362,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   <div class="sig-footer">
     <div class="sig-box">
       <div class="sig-line"></div>
-      <img src="${window.location.origin}/stamp.ico" class="sig-stamp" alt="Soundabode Stamp" />
       Director<br/>Authorised Signatory
     </div>
   </div>
@@ -4040,12 +4034,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 </td>
                                 <td>
                                   <div className={styles.studentCell}>
-                                    <div
-                                      className={styles.avatarCircle}
-                                      style={{ background: avatar.bg, border: `1px solid ${avatar.border}` }}
-                                    >
-                                      {avatar.initials}
-                                    </div>
+                                    {item.photoUrl && safeImageUrl(item.photoUrl) ? (
+                                      <img
+                                        src={safeImageUrl(item.photoUrl)}
+                                        alt={`${item.firstName} ${item.lastName}`}
+                                        className={styles.avatarCircle}
+                                        style={{ objectFit: 'cover', border: '1.5px solid var(--accent-primary, #6366f1)' }}
+                                      />
+                                    ) : (
+                                      <div
+                                        className={styles.avatarCircle}
+                                        style={{ background: avatar.bg, border: `1px solid ${avatar.border}` }}
+                                      >
+                                        {avatar.initials}
+                                      </div>
+                                    )}
                                     <div>
                                       <div className={styles.studentName} style={{ fontWeight: 600 }}>{item.firstName} {item.lastName}</div>
                                       <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>Father: {item.fatherName}</div>
@@ -4133,12 +4136,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         <div key={item.id} className={styles.mobileDataCard}>
                           <div className={styles.mobileCardHeader}>
                             <div className={styles.mobileCardTitleBox}>
-                              <div
-                                className={styles.avatarCircle}
-                                style={{ background: avatar.bg, border: `1px solid ${avatar.border}`, width: '34px', height: '34px' }}
-                              >
-                                {avatar.initials}
-                              </div>
+                              {item.photoUrl && safeImageUrl(item.photoUrl) ? (
+                                <img
+                                  src={safeImageUrl(item.photoUrl)}
+                                  alt={`${item.firstName} ${item.lastName}`}
+                                  className={styles.avatarCircle}
+                                  style={{ objectFit: 'cover', border: '1.5px solid var(--accent-primary, #6366f1)', width: '34px', height: '34px' }}
+                                />
+                              ) : (
+                                <div
+                                  className={styles.avatarCircle}
+                                  style={{ background: avatar.bg, border: `1px solid ${avatar.border}`, width: '34px', height: '34px' }}
+                                >
+                                  {avatar.initials}
+                                </div>
+                              )}
                               <div>
                                 <div className={styles.mobileCardTitle}>{item.firstName} {item.lastName}</div>
                                 <div className={styles.mobileCardSubText}>Form No: {item.formNo}</div>
@@ -6188,11 +6200,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       <span className={admissionStyles.footerLogoText}>SOUNDABODE</span>
                     </div>
 
-                    <div className={admissionStyles.softwarePills}>
-                      <span className={admissionStyles.softwarePill}>ABLETON LIVE</span>
-                      <span className={admissionStyles.softwarePill}>NATIVE INSTRUMENTS</span>
-                      <span className={admissionStyles.softwarePill}>WAVES ACCESS</span>
-                    </div>
+
                   </div>
                 </div>
               </div>
