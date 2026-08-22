@@ -28,7 +28,15 @@ export const BlogPage: React.FC<BlogPageProps> = ({ onNavigateHome, articleSlug 
       .finally(() => setIsLoadingPosts(false));
   }, []);
 
-  const selectedPost = articleSlug ? posts.find((post) => post.slug === articleSlug) || null : null;
+  const selectedPost = articleSlug
+    ? posts.find(
+        (post) =>
+          post.slug === articleSlug ||
+          post.id === articleSlug ||
+          post.slug.toLowerCase() === articleSlug.toLowerCase() ||
+          post.slug.toLowerCase() === decodeURIComponent(articleSlug).toLowerCase()
+      ) || null
+    : null;
 
   // Filtered posts based on category and search query
   const filteredPosts = useMemo(() => {
@@ -152,7 +160,7 @@ export const BlogPage: React.FC<BlogPageProps> = ({ onNavigateHome, articleSlug 
                 <span>{selectedPost.readTimeMinutes} min read</span>
               </div>
               <img className={styles.articleHeroImage} src={safeImageUrl(selectedPost.coverImage)} alt={selectedPost.title} />
-              <div className={styles.articleHTML} dangerouslySetInnerHTML={{ __html: sanitizeHtml(selectedPost.content || '') }} />
+              <div className={styles.articleHTML} dangerouslySetInnerHTML={{ __html: sanitizeHtml(BlogService.formatPostContent(selectedPost.content || '')) }} />
             </article>
           ) : (
             <section className={styles.articleNotFound}>

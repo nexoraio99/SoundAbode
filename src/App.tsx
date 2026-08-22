@@ -49,7 +49,11 @@ const getRouteFromLocation = (): { page: RoutePage; slug?: string } => {
   if (path === '/admission-emp' || path === '/admission/emp' || path === '/emp-admission') return { page: 'admission-emp' };
   if (path === '/about' || hash === '#about') return { page: 'about' };
   if (path === '/contact' || hash === '#contact') return { page: 'contact' };
-  if (path.startsWith('/blog/')) return { page: 'blog-article', slug: path.split('/').pop() || '' };
+  if (path.startsWith('/blog/')) {
+    const rawSlug = path.replace(/^\/blog\//, '').replace(/\/.*$/, '');
+    const slug = decodeURIComponent(rawSlug || '');
+    return { page: 'blog-article', slug };
+  }
   if (path === '/blog' || hash === '#blog') return { page: 'blog' };
   if (path === '/terms' || path === '/terms-and-conditions' || hash === '#terms') return { page: 'terms' };
   if (path === '/privacy' || path === '/privacy-policy' || hash === '#privacy') return { page: 'privacy' };
@@ -143,7 +147,9 @@ export const App: React.FC = () => {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         } else if (lowerHref.startsWith('/blog/')) {
           e.preventDefault();
-          const slug = href.split('/').pop() || '';
+          const cleanHref = href.split('?')[0].split('#')[0].replace(/\/+$/, '');
+          const rawSlug = cleanHref.substring(cleanHref.lastIndexOf('/') + 1);
+          const slug = decodeURIComponent(rawSlug || '');
           window.history.pushState({}, '', href);
           window.dispatchEvent(new Event('popstate'));
           setCurrentRoute({ page: 'blog-article', slug });

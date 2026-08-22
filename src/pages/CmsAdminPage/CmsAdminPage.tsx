@@ -4,7 +4,7 @@ import admissionStyles from '../AdmissionPage/AdmissionPage.module.css';
 import SEO from '../../components/common/SEO';
 import { BlogService } from '../../services/blogService';
 import { InquiryService, ContactInquiry } from '../../services/inquiryService';
-import { AttendanceService, EnrolledStudent, AttendanceStatus } from '../../services/attendanceService';
+import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord } from '../../services/attendanceService';
 import { AdmissionService, AdmissionSubmission } from '../../services/admissionService';
 import { AuthService, CmsUser } from '../../services/authService';
 import { getApiBaseUrl } from '../../services/apiConfig';
@@ -19,7 +19,7 @@ interface CmsAdminPageProps {
   onNavigate?: (page: string) => void;
 }
 
-type TabType = 'overview' | 'students' | 'blog' | 'inquiries' | 'admissions' | 'attendance' | 'fees' | 'settings';
+type TabType = 'overview' | 'students' | 'classes' | 'blog' | 'inquiries' | 'admissions' | 'attendance' | 'fees' | 'settings';
 
 const THEME_STORAGE_KEY = 'soundabode_cms_theme';
 
@@ -278,6 +278,17 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     date: string;
     comment: string;
   }>(defaultFeeForm());
+
+  // CLASSES SECTION (ADMIN ONLY) STATES & FILTERS
+  const [classesTeacherFilter, setClassesTeacherFilter] = useState<'ALL' | 'ashu' | 'vaibhav' | 'abhinav' | 'admin'>('ALL');
+  const [classesStatusFilter, setClassesStatusFilter] = useState<string>('ALL');
+  const [classesDatePreset, setClassesDatePreset] = useState<'ALL' | 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'THIS_MONTH' | 'CUSTOM'>('ALL');
+  const [classesCustomDate, setClassesCustomDate] = useState<string>('');
+  const [classesCourseFilter, setClassesCourseFilter] = useState<string>('ALL');
+  const [classesSearch, setClassesSearch] = useState<string>('');
+  const [selectedRecordForInspection, setSelectedRecordForInspection] = useState<AttendanceRecord | null>(null);
+  const [isClassesSyncing, setIsClassesSyncing] = useState<boolean>(false);
+  const [classesFeedbackToast, setClassesFeedbackToast] = useState<string | null>(null);
 
   // Settings & Real-time states
   const [newPasscode, setNewPasscode] = useState('');
@@ -1534,6 +1545,383 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     setIsGroupAttendanceModalOpen(true);
   };
 
+  // ─── CLASSES SECTION COMPUTATIONS & HANDLERS (ADMIN ONLY) ───────────────────
+  const teacherAshuRecords = useMemo(() => {
+    return allAttendanceRecords.filter((r) => {
+      const by = (r.markedBy || '').toLowerCase();
+      const name = (r.markedByName || '').toLowerCase();
+      return by.includes('ashu') || name.includes('ashu');
+    });
+  }, [allAttendanceRecords]);
+
+  const teacherVaibhavRecords = useMemo(() => {
+    return allAttendanceRecords.filter((r) => {
+      const by = (r.markedBy || '').toLowerCase();
+      const name = (r.markedByName || '').toLowerCase();
+      return by.includes('vaibhav') || name.includes('vaibhav');
+    });
+  }, [allAttendanceRecords]);
+
+  const teacherAbhinavRecords = useMemo(() => {
+    return allAttendanceRecords.filter((r) => {
+      const by = (r.markedBy || '').toLowerCase();
+      const name = (r.markedByName || '').toLowerCase();
+      const isAshu = by.includes('ashu') || name.includes('ashu');
+      const isVaibhav = by.includes('vaibhav') || name.includes('vaibhav');
+      return !isAshu && !isVaibhav;
+    });
+  }, [allAttendanceRecords]);
+
+  // Studio-wide group sessions calculation (distinct date + timeSlot combinations)
+  const totalGroupRecords = useMemo(() => {
+    return allAttendanceRecords.filter((r) => r.status === 'GROUP_SESSION');
+  }, [allAttendanceRecords]);
+
+  const studioGroupSessionsCount = useMemo(() => {
+    return new Set(totalGroupRecords.map((r) => `${r.date}_${r.timeSlot}`)).size;
+  }, [totalGroupRecords]);
+
+  const distinctCourses = useMemo(() => {
+    const courses = new Set<string>();
+    students.forEach((s) => s.course && courses.add(s.course));
+    allAttendanceRecords.forEach((r) => {
+      const st = students.find((s) => s.id === r.studentId);
+      if (st?.course) courses.add(st.course);
+    });
+    return Array.from(courses);
+  }, [students, allAttendanceRecords]);
+
+  const isDateInPreset = (dateStr: string, preset: typeof classesDatePreset, customDate: string) => {
+    if (preset === 'ALL') return true;
+    if (preset === 'CUSTOM') return !customDate || dateStr === customDate;
+
+    const now = new Date();
+    const todayStr = formatLocalDateStr(now.getFullYear(), now.getMonth(), now.getDate());
+
+    if (preset === 'TODAY') {
+      return dateStr === todayStr;
+    }
+
+    if (preset === 'YESTERDAY') {
+      const yDate = new Date(now);
+      yDate.setDate(yDate.getDate() - 1);
+      const yesterdayStr = formatLocalDateStr(yDate.getFullYear(), yDate.getMonth(), yDate.getDate());
+      return dateStr === yesterdayStr;
+    }
+
+    if (preset === 'THIS_WEEK') {
+      const startOfWeek = new Date(now);
+      const day = startOfWeek.getDay();
+      const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+      startOfWeek.setDate(diff);
+      const startOfWeekStr = formatLocalDateStr(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate());
+      return dateStr >= startOfWeekStr && dateStr <= todayStr;
+    }
+
+    if (preset === 'THIS_MONTH') {
+      const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      return dateStr.startsWith(currentYearMonth);
+    }
+
+    return true;
+  };
+
+  const filteredClassesRecords = useMemo(() => {
+    return allAttendanceRecords.filter((r) => {
+      // 1. Teacher Filter
+      if (classesTeacherFilter === 'ashu') {
+        const by = (r.markedBy || '').toLowerCase();
+        const name = (r.markedByName || '').toLowerCase();
+        if (!by.includes('ashu') && !name.includes('ashu')) return false;
+      } else if (classesTeacherFilter === 'vaibhav') {
+        const by = (r.markedBy || '').toLowerCase();
+        const name = (r.markedByName || '').toLowerCase();
+        if (!by.includes('vaibhav') && !name.includes('vaibhav')) return false;
+      } else if (classesTeacherFilter === 'abhinav' || classesTeacherFilter === 'admin') {
+        const by = (r.markedBy || '').toLowerCase();
+        const name = (r.markedByName || '').toLowerCase();
+        if (by.includes('ashu') || name.includes('ashu') || by.includes('vaibhav') || name.includes('vaibhav')) return false;
+      }
+
+      // 2. Status Filter
+      if (classesStatusFilter !== 'ALL' && r.status !== classesStatusFilter) {
+        return false;
+      }
+
+      // 3. Date Filter
+      if (!isDateInPreset(r.date, classesDatePreset, classesCustomDate)) {
+        return false;
+      }
+
+      const student = students.find((s) => s.id === r.studentId);
+
+      // 4. Course Filter
+      if (classesCourseFilter !== 'ALL') {
+        if (!student || student.course !== classesCourseFilter) return false;
+      }
+
+      // 5. Search Query
+      if (classesSearch.trim()) {
+        const q = classesSearch.toLowerCase().trim();
+        const studentName = (student?.name || '').toLowerCase();
+        const studentEmail = (student?.email || '').toLowerCase();
+        const studentPhone = (student?.phone || '').toLowerCase();
+        const courseName = (student?.course || '').toLowerCase();
+        const batchName = (student?.batch || '').toLowerCase();
+        const teacherName = (r.markedByName || '').toLowerCase();
+        const teacherEmail = (r.markedBy || '').toLowerCase();
+        const comment = (r.comment || '').toLowerCase();
+        const date = (r.date || '').toLowerCase();
+        const slot = (r.timeSlot || '').toLowerCase();
+
+        const matches =
+          studentName.includes(q) ||
+          studentEmail.includes(q) ||
+          studentPhone.includes(q) ||
+          courseName.includes(q) ||
+          batchName.includes(q) ||
+          teacherName.includes(q) ||
+          teacherEmail.includes(q) ||
+          comment.includes(q) ||
+          date.includes(q) ||
+          slot.includes(q);
+
+        if (!matches) return false;
+      }
+
+      return true;
+    });
+  }, [
+    allAttendanceRecords,
+    classesTeacherFilter,
+    classesStatusFilter,
+    classesDatePreset,
+    classesCustomDate,
+    classesCourseFilter,
+    classesSearch,
+    students,
+  ]);
+
+  const ashuAnalytics = useMemo(() => {
+    const total = teacherAshuRecords.length;
+    const present = teacherAshuRecords.filter((r) => r.status === 'PRESENT').length;
+    const absent = teacherAshuRecords.filter((r) => r.status === 'ABSENT').length;
+    const practice = teacherAshuRecords.filter((r) => r.status === 'PRACTICE_SESSION').length;
+    const groupRecords = teacherAshuRecords.filter((r) => r.status === 'GROUP_SESSION');
+    const group = groupRecords.length;
+    const groupSessionsCount = new Set(groupRecords.map((r) => `${r.date}_${r.timeSlot}`)).size;
+    const uniqueStudentIds = Array.from(new Set(teacherAshuRecords.map((r) => r.studentId)));
+    const uniqueStudents = uniqueStudentIds.map((id) => students.find((s) => s.id === id)).filter((s): s is EnrolledStudent => Boolean(s));
+    const dates = Array.from(new Set(teacherAshuRecords.map((r) => r.date))).sort().reverse();
+    const lastActiveDate = dates[0] || 'No sessions yet';
+    const presentRate = total > 0 ? Math.round(((present + practice + group) / total) * 100) : 0;
+
+    return {
+      total,
+      present,
+      absent,
+      practice,
+      group,
+      groupSessionsCount,
+      uniqueStudentCount: uniqueStudentIds.length,
+      uniqueStudents,
+      lastActiveDate,
+      presentRate,
+      datesCount: dates.length,
+    };
+  }, [teacherAshuRecords, students]);
+
+  const vaibhavAnalytics = useMemo(() => {
+    const total = teacherVaibhavRecords.length;
+    const present = teacherVaibhavRecords.filter((r) => r.status === 'PRESENT').length;
+    const absent = teacherVaibhavRecords.filter((r) => r.status === 'ABSENT').length;
+    const practice = teacherVaibhavRecords.filter((r) => r.status === 'PRACTICE_SESSION').length;
+    const groupRecords = teacherVaibhavRecords.filter((r) => r.status === 'GROUP_SESSION');
+    const group = groupRecords.length;
+    const groupSessionsCount = new Set(groupRecords.map((r) => `${r.date}_${r.timeSlot}`)).size;
+    const uniqueStudentIds = Array.from(new Set(teacherVaibhavRecords.map((r) => r.studentId)));
+    const uniqueStudents = uniqueStudentIds.map((id) => students.find((s) => s.id === id)).filter((s): s is EnrolledStudent => Boolean(s));
+    const dates = Array.from(new Set(teacherVaibhavRecords.map((r) => r.date))).sort().reverse();
+    const lastActiveDate = dates[0] || 'No sessions yet';
+    const presentRate = total > 0 ? Math.round(((present + practice + group) / total) * 100) : 0;
+
+    return {
+      total,
+      present,
+      absent,
+      practice,
+      group,
+      groupSessionsCount,
+      uniqueStudentCount: uniqueStudentIds.length,
+      uniqueStudents,
+      lastActiveDate,
+      presentRate,
+      datesCount: dates.length,
+    };
+  }, [teacherVaibhavRecords, students]);
+
+  const abhinavAnalytics = useMemo(() => {
+    const total = teacherAbhinavRecords.length;
+    const present = teacherAbhinavRecords.filter((r) => r.status === 'PRESENT').length;
+    const absent = teacherAbhinavRecords.filter((r) => r.status === 'ABSENT').length;
+    const practice = teacherAbhinavRecords.filter((r) => r.status === 'PRACTICE_SESSION').length;
+    const groupRecords = teacherAbhinavRecords.filter((r) => r.status === 'GROUP_SESSION');
+    const group = groupRecords.length;
+    const groupSessionsCount = new Set(groupRecords.map((r) => `${r.date}_${r.timeSlot}`)).size;
+    const uniqueStudentIds = Array.from(new Set(teacherAbhinavRecords.map((r) => r.studentId)));
+    const uniqueStudents = uniqueStudentIds.map((id) => students.find((s) => s.id === id)).filter((s): s is EnrolledStudent => Boolean(s));
+    const dates = Array.from(new Set(teacherAbhinavRecords.map((r) => r.date))).sort().reverse();
+    const lastActiveDate = dates[0] || 'No sessions yet';
+    const presentRate = total > 0 ? Math.round(((present + practice + group) / total) * 100) : 0;
+
+    return {
+      total,
+      present,
+      absent,
+      practice,
+      group,
+      groupSessionsCount,
+      uniqueStudentCount: uniqueStudentIds.length,
+      uniqueStudents,
+      lastActiveDate,
+      presentRate,
+      datesCount: dates.length,
+    };
+  }, [teacherAbhinavRecords, students]);
+
+  const handleExportClassesCSV = () => {
+    const headers = [
+      'Record ID',
+      'Class Date',
+      'Time Slot',
+      'Teacher Name',
+      'Teacher Email',
+      'Teacher Role',
+      'Student Name',
+      'Student Email',
+      'Student Phone',
+      'Course',
+      'Batch',
+      'Attendance Status',
+      'Remarks / Topics Covered',
+      'Marked At',
+    ];
+
+    const rows = filteredClassesRecords.map((rec) => {
+      const student = students.find((s) => s.id === rec.studentId);
+      return [
+        `"${rec.id}"`,
+        `"${rec.date}"`,
+        `"${rec.timeSlot}"`,
+        `"${(rec.markedByName || 'Staff').replace(/"/g, '""')}"`,
+        `"${(rec.markedBy || '').replace(/"/g, '""')}"`,
+        `"${rec.markedByRole || 'teacher'}"`,
+        `"${(student?.name || rec.studentId).replace(/"/g, '""')}"`,
+        `"${(student?.email || '').replace(/"/g, '""')}"`,
+        `"${(student?.phone || '').replace(/"/g, '""')}"`,
+        `"${(student?.course || '').replace(/"/g, '""')}"`,
+        `"${(student?.batch || '').replace(/"/g, '""')}"`,
+        `"${rec.status}"`,
+        `"${(rec.comment || '').replace(/"/g, '""')}"`,
+        `"${rec.updatedAt || ''}"`,
+      ].join(',');
+    });
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `soundabode_teacher_classes_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    setClassesFeedbackToast('Exported class logs to CSV successfully.');
+    setTimeout(() => setClassesFeedbackToast(null), 3500);
+  };
+
+  const handlePrintClassesLedger = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const rowsHtml = filteredClassesRecords
+      .map((rec) => {
+        const student = students.find((s) => s.id === rec.studentId);
+        return `
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${escapeHtml(rec.date)}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(rec.timeSlot)}</td>
+            <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${escapeHtml(rec.markedByName || 'Staff')} (${escapeHtml(rec.markedBy || '')})</td>
+            <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${escapeHtml(student?.name || rec.studentId)}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(student?.course || '—')}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(student?.batch || '—')}</td>
+            <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${escapeHtml(rec.status)}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(rec.comment || '—')}</td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Soundabode Studios - Teacher Classes & Attendance Ledger</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; color: #111; }
+            h1 { font-size: 18px; margin-bottom: 4px; }
+            p { font-size: 12px; color: #666; margin-top: 0; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 15px; }
+            th { background: #f2f2f2; padding: 8px; border: 1px solid #ddd; text-align: left; }
+          </style>
+        </head>
+        <body>
+          <h1>Soundabode Studios - Teacher Classes & Attendance Master Ledger</h1>
+          <p>Generated on ${new Date().toLocaleString('en-IN')} | Total Records: ${filteredClassesRecords.length} | Teachers: Ashu &amp; Vaibhav</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Time Slot</th>
+                <th>Teacher</th>
+                <th>Student</th>
+                <th>Course</th>
+                <th>Batch</th>
+                <th>Status</th>
+                <th>Remarks / Topic</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(sanitizePrintHtml(htmlContent));
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 500);
+  };
+
+  const handleSyncClassesData = async () => {
+    setIsClassesSyncing(true);
+    try {
+      await AttendanceService.fetchAndSyncFromRemote();
+      setAttendanceVersion((v) => v + 1);
+      setClassesFeedbackToast('Class records synced with live database!');
+    } catch {
+      setClassesFeedbackToast('Failed to sync. Using local cache.');
+    } finally {
+      setIsClassesSyncing(false);
+      setTimeout(() => setClassesFeedbackToast(null), 3500);
+    }
+  };
+
   const totalPresent = activeAttendanceRecords.filter((r) => r.status === 'PRESENT').length;
   const totalAbsent = activeAttendanceRecords.filter((r) => r.status === 'ABSENT').length;
   const totalPractice = activeAttendanceRecords.filter((r) => r.status === 'PRACTICE_SESSION' || r.status === 'NA').length;
@@ -1848,6 +2236,20 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
               {!isTeacher && (
                 <button
+                  onClick={() => { setActiveTab('classes'); setIsMobileMenuOpen(false); }}
+                  className={`${styles.sidebarBtn} ${activeTab === 'classes' ? styles.sidebarBtnActive : ''}`}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                  </svg>
+                  Classes
+                  <span className={styles.badgeCount}>{allAttendanceRecords.length}</span>
+                </button>
+              )}
+
+              {!isTeacher && (
+                <button
                   onClick={() => { setActiveTab('blog'); setIsMobileMenuOpen(false); }}
                   className={`${styles.sidebarBtn} ${activeTab === 'blog' ? styles.sidebarBtnActive : ''}`}
                 >
@@ -1919,14 +2321,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   setIsMobileMenuOpen(false);
                 }}
                 className={styles.btnSecondary}
-                style={{ justifyContent: 'center', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#f87171', gap: '0.4rem' }}
+                style={{
+                  justifyContent: 'center',
+                  borderColor: 'rgba(244, 63, 94, 0.4)',
+                  color: '#fb7185',
+                  background: 'rgba(244, 63, 94, 0.08)'
+                }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
                 </svg>
-                Report Issue to Developer
+                Developer Hub
               </button>
-              <button onClick={() => { handleLogout(); setIsMobileMenuOpen(false); }} className={styles.btnGhost} style={{ color: '#f87171', justifyContent: 'center' }}>
+              <button onClick={handleLogout} className={styles.btnSecondary} style={{ justifyContent: 'center', color: 'var(--accent-red)' }}>
                 Sign Out
               </button>
             </div>
@@ -1964,6 +2373,20 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               </svg>
               Students
               <span className={styles.badgeCount}>{students.length}</span>
+            </button>
+          )}
+
+          {!isTeacher && (
+            <button
+              onClick={() => setActiveTab('classes')}
+              className={`${styles.sidebarBtn} ${activeTab === 'classes' ? styles.sidebarBtnActive : ''}`}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+              </svg>
+              Classes
+              <span className={styles.badgeCount}>{allAttendanceRecords.length}</span>
             </button>
           )}
 
@@ -2511,6 +2934,607 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                               style={{ height: '34px', padding: '0 0.6rem' }}
                             >
                               Delete
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* TAB: CLASSES & TEACHER ATTENDANCE (ADMIN ROLE ONLY) */}
+          {!isTeacher && activeTab === 'classes' && (
+            <div className={styles.classesContainer}>
+              {/* FEEDBACK NOTIFICATION TOAST */}
+              {classesFeedbackToast && (
+                <div
+                  style={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-medium)',
+                    color: 'var(--text-primary)',
+                    padding: '0.65rem 0.9rem',
+                    borderRadius: 'var(--radius-btn)',
+                    fontSize: '0.82rem',
+                    fontWeight: 500,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+                  {classesFeedbackToast}
+                </div>
+              )}
+
+              {/* PAGE HEADER ROW */}
+              <div className={styles.pageHeaderRow}>
+                <div>
+                  <h1 className={styles.pageTitle}>
+                    Teacher Classes &amp; Attendance Logs
+                  </h1>
+                  <div className={styles.pageMetaBadge}>
+                    <span>{allAttendanceRecords.length} total sessions logged</span>
+                    <span>•</span>
+                    <span>Ashu ({teacherAshuRecords.length})</span>
+                    <span>•</span>
+                    <span>Vaibhav ({teacherVaibhavRecords.length})</span>
+                    <span>•</span>
+                    <span>Abhinav ({teacherAbhinavRecords.length})</span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={handleSyncClassesData}
+                    disabled={isClassesSyncing}
+                    className={styles.btnSecondary}
+                    style={{ fontSize: '0.8rem', height: '34px', gap: '0.4rem' }}
+                    title="Refresh and sync attendance data from MongoDB"
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      style={{ animation: isClassesSyncing ? 'spin 1s linear infinite' : 'none' }}
+                    >
+                      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                    </svg>
+                    {isClassesSyncing ? 'Syncing...' : 'Sync'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExportClassesCSV}
+                    className={styles.btnSecondary}
+                    style={{ fontSize: '0.8rem', height: '34px', gap: '0.4rem' }}
+                    title="Download class logs in CSV format"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Export CSV
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handlePrintClassesLedger}
+                    className={styles.btnPrimary}
+                    style={{ fontSize: '0.8rem', height: '34px', gap: '0.4rem' }}
+                    title="Print formatted class attendance ledger"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="6 9 6 2 18 2 18 9" />
+                      <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                      <rect x="6" y="14" width="12" height="8" />
+                    </svg>
+                    Print
+                  </button>
+                </div>
+              </div>
+
+              {/* RESTRAINED SUMMARY STATS STRIP */}
+              <div className={styles.summaryStatsStrip}>
+                {/* Ashu Block */}
+                <div className={styles.summaryStatBlock}>
+                  <div className={styles.summaryStatHeader}>
+                    <span className={styles.summaryStatTitle}>Teacher Ashu</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = classesTeacherFilter === 'ashu' ? 'ALL' : 'ashu';
+                        setClassesTeacherFilter(next);
+                      }}
+                      className={styles.filterPill}
+                      style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
+                    >
+                      {classesTeacherFilter === 'ashu' ? 'Active' : 'Filter'}
+                    </button>
+                  </div>
+                  <div className={styles.summaryStatCount}>{ashuAnalytics.total}</div>
+                  <div className={styles.summaryStatMeta}>
+                    <span className={styles.summaryStatMetaItem}>
+                      Present: <span className={styles.summaryStatMetaNum}>{ashuAnalytics.present}</span>
+                    </span>
+                    <span>•</span>
+                    <span className={styles.summaryStatMetaItem}>
+                      Group: <span className={styles.summaryStatMetaNum}>{ashuAnalytics.groupSessionsCount}{ashuAnalytics.group > 0 ? ` (${ashuAnalytics.group} st)` : ''}</span>
+                    </span>
+                    <span>•</span>
+                    <span className={styles.summaryStatMetaItem}>
+                      Students: <span className={styles.summaryStatMetaNum}>{ashuAnalytics.uniqueStudentCount}</span>
+                    </span>
+                    <span>•</span>
+                    <span className={styles.summaryStatMetaItem}>
+                      Rate: <span className={styles.summaryStatMetaNum}>{ashuAnalytics.presentRate}%</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Vaibhav Block */}
+                <div className={styles.summaryStatBlock}>
+                  <div className={styles.summaryStatHeader}>
+                    <span className={styles.summaryStatTitle}>Teacher Vaibhav</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = classesTeacherFilter === 'vaibhav' ? 'ALL' : 'vaibhav';
+                        setClassesTeacherFilter(next);
+                      }}
+                      className={styles.filterPill}
+                      style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
+                    >
+                      {classesTeacherFilter === 'vaibhav' ? 'Active' : 'Filter'}
+                    </button>
+                  </div>
+                  <div className={styles.summaryStatCount}>{vaibhavAnalytics.total}</div>
+                  <div className={styles.summaryStatMeta}>
+                    <span className={styles.summaryStatMetaItem}>
+                      Present: <span className={styles.summaryStatMetaNum}>{vaibhavAnalytics.present}</span>
+                    </span>
+                    <span>•</span>
+                    <span className={styles.summaryStatMetaItem}>
+                      Group: <span className={styles.summaryStatMetaNum}>{vaibhavAnalytics.groupSessionsCount}{vaibhavAnalytics.group > 0 ? ` (${vaibhavAnalytics.group} st)` : ''}</span>
+                    </span>
+                    <span>•</span>
+                    <span className={styles.summaryStatMetaItem}>
+                      Students: <span className={styles.summaryStatMetaNum}>{vaibhavAnalytics.uniqueStudentCount}</span>
+                    </span>
+                    <span>•</span>
+                    <span className={styles.summaryStatMetaItem}>
+                      Rate: <span className={styles.summaryStatMetaNum}>{vaibhavAnalytics.presentRate}%</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Abhinav Block */}
+                <div className={styles.summaryStatBlock}>
+                  <div className={styles.summaryStatHeader}>
+                    <span className={styles.summaryStatTitle}>Abhinav</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = classesTeacherFilter === 'abhinav' ? 'ALL' : 'abhinav';
+                        setClassesTeacherFilter(next);
+                      }}
+                      className={styles.filterPill}
+                      style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
+                    >
+                      {classesTeacherFilter === 'abhinav' ? 'Active' : 'Filter'}
+                    </button>
+                  </div>
+                  <div className={styles.summaryStatCount}>{abhinavAnalytics.total}</div>
+                  <div className={styles.summaryStatMeta}>
+                    <span className={styles.summaryStatMetaItem}>
+                      Present: <span className={styles.summaryStatMetaNum}>{abhinavAnalytics.present}</span>
+                    </span>
+                    <span>•</span>
+                    <span className={styles.summaryStatMetaItem}>
+                      Group: <span className={styles.summaryStatMetaNum}>{abhinavAnalytics.groupSessionsCount}{abhinavAnalytics.group > 0 ? ` (${abhinavAnalytics.group} st)` : ''}</span>
+                    </span>
+                    <span>•</span>
+                    <span className={styles.summaryStatMetaItem}>
+                      Students: <span className={styles.summaryStatMetaNum}>{abhinavAnalytics.uniqueStudentCount}</span>
+                    </span>
+                    <span>•</span>
+                    <span className={styles.summaryStatMetaItem}>
+                      Rate: <span className={styles.summaryStatMetaNum}>{abhinavAnalytics.presentRate}%</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Studio Total Block */}
+                <div className={styles.summaryStatBlock}>
+                  <div className={styles.summaryStatHeader}>
+                    <span className={styles.summaryStatTitle}>Studio Total</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClassesTeacherFilter('ALL');
+                        setClassesStatusFilter('ALL');
+                        setClassesDatePreset('ALL');
+                        setClassesCourseFilter('ALL');
+                        setClassesSearch('');
+                      }}
+                      className={styles.filterPill}
+                      style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
+                    >
+                      Reset
+                    </button>
+                  </div>
+                  <div className={styles.summaryStatCount}>{allAttendanceRecords.length}</div>
+                  <div className={styles.summaryStatMeta}>
+                    <span className={styles.summaryStatMetaItem}>
+                      Present: <span className={styles.summaryStatMetaNum}>{allAttendanceRecords.filter(r => r.status === 'PRESENT').length}</span>
+                    </span>
+                    <span>•</span>
+                    <span className={styles.summaryStatMetaItem}>
+                      Absent: <span className={styles.summaryStatMetaNum}>{allAttendanceRecords.filter(r => r.status === 'ABSENT').length}</span>
+                    </span>
+                    <span>•</span>
+                    <span className={styles.summaryStatMetaItem}>
+                      Group: <span className={styles.summaryStatMetaNum}>{studioGroupSessionsCount} ({totalGroupRecords.length} students)</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* UNIFIED FILTER TOOLBAR */}
+              <div className={styles.filterBar} style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div className={styles.searchBox} style={{ flex: '1 1 200px', maxWidth: '300px' }}>
+                  <svg className={styles.searchIcon} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Search logs…"
+                    value={classesSearch}
+                    onChange={(e) => setClassesSearch(e.target.value)}
+                    className={styles.searchInput}
+                  />
+                  {classesSearch && (
+                    <button
+                      onClick={() => setClassesSearch('')}
+                      style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.8rem' }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* TEACHER TOGGLES */}
+                <div className={styles.filterPillGroup}>
+                  <button
+                    type="button"
+                    onClick={() => setClassesTeacherFilter('ALL')}
+                    className={`${styles.filterPill} ${classesTeacherFilter === 'ALL' ? styles.filterPillActive : ''}`}
+                  >
+                    All ({allAttendanceRecords.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setClassesTeacherFilter('ashu')}
+                    className={`${styles.filterPill} ${classesTeacherFilter === 'ashu' ? styles.filterPillActive : ''}`}
+                  >
+                    Ashu ({teacherAshuRecords.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setClassesTeacherFilter('vaibhav')}
+                    className={`${styles.filterPill} ${classesTeacherFilter === 'vaibhav' ? styles.filterPillActive : ''}`}
+                  >
+                    Vaibhav ({teacherVaibhavRecords.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setClassesTeacherFilter('abhinav')}
+                    className={`${styles.filterPill} ${classesTeacherFilter === 'abhinav' ? styles.filterPillActive : ''}`}
+                  >
+                    Abhinav ({teacherAbhinavRecords.length})
+                  </button>
+                </div>
+
+                {/* STATUS FILTER */}
+                <select
+                  value={classesStatusFilter}
+                  onChange={(e) => setClassesStatusFilter(e.target.value)}
+                  className={styles.filterSelect}
+                  style={{ width: 'auto' }}
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="PRESENT">Present</option>
+                  <option value="ABSENT">Absent</option>
+                  <option value="PRACTICE_SESSION">Practice</option>
+                  <option value="GROUP_SESSION">Group</option>
+                  <option value="NA">NA</option>
+                </select>
+
+                {/* DATE PRESET */}
+                <select
+                  value={classesDatePreset}
+                  onChange={(e) => setClassesDatePreset(e.target.value as typeof classesDatePreset)}
+                  className={styles.filterSelect}
+                  style={{ width: 'auto' }}
+                >
+                  <option value="ALL">All Dates</option>
+                  <option value="TODAY">Today</option>
+                  <option value="YESTERDAY">Yesterday</option>
+                  <option value="THIS_WEEK">This Week</option>
+                  <option value="THIS_MONTH">This Month</option>
+                  <option value="CUSTOM">Custom Date</option>
+                </select>
+
+                {classesDatePreset === 'CUSTOM' && (
+                  <input
+                    type="date"
+                    value={classesCustomDate}
+                    onChange={(e) => setClassesCustomDate(e.target.value)}
+                    className={styles.filterSelect}
+                    style={{ width: 'auto' }}
+                  />
+                )}
+
+                {/* COURSE FILTER */}
+                {distinctCourses.length > 0 && (
+                  <select
+                    value={classesCourseFilter}
+                    onChange={(e) => setClassesCourseFilter(e.target.value)}
+                    className={styles.filterSelect}
+                    style={{ width: 'auto', maxWidth: '160px' }}
+                  >
+                    <option value="ALL">All Courses</option>
+                    {distinctCourses.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                )}
+
+                {/* CLEAR FILTERS */}
+                {(classesTeacherFilter !== 'ALL' || classesStatusFilter !== 'ALL' || classesDatePreset !== 'ALL' || classesCourseFilter !== 'ALL' || classesSearch) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClassesTeacherFilter('ALL');
+                      setClassesStatusFilter('ALL');
+                      setClassesDatePreset('ALL');
+                      setClassesCustomDate('');
+                      setClassesCourseFilter('ALL');
+                      setClassesSearch('');
+                    }}
+                    className={styles.btnSecondary}
+                    style={{ fontSize: '0.75rem', height: '32px' }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              {/* DATA TABLE */}
+              {filteredClassesRecords.length === 0 ? (
+                <div className={styles.emptyStateCard} style={{ padding: '2.5rem 1.5rem', textAlign: 'center' }}>
+                  <div className={styles.emptyStateTitle} style={{ fontSize: '1rem', fontWeight: 600 }}>
+                    No class records found
+                  </div>
+                  <div className={styles.emptyStateDesc} style={{ maxWidth: '340px', margin: '0.35rem auto 1rem', fontSize: '0.8rem' }}>
+                    Adjust filters to view attendance logs marked by teachers.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClassesTeacherFilter('ALL');
+                      setClassesStatusFilter('ALL');
+                      setClassesDatePreset('ALL');
+                      setClassesCourseFilter('ALL');
+                      setClassesSearch('');
+                    }}
+                    className={styles.btnPrimary}
+                    style={{ height: '34px', fontSize: '0.8rem' }}
+                  >
+                    Reset Filters
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className={styles.desktopTableContainer}>
+                    <div className={styles.classesTableCard}>
+                      <table className={styles.classesTable}>
+                        <thead>
+                          <tr>
+                            <th className={styles.colStudent}>Student</th>
+                            <th className={styles.colCourse}>Course</th>
+                            <th className={styles.colSchedule}>Date &amp; Slot</th>
+                            <th className={styles.colTeacher}>Teacher</th>
+                            <th className={styles.colStatus}>Status</th>
+                            <th className={styles.colNotes}>Notes</th>
+                            <th className={styles.colLoggedAt}>Logged At</th>
+                            <th className={styles.colActions}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredClassesRecords.map((rec) => {
+                            const student = students.find((s) => s.id === rec.studentId);
+                            const isAshu = (rec.markedByName || '').toLowerCase().includes('ashu') || (rec.markedBy || '').toLowerCase().includes('ashu');
+                            const isVaibhav = (rec.markedByName || '').toLowerCase().includes('vaibhav') || (rec.markedBy || '').toLowerCase().includes('vaibhav');
+
+                            return (
+                              <tr key={rec.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedRecordForInspection(rec)}>
+                                <td className={styles.colStudent}>
+                                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
+                                    {student?.name || 'Student ' + rec.studentId}
+                                  </div>
+                                  <div className={styles.monoCell} style={{ fontSize: '0.72rem' }}>
+                                    {student?.phone || rec.studentId}
+                                  </div>
+                                </td>
+
+                                <td className={styles.colCourse}>
+                                  <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 500 }}>
+                                    {student?.course || '—'}
+                                  </div>
+                                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                    {student?.batch || 'Regular'}
+                                  </div>
+                                </td>
+
+                                <td className={styles.colSchedule}>
+                                  <div className={styles.monoCellStrong}>
+                                    {rec.date}
+                                  </div>
+                                  <div className={styles.monoCell} style={{ fontSize: '0.72rem' }}>
+                                    {rec.timeSlot}
+                                  </div>
+                                </td>
+
+                                <td className={styles.colTeacher}>
+                                  <div className={styles.teacherTag}>
+                                    {isAshu ? 'Ashu' : isVaibhav ? 'Vaibhav' : (rec.markedByName || 'Staff')}
+                                  </div>
+                                  <div className={styles.teacherTagSub}>
+                                    {rec.markedBy}
+                                  </div>
+                                </td>
+
+                                <td className={styles.colStatus}>
+                                  {rec.status === 'PRESENT' && (
+                                    <span className={`${styles.statusTag} ${styles.statusPresent}`}>
+                                      Present
+                                    </span>
+                                  )}
+                                  {rec.status === 'ABSENT' && (
+                                    <span className={`${styles.statusTag} ${styles.statusAbsent}`}>
+                                      Absent
+                                    </span>
+                                  )}
+                                  {rec.status === 'PRACTICE_SESSION' && (
+                                    <span className={`${styles.statusTag} ${styles.statusNeutral}`}>
+                                      Practice
+                                    </span>
+                                  )}
+                                  {rec.status === 'GROUP_SESSION' && (
+                                    <span className={`${styles.statusTag} ${styles.statusNeutral}`}>
+                                      Group
+                                    </span>
+                                  )}
+                                  {rec.status === 'NA' && (
+                                    <span className={`${styles.statusTag} ${styles.statusNeutral}`}>
+                                      NA
+                                    </span>
+                                  )}
+                                </td>
+
+                                <td className={styles.colNotes}>
+                                  <div style={{ fontSize: '0.78rem', color: rec.comment ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                                    {rec.comment || '—'}
+                                  </div>
+                                </td>
+
+                                <td className={styles.colLoggedAt}>
+                                  <div className={styles.monoCell} style={{ fontSize: '0.72rem' }}>
+                                    {rec.updatedAt ? new Date(rec.updatedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true }) : '—'}
+                                  </div>
+                                </td>
+
+                                <td className={styles.colActions}>
+                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }} onClick={(e) => e.stopPropagation()}>
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedRecordForInspection(rec)}
+                                      className={styles.btnSecondary}
+                                      style={{ height: '26px', fontSize: '0.72rem', padding: '0 0.5rem' }}
+                                    >
+                                      Inspect
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedStudentId(rec.studentId);
+                                        setActiveTab('attendance');
+                                      }}
+                                      className={styles.btnSecondary}
+                                      style={{ height: '26px', fontSize: '0.72rem', padding: '0 0.5rem' }}
+                                    >
+                                      Sheet
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* MOBILE CARDS LIST VIEW */}
+                  <div className={styles.mobileCardList}>
+                    {filteredClassesRecords.map((rec) => {
+                      const student = students.find((s) => s.id === rec.studentId);
+                      const isAshu = (rec.markedByName || '').toLowerCase().includes('ashu') || (rec.markedBy || '').toLowerCase().includes('ashu');
+                      const isVaibhav = (rec.markedByName || '').toLowerCase().includes('vaibhav') || (rec.markedBy || '').toLowerCase().includes('vaibhav');
+
+                      return (
+                        <div key={rec.id} className={styles.mobileCard} onClick={() => setSelectedRecordForInspection(rec)}>
+                          <div className={styles.mobileCardHeader}>
+                            <div>
+                              <div className={styles.mobileCardTitle}>{student?.name || 'Student ' + rec.studentId}</div>
+                              <div className={styles.monoCell} style={{ fontSize: '0.72rem' }}>{student?.course || 'Enrolled Student'}</div>
+                            </div>
+                            <div>
+                              {rec.status === 'PRESENT' && <span className={`${styles.statusTag} ${styles.statusPresent}`}>Present</span>}
+                              {rec.status === 'ABSENT' && <span className={`${styles.statusTag} ${styles.statusAbsent}`}>Absent</span>}
+                              {rec.status === 'PRACTICE_SESSION' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Practice</span>}
+                              {rec.status === 'GROUP_SESSION' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Group</span>}
+                              {rec.status === 'NA' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>NA</span>}
+                            </div>
+                          </div>
+
+                          <div className={styles.mobileCardGrid}>
+                            <div className={styles.mobileCardItem}>
+                              <span className={styles.mobileCardLabel}>Date &amp; Slot</span>
+                              <span className={styles.monoCellStrong}>{rec.date} ({rec.timeSlot})</span>
+                            </div>
+                            <div className={styles.mobileCardItem}>
+                              <span className={styles.mobileCardLabel}>Teacher</span>
+                              <span className={styles.mobileCardValue}>
+                                {isAshu ? 'Ashu' : isVaibhav ? 'Vaibhav' : (rec.markedByName || 'Staff')}
+                              </span>
+                            </div>
+                            {rec.comment && (
+                              <div className={styles.mobileCardItem} style={{ gridColumn: 'span 2' }}>
+                                <span className={styles.mobileCardLabel}>Notes</span>
+                                <span className={styles.mobileCardValue}>{rec.comment}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className={styles.mobileCardActions} onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedRecordForInspection(rec)}
+                              className={styles.btnSecondary}
+                              style={{ height: '30px', fontSize: '0.75rem' }}
+                            >
+                              Inspect
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedStudentId(rec.studentId);
+                                setActiveTab('attendance');
+                              }}
+                              className={styles.btnSecondary}
+                              style={{ height: '30px', fontSize: '0.75rem' }}
+                            >
+                              Sheet
                             </button>
                           </div>
                         </div>
@@ -6629,6 +7653,174 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           </div>
         </div>
       )}
+
+      {/* RECORD DETAIL INSPECTION MODAL (ADMIN CLASSES SECTION) */}
+      {selectedRecordForInspection && (() => {
+        const rec = selectedRecordForInspection;
+        const student = students.find((s) => s.id === rec.studentId);
+        const isAshu = (rec.markedByName || '').toLowerCase().includes('ashu') || (rec.markedBy || '').toLowerCase().includes('ashu');
+        const isVaibhav = (rec.markedByName || '').toLowerCase().includes('vaibhav') || (rec.markedBy || '').toLowerCase().includes('vaibhav');
+        const studentAllRecords = allAttendanceRecords.filter((r) => r.studentId === rec.studentId);
+        const studentAshuCount = studentAllRecords.filter((r) => (r.markedByName || '').toLowerCase().includes('ashu') || (r.markedBy || '').toLowerCase().includes('ashu')).length;
+        const studentVaibhavCount = studentAllRecords.filter((r) => (r.markedByName || '').toLowerCase().includes('vaibhav') || (r.markedBy || '').toLowerCase().includes('vaibhav')).length;
+
+        return (
+          <div className={styles.modalOverlay} onClick={() => setSelectedRecordForInspection(null)}>
+            <div className={`${styles.modalCard} ${styles.detailInspectionModal}`} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <div
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '8px',
+                      background: 'rgba(56, 189, 248, 0.15)',
+                      border: '1px solid rgba(56, 189, 248, 0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#38bdf8',
+                    }}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className={styles.modalTitle}>Class Attendance Detail</h3>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      Session record &amp; teacher submission verification
+                    </div>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setSelectedRecordForInspection(null)} className={styles.closeModalBtn}>✕</button>
+              </div>
+
+              <div className={styles.modalBody} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                {/* CLEAN INSPECTION LIST */}
+                <div className={styles.inspectionList}>
+                  <div className={styles.inspectionRow}>
+                    <span className={styles.inspectionKey}>Student</span>
+                    <div className={styles.inspectionVal}>
+                      <div style={{ fontWeight: 600 }}>{student?.name || 'Student ' + rec.studentId}</div>
+                      <div className={styles.monoCell} style={{ fontSize: '0.75rem' }}>
+                        ID: {rec.studentId} • {student?.course || 'Enrolled Student'} ({student?.batch || 'Regular'})
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={styles.inspectionRow}>
+                    <span className={styles.inspectionKey}>Schedule</span>
+                    <div className={styles.inspectionVal}>
+                      <span className={styles.monoCellStrong}>{rec.date}</span>
+                      <span className={styles.monoCell} style={{ marginLeft: '0.5rem' }}>Slot: {rec.timeSlot}</span>
+                    </div>
+                  </div>
+
+                  <div className={styles.inspectionRow}>
+                    <span className={styles.inspectionKey}>Marked By Teacher</span>
+                    <div className={styles.inspectionVal}>
+                      <span style={{ fontWeight: 600 }}>{isAshu ? 'Ashu' : isVaibhav ? 'Vaibhav' : (rec.markedByName || 'Staff')}</span>
+                      <div className={styles.monoCell} style={{ fontSize: '0.75rem' }}>
+                        {rec.markedBy} (Role: {rec.markedByRole || 'teacher'})
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={styles.inspectionRow}>
+                    <span className={styles.inspectionKey}>Attendance Status</span>
+                    <div className={styles.inspectionVal}>
+                      {rec.status === 'PRESENT' && <span className={`${styles.statusTag} ${styles.statusPresent}`}>Present in Studio</span>}
+                      {rec.status === 'ABSENT' && <span className={`${styles.statusTag} ${styles.statusAbsent}`}>Absent / Missed</span>}
+                      {rec.status === 'PRACTICE_SESSION' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Practice Session</span>}
+                      {rec.status === 'GROUP_SESSION' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Group Masterclass</span>}
+                      {rec.status === 'NA' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Not Applicable</span>}
+                    </div>
+                  </div>
+
+                  <div className={styles.inspectionRow}>
+                    <span className={styles.inspectionKey}>Session Remarks</span>
+                    <div className={styles.inspectionVal} style={{ fontStyle: rec.comment ? 'normal' : 'italic', color: rec.comment ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                      {rec.comment || 'No specific notes recorded for this session.'}
+                    </div>
+                  </div>
+
+                  <div className={styles.inspectionRow}>
+                    <span className={styles.inspectionKey}>System Timestamp</span>
+                    <div className={styles.inspectionVal}>
+                      <span className={styles.monoCell}>
+                        {rec.updatedAt ? new Date(rec.updatedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '—'}
+                      </span>
+                      <div className={styles.monoCell} style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                        Record ID: {rec.id}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={styles.inspectionRow}>
+                    <span className={styles.inspectionKey}>Student History</span>
+                    <div className={styles.inspectionVal}>
+                      <span className={styles.monoCell}>
+                        {studentAllRecords.length} total classes logged ({studentAshuCount} with Ashu, {studentVaibhavCount} with Vaibhav)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* MODAL FOOTER ACTIONS */}
+              <div className={styles.modalFooter} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', gap: '0.4rem' }}>
+                  {student?.phone && (
+                    <a
+                      href={safeWhatsAppUrl(student.phone, `Hello ${student.name}, this is Soundabode Studios regarding your class session on ${rec.date} (${rec.timeSlot}).`)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={styles.btnSecondary}
+                      style={{ fontSize: '0.75rem', height: '32px', textDecoration: 'none' }}
+                    >
+                      WhatsApp
+                    </a>
+                  )}
+                  {student?.email && (
+                    <a
+                      href={safeMailto(student.email, `Soundabode Studios - Class Update (${rec.date})`, `Hello ${student.name},\n\nRegarding your class session on ${rec.date} at ${rec.timeSlot}.`)}
+                      className={styles.btnSecondary}
+                      style={{ fontSize: '0.75rem', height: '32px', textDecoration: 'none' }}
+                    >
+                      Email
+                    </a>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedStudentId(rec.studentId);
+                      setActiveTab('attendance');
+                      setSelectedRecordForInspection(null);
+                    }}
+                    className={styles.btnPrimary}
+                    style={{ fontSize: '0.78rem', height: '32px' }}
+                  >
+                    Student Sheet
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRecordForInspection(null)}
+                    className={styles.btnSecondary}
+                    style={{ fontSize: '0.78rem', height: '32px' }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* REAL-TIME LEAD NOTIFICATION TOAST */}
       {realtimeLeadToast && (

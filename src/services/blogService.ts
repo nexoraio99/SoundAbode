@@ -483,15 +483,158 @@ import { getApiBaseUrl } from './apiConfig';
 const LOCAL_STORAGE_KEY = 'soundabode_blog_posts';
 const API_BASE_URL = getApiBaseUrl();
 
+export function formatPostContent(rawContent?: string): string {
+  if (!rawContent) return '';
+  const trimmed = rawContent.trim();
+  if (!trimmed) return '';
+
+  // If already rich HTML with standard tags, return as is
+  if (/<(p|h1|h2|h3|h4|h5|h6|ul|ol|table|blockquote|div)\b/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  const formatInline = (text: string) => {
+    return text
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>');
+  };
+
+  const lines = trimmed.split('\n');
+  const result: string[] = [];
+  let inList = false;
+  let currentParagraph: string[] = [];
+
+  const flushParagraph = () => {
+    if (currentParagraph.length > 0) {
+      const pText = currentParagraph.join(' ').trim();
+      if (pText) {
+        result.push(`<p>${formatInline(pText)}</p>`);
+      }
+      currentParagraph = [];
+    }
+  };
+
+  const closeList = () => {
+    if (inList) {
+      result.push('</ul>');
+      inList = false;
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+
+    if (!line) {
+      flushParagraph();
+      closeList();
+      continue;
+    }
+
+    // Bullet points (• or - or *)
+    if (/^[•\-\*]\s+/.test(line)) {
+      flushParagraph();
+      if (!inList) {
+        result.push('<ul>');
+        inList = true;
+      }
+      const itemContent = line.replace(/^[•\-\*]\s+/, '');
+      const colonIdx = itemContent.indexOf(':');
+      if (colonIdx > 0 && colonIdx < 50 && !itemContent.startsWith('http')) {
+        const key = itemContent.slice(0, colonIdx);
+        const rest = itemContent.slice(colonIdx + 1);
+        result.push(`<li><strong>${key}:</strong>${formatInline(rest)}</li>`);
+      } else {
+        result.push(`<li>${formatInline(itemContent)}</li>`);
+      }
+      continue;
+    }
+
+    // Callout / note lines
+    if (line.startsWith('📌') || line.startsWith('👉') || line.startsWith('📞') || line.startsWith('📍') || line.startsWith('Note:') || line.startsWith('Hybrid Learning Note:')) {
+      flushParagraph();
+      closeList();
+      result.push(`<p><em>${formatInline(line)}</em></p>`);
+      continue;
+    }
+
+    // Heading lines
+    const isHeader =
+      /^(Step \d+:|Level \d+[^:]*:|\d+\.\s+[A-Z]|Why Pune|What to Look|Soundabode Academy:|What Tools|Career Paths|Music Production Course Fees|Frequently Asked Questions|Core Ableton|Learning Ableton|What Is Audio|Core Skills|Soundabode's Diploma|Audio Engineering vs|How to Choose|The 4-Level|The Professional Gear|From Pune to|Ready to)/i.test(line) ||
+      (line.length < 90 && !line.endsWith('.') && !line.endsWith(',') && !line.includes(';') && (line.endsWith('?') || /^[A-Z]/.test(line)) && i + 1 < lines.length && lines[i + 1].trim() === '');
+
+    if (isHeader) {
+      flushParagraph();
+      closeList();
+      result.push(`<h3>${formatInline(line)}</h3>`);
+      continue;
+    }
+
+    if (inList) {
+      closeList();
+    }
+    currentParagraph.push(line);
+  }
+
+  flushParagraph();
+  closeList();
+
+  return result.join('\n');
+}
+
 export class BlogService {
+  public static formatPostContent(content?: string): string {
+    return formatPostContent(content);
+  }
+
   public static normalizePost(post: any): BlogPost {
     if (!post) return post;
-    const authorName = post.author?.name || post.authorName || 'Soundabode';
+    const authorName = post.author?.name || post.authorName || (typeof post.author === 'string' ? post.author : 'Soundabode');
     const authorRole = post.author?.role || post.authorRole || 'Academy Editorial';
     const authorAvatarUrl = post.author?.avatarUrl || post.authorAvatarUrl || '';
 
+    const id = String(post.id || Date.now());
+    const title = post.title || post.heading || 'Soundabode Article';
+    const excerpt = post.excerpt || post.subheading || '';
+    const slug =
+      post.slug ||
+      title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '') ||
+      id;
+
+    const coverImage =
+      post.coverImage ||
+      post.imageUrl ||
+      post.metaImage ||
+      'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?q=80&w=1200&auto=format&fit=crop';
+    const ogImage = post.ogImage || post.metaImage || coverImage;
+    const focusKeyword = post.focusKeyword || post.targetKeyword || '';
+
+    let content = post.content || '';
+    // If content is missing, recover from OFFICIAL_BLOG_POSTS
+    if (!content || content.trim().length < 20) {
+      const official = OFFICIAL_BLOG_POSTS.find((p) => p.id === id || p.slug === slug);
+      if (official && official.content) {
+        content = official.content;
+      }
+    }
+
+    content = formatPostContent(content);
+
     return {
       ...post,
+      id,
+      slug,
+      title,
+      excerpt,
+      content,
+      category: (post.category || 'ACADEMY NEWS').toUpperCase() as any,
+      coverImage,
+      ogImage,
+      focusKeyword,
+      publishedAt: post.publishedAt || '2026-08-01',
+      readTimeMinutes: post.readTimeMinutes || 6,
       author: {
         name: authorName,
         role: authorRole,
