@@ -3188,8 +3188,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               </div>
 
               {/* UNIFIED FILTER TOOLBAR */}
-              <div className={styles.filterBar} style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
-                <div className={styles.searchBox} style={{ flex: '1 1 200px', maxWidth: '300px' }}>
+              <div className={styles.filterBar}>
+                <div className={styles.searchBox}>
                   <svg className={styles.searchIcon} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="11" cy="11" r="8" />
                     <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -3243,79 +3243,78 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   </button>
                 </div>
 
-                {/* STATUS FILTER */}
-                <select
-                  value={classesStatusFilter}
-                  onChange={(e) => setClassesStatusFilter(e.target.value)}
-                  className={styles.filterSelect}
-                  style={{ width: 'auto' }}
-                >
-                  <option value="ALL">All Statuses</option>
-                  <option value="PRESENT">Present</option>
-                  <option value="ABSENT">Absent</option>
-                  <option value="PRACTICE_SESSION">Practice</option>
-                  <option value="GROUP_SESSION">Group</option>
-                  <option value="NA">NA</option>
-                </select>
-
-                {/* DATE PRESET */}
-                <select
-                  value={classesDatePreset}
-                  onChange={(e) => setClassesDatePreset(e.target.value as typeof classesDatePreset)}
-                  className={styles.filterSelect}
-                  style={{ width: 'auto' }}
-                >
-                  <option value="ALL">All Dates</option>
-                  <option value="TODAY">Today</option>
-                  <option value="YESTERDAY">Yesterday</option>
-                  <option value="THIS_WEEK">This Week</option>
-                  <option value="THIS_MONTH">This Month</option>
-                  <option value="CUSTOM">Custom Date</option>
-                </select>
-
-                {classesDatePreset === 'CUSTOM' && (
-                  <input
-                    type="date"
-                    value={classesCustomDate}
-                    onChange={(e) => setClassesCustomDate(e.target.value)}
-                    className={styles.filterSelect}
-                    style={{ width: 'auto' }}
-                  />
-                )}
-
-                {/* COURSE FILTER */}
-                {distinctCourses.length > 0 && (
+                {/* FILTER SELECTS GROUP */}
+                <div className={styles.filterSelectGroup}>
+                  {/* STATUS FILTER */}
                   <select
-                    value={classesCourseFilter}
-                    onChange={(e) => setClassesCourseFilter(e.target.value)}
+                    value={classesStatusFilter}
+                    onChange={(e) => setClassesStatusFilter(e.target.value)}
                     className={styles.filterSelect}
-                    style={{ width: 'auto', maxWidth: '160px' }}
                   >
-                    <option value="ALL">All Courses</option>
-                    {distinctCourses.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
+                    <option value="ALL">All Statuses</option>
+                    <option value="PRESENT">Present</option>
+                    <option value="ABSENT">Absent</option>
+                    <option value="PRACTICE_SESSION">Practice</option>
+                    <option value="GROUP_SESSION">Group</option>
+                    <option value="NA">NA</option>
                   </select>
-                )}
 
-                {/* CLEAR FILTERS */}
-                {(classesTeacherFilter !== 'ALL' || classesStatusFilter !== 'ALL' || classesDatePreset !== 'ALL' || classesCourseFilter !== 'ALL' || classesSearch) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setClassesTeacherFilter('ALL');
-                      setClassesStatusFilter('ALL');
-                      setClassesDatePreset('ALL');
-                      setClassesCustomDate('');
-                      setClassesCourseFilter('ALL');
-                      setClassesSearch('');
-                    }}
-                    className={styles.btnSecondary}
-                    style={{ fontSize: '0.75rem', height: '32px' }}
+                  {/* DATE PRESET */}
+                  <select
+                    value={classesDatePreset}
+                    onChange={(e) => setClassesDatePreset(e.target.value as typeof classesDatePreset)}
+                    className={styles.filterSelect}
                   >
-                    Clear
-                  </button>
-                )}
+                    <option value="ALL">All Dates</option>
+                    <option value="TODAY">Today</option>
+                    <option value="YESTERDAY">Yesterday</option>
+                    <option value="THIS_WEEK">This Week</option>
+                    <option value="THIS_MONTH">This Month</option>
+                    <option value="CUSTOM">Custom Date</option>
+                  </select>
+
+                  {classesDatePreset === 'CUSTOM' && (
+                    <input
+                      type="date"
+                      value={classesCustomDate}
+                      onChange={(e) => setClassesCustomDate(e.target.value)}
+                      className={styles.filterSelect}
+                    />
+                  )}
+
+                  {/* COURSE FILTER */}
+                  {distinctCourses.length > 0 && (
+                    <select
+                      value={classesCourseFilter}
+                      onChange={(e) => setClassesCourseFilter(e.target.value)}
+                      className={styles.filterSelect}
+                    >
+                      <option value="ALL">All Courses</option>
+                      {distinctCourses.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {/* CLEAR FILTERS */}
+                  {(classesTeacherFilter !== 'ALL' || classesStatusFilter !== 'ALL' || classesDatePreset !== 'ALL' || classesCourseFilter !== 'ALL' || classesSearch) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClassesTeacherFilter('ALL');
+                        setClassesStatusFilter('ALL');
+                        setClassesDatePreset('ALL');
+                        setClassesCustomDate('');
+                        setClassesCourseFilter('ALL');
+                        setClassesSearch('');
+                      }}
+                      className={styles.btnSecondary}
+                      style={{ fontSize: '0.75rem', height: '32px' }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* DATA TABLE */}
@@ -3480,13 +3479,16 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       const student = students.find((s) => s.id === rec.studentId);
                       const isAshu = (rec.markedByName || '').toLowerCase().includes('ashu') || (rec.markedBy || '').toLowerCase().includes('ashu');
                       const isVaibhav = (rec.markedByName || '').toLowerCase().includes('vaibhav') || (rec.markedBy || '').toLowerCase().includes('vaibhav');
+                      const teacherName = isAshu ? 'Ashu' : isVaibhav ? 'Vaibhav' : (rec.markedByName || 'Abhinav');
 
                       return (
-                        <div key={rec.id} className={styles.mobileCard} onClick={() => setSelectedRecordForInspection(rec)}>
+                        <div key={rec.id} className={styles.mobileDataCard} onClick={() => setSelectedRecordForInspection(rec)}>
                           <div className={styles.mobileCardHeader}>
-                            <div>
+                            <div className={styles.mobileCardTitleBox}>
                               <div className={styles.mobileCardTitle}>{student?.name || 'Student ' + rec.studentId}</div>
-                              <div className={styles.monoCell} style={{ fontSize: '0.72rem' }}>{student?.course || 'Enrolled Student'}</div>
+                              <div className={styles.mobileCardSubText}>
+                                {student?.course || 'Enrolled Student'} {student?.batch ? `• ${student.batch}` : ''}
+                              </div>
                             </div>
                             <div>
                               {rec.status === 'PRESENT' && <span className={`${styles.statusTag} ${styles.statusPresent}`}>Present</span>}
@@ -3497,21 +3499,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             </div>
                           </div>
 
-                          <div className={styles.mobileCardGrid}>
-                            <div className={styles.mobileCardItem}>
+                          <div className={styles.mobileCardBody}>
+                            <div className={styles.mobileCardRow}>
                               <span className={styles.mobileCardLabel}>Date &amp; Slot</span>
-                              <span className={styles.monoCellStrong}>{rec.date} ({rec.timeSlot})</span>
-                            </div>
-                            <div className={styles.mobileCardItem}>
-                              <span className={styles.mobileCardLabel}>Teacher</span>
-                              <span className={styles.mobileCardValue}>
-                                {isAshu ? 'Ashu' : isVaibhav ? 'Vaibhav' : (rec.markedByName || 'Staff')}
+                              <span className={styles.monoCellStrong}>
+                                {rec.date} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({rec.timeSlot})</span>
                               </span>
                             </div>
+                            <div className={styles.mobileCardRow}>
+                              <span className={styles.mobileCardLabel}>Teacher</span>
+                              <span className={styles.mobileCardValue}>{teacherName}</span>
+                            </div>
                             {rec.comment && (
-                              <div className={styles.mobileCardItem} style={{ gridColumn: 'span 2' }}>
+                              <div className={styles.mobileCardRow} style={{ alignItems: 'flex-start' }}>
                                 <span className={styles.mobileCardLabel}>Notes</span>
-                                <span className={styles.mobileCardValue}>{rec.comment}</span>
+                                <span className={styles.mobileCardValue} style={{ maxWidth: '65%' }}>{rec.comment}</span>
                               </div>
                             )}
                           </div>
@@ -3521,7 +3523,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                               type="button"
                               onClick={() => setSelectedRecordForInspection(rec)}
                               className={styles.btnSecondary}
-                              style={{ height: '30px', fontSize: '0.75rem' }}
+                              style={{ height: '28px', fontSize: '0.72rem', padding: '0 0.6rem' }}
                             >
                               Inspect
                             </button>
@@ -3532,7 +3534,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 setActiveTab('attendance');
                               }}
                               className={styles.btnSecondary}
-                              style={{ height: '30px', fontSize: '0.75rem' }}
+                              style={{ height: '28px', fontSize: '0.72rem', padding: '0 0.6rem' }}
                             >
                               Sheet
                             </button>
@@ -3726,15 +3728,24 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 </td>
                                 <td>
                                   <span style={{
-                                    background: 'rgba(56, 189, 248, 0.15)',
-                                    color: '#38bdf8',
-                                    border: '1px solid rgba(56, 189, 248, 0.3)',
+                                    background: 'var(--bg-surface)',
+                                    color: 'var(--text-secondary)',
+                                    border: '1px solid var(--border-medium)',
                                     padding: '3px 10px',
                                     borderRadius: '12px',
                                     fontSize: '0.75rem',
-                                    fontWeight: 700
+                                    fontWeight: 600,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem'
                                   }}>
-                                    👥 {gs.studentIds.length} Student{gs.studentIds.length === 1 ? '' : 's'}
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                      <circle cx="9" cy="7" r="4"></circle>
+                                      <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                      <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                                    </svg>
+                                    {gs.studentIds.length} Student{gs.studentIds.length === 1 ? '' : 's'}
                                   </span>
                                 </td>
                                 <td>
@@ -5471,16 +5482,16 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     Update the secret passcode required to access soundabode.com/CMS-Admin.
                   </p>
 
-                  <form onSubmit={handleChangePasscode} style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                  <form onSubmit={handleChangePasscode} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                     <input
                       type="password"
                       placeholder="New admin passcode..."
                       value={newPasscode}
                       onChange={(e) => setNewPasscode(e.target.value)}
                       className={styles.formInput}
-                      style={{ maxWidth: '300px' }}
+                      style={{ maxWidth: '280px', flex: 1, minWidth: '180px' }}
                     />
-                    <button type="submit" className={styles.btnSecondary}>
+                    <button type="submit" className={styles.btnSecondary} style={{ height: '34px' }}>
                       Save Passcode
                     </button>
                   </form>

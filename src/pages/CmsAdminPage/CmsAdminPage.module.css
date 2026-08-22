@@ -241,16 +241,18 @@
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  min-height: 48px;
-  padding: 0 1rem;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 0.85rem;
   background: var(--accent-red);
   color: #ffffff;
-  font-size: 1rem;
+  font-size: 0.825rem;
   font-weight: 500;
   border-radius: var(--radius-btn);
   border: none;
   cursor: pointer;
   transition: background-color 0.15s ease;
+  white-space: nowrap;
 }
 
 .btnPrimary:hover {
@@ -262,17 +264,19 @@
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  min-height: 48px;
-  padding: 0 1rem;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 0.85rem;
   background: var(--bg-surface);
   border: 1px solid var(--border-medium);
   color: var(--text-secondary);
-  font-size: 1rem;
+  font-size: 0.825rem;
   font-weight: 500;
   border-radius: var(--radius-btn);
   text-decoration: none;
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .btnSecondary:hover {
@@ -286,16 +290,18 @@
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
-  min-height: 48px;
-  padding: 0 0.75rem;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 0.65rem;
   background: transparent;
   border: 1px solid transparent;
   color: var(--text-muted);
-  font-size: 0.875rem;
+  font-size: 0.8rem;
   font-weight: 500;
   border-radius: var(--radius-btn);
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .btnGhost:hover {
@@ -308,15 +314,18 @@
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
-  min-height: 48px;
-  padding: 0 0.75rem;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 0.65rem;
   background: transparent;
   border: 1px solid transparent;
   color: var(--text-muted);
-  font-size: 0.875rem;
+  font-size: 0.8rem;
+  font-weight: 500;
   border-radius: var(--radius-btn);
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .btnDestructive:hover {
@@ -1243,438 +1252,6 @@
   animation: pulseSkeleton 1.5s infinite ease-in-out;
 }
 
-/* RESPONSIVE DESIGN */
-@media (max-width: 1024px) {
-  .dashboardBody {
-    flex-direction: column;
-  }
-
-  .sidebar {
-    width: 100%;
-    flex-direction: row;
-    overflow-x: auto;
-    white-space: nowrap;
-    padding: 0.5rem 1rem;
-    gap: 0.5rem;
-    -webkit-overflow-scrolling: touch;
-    border-right: none;
-    border-bottom: 1px solid var(--border-subtle);
-    scrollbar-width: none; /* Firefox */
-  }
-
-  .sidebar::-webkit-scrollbar {
-    display: none; /* Chrome/Safari */
-  }
-
-  .sidebarBtn {
-    width: auto;
-    flex-shrink: 0;
-    white-space: nowrap;
-    padding: 0.6rem 1rem;
-    font-size: 0.875rem;
-    min-height: 48px;
-  }
-
-  .kpiGrid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .chartsGrid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 768px) {
-  .topAdminHeader {
-    padding: 0.5rem 1rem;
-  }
-
-  .pageTitle {
-    font-size: 1.5rem;
-    font-weight: 700;
-  }
-
-  .chartTitle {
-    font-size: 1.125rem;
-  }
-
-  .tableHeaderTitle {
-    font-size: 1.125rem;
-  }
-
-  .settingsCardTitle {
-    font-size: 1.125rem;
-  }
-
-  .pageHeaderRow {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
-  }
-
-  .filterBar {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.75rem;
-    padding: 0.75rem 1rem;
-  }
-
-  .searchInput {
-    max-width: 100%;
-    width: 100% !important;
-    min-height: 48px;
-    font-size: 1rem;
-  }
-
-  .selectInput {
-    width: 100% !important;
-    min-height: 48px;
-    font-size: 1rem;
-  }
-
-  .filterActionsRow {
-    width: 100%;
-    overflow-x: auto;
-    justify-content: flex-start;
-  }
-
-  .dataTable {
-    min-width: 660px;
-  }
-
-  .dataTable th {
-    font-size: 0.75rem;
-    padding: 0.75rem 1rem;
-    white-space: nowrap;
-  }
-
-  .dataTable td {
-    font-size: 0.875rem;
-    padding: 0.85rem 1rem;
-    white-space: nowrap;
-  }
-
-  .kpiLabelRow {
-    font-size: 0.75rem;
-  }
-
-  .kpiValue {
-    font-size: 1.75rem;
-  }
-
-  .kpiSubText {
-    font-size: 0.875rem;
-  }
-
-  .badge {
-    font-size: 0.75rem;
-    padding: 0.25rem 0.6rem;
-  }
-
-  .formLabel {
-    font-size: 0.75rem;
-  }
-
-  .formInput, .formTextarea, .formSelect {
-    font-size: 1rem;
-    padding: 0.65rem 0.85rem;
-    min-height: 48px;
-  }
-
-  .settingsCardDesc {
-    font-size: 0.875rem;
-    line-height: 1.5;
-  }
-
-  .pageMetaBadge {
-    font-size: 0.875rem;
-  }
-
-  .studentName {
-    font-size: 1rem;
-  }
-
-  .mobileCardRow {
-    font-size: 0.875rem;
-  }
-
-  .mobileCardTitle {
-    font-size: 1rem;
-  }
-
-  .mobileCardSubText {
-    font-size: 0.875rem;
-  }
-
-  .emptyStateTitle {
-    font-size: 1.125rem;
-  }
-
-  .emptyStateDesc {
-    font-size: 0.875rem;
-  }
-
-  .toastBody {
-    font-size: 1rem;
-  }
-
-  .toastTitle {
-    font-size: 0.75rem;
-  }
-}
-
-@media (max-width: 640px) {
-  .topAdminHeader {
-    padding: 0.5rem 1rem;
-    gap: 0.5rem;
-  }
-
-  .navBtnLabel {
-    display: none;
-  }
-
-  .mobileOnlyIcon {
-    display: inline-block;
-  }
-
-  .userBadgeText {
-    max-width: 100px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .dbStatusText {
-    display: none;
-  }
-
-  .contentArea {
-    padding: 1rem 1rem;
-    width: 100%;
-    overflow-x: hidden;
-  }
-
-  .pageHeaderRow {
-    margin-bottom: 1rem;
-  }
-
-  .pageTitle {
-    font-size: 1.75rem;
-    line-height: 1.2;
-  }
-
-  .chartTitle {
-    font-size: 1.125rem;
-  }
-
-  .modalTitle {
-    font-size: 1.25rem;
-  }
-
-  .kpiGrid {
-    grid-template-columns: 1fr;
-    gap: 0.75rem;
-  }
-
-  .kpiCard {
-    padding: 1rem;
-  }
-
-  .modalOverlay {
-    padding: 0.5rem;
-    align-items: flex-end;
-  }
-
-  .modalCard {
-    max-height: 94vh;
-    border-bottom-left-radius: 0;
-    border-bottom-right-radius: 0;
-  }
-
-  .modalHeader {
-    padding: 1rem;
-  }
-
-  .modalBody {
-    padding: 1rem;
-    gap: 1rem;
-  }
-
-  .leadContactGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .formRow {
-    grid-template-columns: 1fr !important;
-    gap: 1rem;
-  }
-
-  .modalFooter {
-    padding: 1rem;
-    flex-direction: column-reverse;
-    gap: 0.5rem;
-  }
-
-  .modalFooter button {
-    width: 100%;
-    min-height: 48px;
-    font-size: 1rem;
-  }
-
-  .realtimeLeadToast {
-    left: 1rem;
-    right: 1rem;
-    bottom: 1rem;
-    max-width: none;
-  }
-
-  .calendarGrid {
-    gap: 0.15rem;
-  }
-
-  .calendarDayCell {
-    min-height: 48px;
-    padding: 0.25rem;
-  }
-
-  /* ATTENDANCE SECTION MOBILE OVERRIDES */
-  .attendanceSubTabNav {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.75rem;
-  }
-
-  .attendanceSubTabBtns {
-    width: 100%;
-  }
-
-  .attendanceSubTabBtns > button,
-  .attendanceSubTabBtn {
-    flex: 1;
-    justify-content: center;
-    text-align: center;
-    font-size: 0.875rem;
-    padding: 0.65rem 0.75rem;
-    min-height: 48px;
-  }
-
-  .attendanceSubTabNav > .btnPrimary {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .kpiGridGroup {
-    grid-template-columns: repeat(2, 1fr) !important;
-    gap: 0.75rem;
-  }
-
-  .kpiGridStudentStats {
-    grid-template-columns: repeat(2, 1fr) !important;
-    gap: 0.75rem;
-  }
-
-  .timeSlotGrid {
-    grid-template-columns: 1fr !important;
-    gap: 0.75rem;
-  }
-
-  .attendanceHeaderActions {
-    width: 100%;
-    flex-wrap: wrap;
-  }
-
-  .attendanceHeaderActions > button {
-    flex: 1;
-    min-width: 0;
-    justify-content: center;
-    font-size: 0.875rem !important;
-    padding: 0 0.75rem !important;
-    min-height: 48px;
-  }
-
-  .calendarCard {
-    padding: 1rem;
-  }
-
-  .calendarHeaderDay {
-    font-size: 0.75rem;
-  }
-
-  .calendarDayNumber {
-    font-size: 0.875rem;
-  }
-
-  .timeSlotInspectorHeader {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.5rem;
-  }
-
-  .timeSlotInspectorHeader > h3 {
-    font-size: 1.125rem !important;
-  }
-
-  .timeSlotInspectorHeader > button {
-    width: 100%;
-    justify-content: center;
-    min-height: 48px;
-  }
-
-  .loginCard {
-    padding: 1.75rem 1.25rem !important;
-  }
-
-  .loginTitle {
-    font-size: 1.5rem;
-    font-weight: 700;
-  }
-
-  .loginSubtitle {
-    font-size: 0.875rem;
-  }
-
-  .passcodeInput {
-    min-height: 48px;
-    font-size: 1rem;
-  }
-
-  .brandLogoText {
-    font-size: 1rem;
-  }
-
-  .userBadge {
-    font-size: 0.75rem;
-    min-height: 48px;
-    padding: 0.25rem 0.75rem;
-  }
-
-  .dbStatusBadge {
-    font-size: 0.75rem;
-    min-height: 36px;
-    padding: 0.25rem 0.6rem;
-  }
-
-  .closeModalBtn {
-    min-width: 48px;
-    min-height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .toastCloseBtn {
-    min-width: 48px;
-    min-height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .sidebarBtn {
-    min-height: 48px;
-    font-size: 0.875rem;
-  }
-}
 
 /* REAL-TIME LEAD NOTIFICATION TOAST */
 .realtimeLeadToast {
@@ -1749,8 +1326,8 @@
   display: none;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  width: 36px;
+  height: 36px;
   background: var(--bg-surface);
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-btn);
@@ -1793,7 +1370,7 @@
 
 .mobileDrawer {
   width: 85%;
-  max-width: 320px;
+  max-width: 300px;
   height: 100%;
   background: var(--bg-panel);
   border-left: 1px solid var(--border-medium);
@@ -1810,7 +1387,7 @@
 }
 
 .mobileDrawerHeader {
-  padding: 1.25rem 1rem;
+  padding: 1rem;
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
@@ -1818,28 +1395,28 @@
 }
 
 .mobileDrawerUserCard {
-  padding: 1rem;
+  padding: 0.85rem 1rem;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 .mobileDrawerBody {
-  padding: 0.85rem 0.65rem;
+  padding: 0.75rem 0.65rem;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.25rem;
   flex: 1;
 }
 
 .mobileDrawerFooter {
-  padding: 1rem;
+  padding: 0.85rem 1rem;
   border-top: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 
 /* RESPONSIVE MOBILE DATA CARDS (REPLACES CLIPPED DESKTOP HTML TABLES ON MOBILE) */
@@ -1850,19 +1427,18 @@
 .mobileCardList {
   display: none;
   flex-direction: column;
-  gap: 0.85rem;
+  gap: 0.6rem;
 }
 
 .mobileDataCard {
   background: var(--bg-panel);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-card);
-  padding: 1rem;
-  box-shadow: var(--shadow-card);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  gap: 0.5rem;
+  transition: border-color 0.15s ease;
 }
 
 .mobileDataCard:hover {
@@ -1871,35 +1447,35 @@
 
 .mobileCardHeader {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.5rem;
 }
 
 .mobileCardTitleBox {
   display: flex;
-  align-items: center;
-  gap: 0.65rem;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
 }
 
 .mobileCardTitle {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-primary);
-  line-height: 1.2;
+  line-height: 1.25;
 }
 
 .mobileCardSubText {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
-  margin-top: 0.15rem;
 }
 
 .mobileCardBody {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.65rem 0;
+  gap: 0.35rem;
+  padding: 0.45rem 0;
   border-top: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border-subtle);
 }
@@ -1908,73 +1484,37 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
+  gap: 0.5rem;
 }
 
 .mobileCardLabel {
   color: var(--text-muted);
   font-weight: 500;
+  font-size: 0.72rem;
+  flex-shrink: 0;
 }
 
 .mobileCardValue {
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-weight: 500;
   text-align: right;
+  word-break: break-word;
 }
 
 .mobileCardActions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 0.25rem;
+  gap: 0.4rem;
 }
 
 .mobileCardActions button {
   flex: 1;
   justify-content: center;
-}
-
-/* MEDIA QUERIES FOR MOBILE ARCHITECTURE */
-@media (max-width: 768px) {
-  .hamburgerBtn {
-    display: inline-flex;
-  }
-
-  .desktopOnlyNav {
-    display: none !important;
-  }
-
-  .mobileOnlyNav {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .sidebar {
-    display: none !important; /* Managed by mobile drawer on mobile screens */
-  }
-
-  .desktopTableContainer {
-    display: none !important;
-  }
-
-  .mobileCardList {
-    display: flex !important;
-  }
-
-  /* Additional mobile attendance overrides at 768px */
-  .kpiGridGroup {
-    grid-template-columns: repeat(2, 1fr) !important;
-  }
-
-  .kpiGridStudentStats {
-    grid-template-columns: repeat(3, 1fr) !important;
-  }
-
-  .timeSlotGrid {
-    grid-template-columns: 1fr !important;
-  }
+  height: 28px !important;
+  font-size: 0.72rem !important;
+  padding: 0 0.5rem !important;
 }
 
 /* ==========================================================================
@@ -2349,6 +1889,13 @@
   flex-grow: 1;
 }
 
+.filterSelectGroup {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 1100px) {
   .summaryStatsStrip {
     grid-template-columns: repeat(2, 1fr);
@@ -2362,22 +1909,380 @@
   }
 }
 
-@media (max-width: 768px) {
-  .summaryStatsStrip {
+@media (max-width: 1024px) {
+  .dashboardBody {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    display: none !important;
+  }
+
+  .hamburgerBtn {
+    display: inline-flex !important;
+  }
+
+  .desktopOnlyNav {
+    display: none !important;
+  }
+
+  .mobileOnlyNav {
+    display: flex !important;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .kpiGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .chartsGrid {
     grid-template-columns: 1fr;
   }
+}
+
+@media (max-width: 768px) {
+  .topAdminHeader {
+    padding: 0.5rem 0.85rem;
+    min-height: 48px;
+  }
+
+  .hamburgerBtn {
+    display: inline-flex !important;
+  }
+
+  .desktopOnlyNav {
+    display: none !important;
+  }
+
+  .mobileOnlyNav {
+    display: flex !important;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .sidebar {
+    display: none !important;
+  }
+
+  .contentArea {
+    padding: 0.85rem 0.75rem !important;
+    width: 100%;
+    overflow-x: hidden;
+  }
+
+  .pageTitle {
+    font-size: 1.15rem;
+    font-weight: 600;
+  }
+
+  .pageMetaBadge {
+    font-size: 0.72rem;
+    gap: 0.3rem;
+  }
+
+  .pageHeaderRow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.65rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .pageHeaderRow > div:last-child {
+    width: 100%;
+    display: flex;
+    gap: 0.35rem;
+  }
+
+  .pageHeaderRow > div:last-child button {
+    flex: 1;
+    font-size: 0.75rem !important;
+    height: 32px !important;
+    padding: 0 0.4rem !important;
+  }
+
+  .summaryStatsStrip {
+    grid-template-columns: repeat(2, 1fr) !important;
+    border-radius: 8px;
+  }
+
   .summaryStatBlock {
-    border-right: none !important;
+    padding: 0.65rem 0.75rem !important;
+    gap: 0.2rem !important;
+    border-right: 1px solid var(--border-subtle) !important;
     border-bottom: 1px solid var(--border-subtle) !important;
   }
-  .summaryStatBlock:last-child {
+
+  .summaryStatBlock:nth-child(2n) {
+    border-right: none !important;
+  }
+
+  .summaryStatBlock:nth-last-child(-n+2) {
     border-bottom: none !important;
   }
+
+  .summaryStatTitle {
+    font-size: 0.75rem !important;
+  }
+
+  .summaryStatCount {
+    font-size: 1.3rem !important;
+  }
+
+  .summaryStatMeta {
+    font-size: 0.68rem !important;
+    gap: 0.3rem !important;
+  }
+
+  .classesContainer {
+    gap: 0.65rem !important;
+  }
+
+  .filterBar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0.55rem 0.65rem;
+    gap: 0.4rem;
+    margin-bottom: 0.65rem;
+  }
+
+  .searchBox {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    flex: none !important;
+    height: 34px !important;
+    margin: 0 !important;
+  }
+
+  .filterPillGroup {
+    width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.15rem;
+    gap: 0.2rem;
+  }
+
+  .filterPill {
+    flex-shrink: 0;
+    padding: 0.25rem 0.55rem;
+    font-size: 0.72rem;
+  }
+
+  .filterSelectGroup {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.35rem;
+  }
+
+  .filterSelectGroup .filterSelect {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 32px;
+    font-size: 0.75rem;
+    padding: 0 0.5rem;
+  }
+
+  .filterSelectGroup .btnSecondary {
+    grid-column: span 2;
+    height: 30px !important;
+    font-size: 0.75rem !important;
+    justify-content: center;
+  }
+
+  .kpiGrid,
+  .kpiGridGroup,
+  .kpiGridStudentStats {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.5rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .kpiCard {
+    padding: 0.75rem 0.85rem;
+  }
+
+  .kpiLabelRow {
+    font-size: 0.65rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .kpiValue {
+    font-size: 1.35rem;
+  }
+
+  .kpiSubText {
+    font-size: 0.7rem;
+    margin-top: 0.25rem;
+  }
+
+  .chartsGrid {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .chartCard {
+    padding: 1rem;
+  }
+
+  .chartTitle {
+    font-size: 0.85rem;
+  }
+
+  .desktopTableContainer {
+    display: none !important;
+  }
+
+  .mobileCardList {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .mobileDataCard {
+    padding: 0.75rem 0.85rem;
+    gap: 0.45rem;
+    border-radius: 8px;
+  }
+
+  .mobileCardTitle {
+    font-size: 0.85rem;
+  }
+
+  .mobileCardSubText {
+    font-size: 0.72rem;
+  }
+
+  .mobileCardBody {
+    gap: 0.35rem;
+    padding: 0.45rem 0;
+  }
+
+  .mobileCardRow {
+    font-size: 0.76rem;
+  }
+
+  .modalOverlay {
+    padding: 0.75rem;
+  }
+
+  .modalCard {
+    max-width: 96vw;
+    max-height: 90vh;
+    border-radius: 10px;
+  }
+
+  .modalHeader {
+    padding: 0.75rem 1rem;
+  }
+
+  .modalTitle {
+    font-size: 0.95rem;
+  }
+
+  .modalBody {
+    padding: 1rem;
+    gap: 0.75rem;
+  }
+
+  .formRow {
+    grid-template-columns: 1fr !important;
+    gap: 0.75rem;
+  }
+
+  .formLabel {
+    font-size: 0.68rem;
+  }
+
+  .formInput,
+  .formTextarea,
+  .formSelect {
+    height: 34px;
+    font-size: 0.8rem;
+    padding: 0 0.65rem;
+  }
+
+  .modalFooter {
+    padding: 0.75rem 1rem;
+    gap: 0.4rem;
+  }
+
+  .modalFooter button {
+    height: 32px;
+    font-size: 0.78rem;
+  }
+
+  .attendanceSubTabNav {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .attendanceSubTabBtns {
+    width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.25rem;
+  }
+
+  .attendanceSubTabBtn {
+    flex: 1;
+    justify-content: center;
+    font-size: 0.78rem;
+    height: 32px;
+    padding: 0 0.65rem;
+  }
+
+  .timeSlotGrid {
+    grid-template-columns: 1fr !important;
+    gap: 0.5rem;
+  }
+
+  .calendarCard {
+    padding: 0.75rem;
+  }
+
+  .calendarGrid {
+    gap: 2px;
+  }
+
+  .calendarDayCell {
+    min-height: 48px;
+    padding: 0.25rem;
+  }
+
+  .calendarHeaderDay {
+    font-size: 0.65rem;
+  }
+
+  .calendarDayNumber {
+    font-size: 0.75rem;
+  }
+
+  .leadContactGrid {
+    grid-template-columns: 1fr;
+    gap: 0.45rem;
+  }
+
+  .settingsContainer {
+    width: 100%;
+  }
+
+  .settingsCard {
+    padding: 1rem;
+  }
+
   .inspectionRow {
     flex-direction: column;
     align-items: flex-start;
     gap: 0.25rem;
   }
+
   .inspectionVal {
     text-align: left;
   }
