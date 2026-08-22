@@ -146,7 +146,7 @@ export const TryNowPage: React.FC<TryNowPageProps> = ({ onNavigateHome }) => {
 
   useEffect(() => {
     const handleOrientationChange = () => {
-      const isMobileDevice = window.innerWidth < 768 || window.innerHeight < 768;
+      const isMobileDevice = window.innerWidth < 1024;
       const isPortrait = window.innerHeight > window.innerWidth;
       setIsMobile(isMobileDevice);
       if (isMobileDevice && isPortrait) {
@@ -315,24 +315,30 @@ export const TryNowPage: React.FC<TryNowPageProps> = ({ onNavigateHome }) => {
               </button>
             )}
 
-            {rotated ? (
-              <div className={styles.landscapeViewportFrame} ref={stageRef}>
-                <div className={styles.landscapeNoticeBanner}>
-                  <span>LANDSCAPE MODE — Playable Dual-Deck View</span>
+            {isMobile ? (
+              rotated ? (
+                <div className={styles.landscapeViewportFrame} ref={stageRef}>
+                  <div className={styles.landscapeNoticeBanner}>
+                    <span>LANDSCAPE MODE — Playable Dual-Deck View</span>
+                  </div>
+                  <FitToFrameConsole
+                    showLibrary={showLibraryMobile}
+                    rotated
+                    stageRef={stageRef}
+                  />
                 </div>
-                <FitToFrameConsole
-                  showLibrary={showLibraryMobile}
-                  rotated
-                  stageRef={stageRef}
-                />
-              </div>
+              ) : (
+                <div className={styles.uprightStageFrame} ref={stageRef}>
+                  <FitToFrameConsole
+                    showLibrary={showLibraryMobile}
+                    rotated={false}
+                    stageRef={stageRef}
+                  />
+                </div>
+              )
             ) : (
-              <div className={styles.uprightStageFrame} ref={stageRef}>
-                <FitToFrameConsole
-                  showLibrary={showLibraryMobile || !isMobile}
-                  rotated={false}
-                  stageRef={stageRef}
-                />
+              <div className={styles.desktopConsoleFrame}>
+                <SoundabodeLiveConsole showLibrary={true} />
               </div>
             )}
           </div>

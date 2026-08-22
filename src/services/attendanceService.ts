@@ -211,7 +211,14 @@ export class AttendanceService {
       const stored = localStorage.getItem(ATTENDANCE_STORAGE_KEY);
       if (stored) {
         const parsed: AttendanceRecord[] = JSON.parse(stored);
-        return parsed.filter((r) => r && !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id));
+        const validStudentIds = new Set(this.getStoredStudents().map((s) => s.id));
+        const filtered = parsed.filter(
+          (r) => r && !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id) && validStudentIds.has(r.studentId)
+        );
+        if (filtered.length !== parsed.length) {
+          localStorage.setItem(ATTENDANCE_STORAGE_KEY, JSON.stringify(filtered));
+        }
+        return filtered;
       }
     } catch {
       // Fallback
@@ -279,7 +286,7 @@ export class AttendanceService {
 
   /**
    * Fetches latest attendance from remote MongoDB and syncs to localStorage.
-   * Call this explicitly when you want to refresh from server (not on every render).
+   * Cleans up any orphaned records for deleted/unknown students.
    */
   public static async fetchAndSyncFromRemote(): Promise<AttendanceRecord[]> {
     if (typeof window !== 'undefined') {
@@ -290,10 +297,32 @@ export class AttendanceService {
         if (res.ok) {
           const remoteRecords = await res.json();
           if (Array.isArray(remoteRecords)) {
-            const cleanRecords = remoteRecords.filter(
-              (r: AttendanceRecord) => r && !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id)
-            );
+            const validStudentIds = new Set(this.getStoredStudents().map((s) => s.id));
+            const cleanRecords: AttendanceRecord[] = [];
+            const orphanedRecordsToDelete: AttendanceRecord[] = [];
+
+            remoteRecords.forEach((r: AttendanceRecord) => {
+              if (!r) return;
+              if (['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id)) return;
+              if (validStudentIds.has(r.studentId)) {
+                cleanRecords.push(r);
+              } else {
+                orphanedRecordsToDelete.push(r);
+              }
+            });
+
             this.saveAttendance(cleanRecords);
+
+            // Asynchronously delete orphaned records on remote MongoDB
+            if (orphanedRecordsToDelete.length > 0) {
+              orphanedRecordsToDelete.forEach((r) => {
+                fetch(`${API_BASE_URL}/attendance/${r.id}`, {
+                  method: 'DELETE',
+                  headers: AuthService.getAuthHeaders(),
+                }).catch(() => {});
+              });
+            }
+
             return cleanRecords;
           }
         }
@@ -357,10 +386,24 @@ export class AttendanceService {
     const targetStudent = students.find((s) => s.id === id);
     students = students.filter((s) => s.id !== id);
     this.saveStudents(students);
-    this.notifyChange(this.getStoredAttendance());
+
+    // Also purge all attendance records for this student
+    let attendance = this.getStoredAttendance();
+    const recordsToDelete = attendance.filter((r) => r.studentId === id);
+    attendance = attendance.filter((r) => r.studentId !== id);
+    this.saveAttendance(attendance);
+    this.notifyChange(attendance);
 
     if (typeof window !== 'undefined') {
       try {
+        // Delete all remote attendance records for this student
+        recordsToDelete.forEach((r) => {
+          fetch(`${API_BASE_URL}/attendance/${r.id}`, {
+            method: 'DELETE',
+            headers: AuthService.getAuthHeaders(),
+          }).catch(() => {});
+        });
+
         const queryParams = new URLSearchParams();
         if (targetStudent?.email) queryParams.append('email', targetStudent.email);
         if (targetStudent?.name) queryParams.append('name', targetStudent.name);

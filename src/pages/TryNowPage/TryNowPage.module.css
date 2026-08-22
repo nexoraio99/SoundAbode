@@ -222,6 +222,18 @@
   overflow: hidden;
 }
 
+.desktopConsoleFrame {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 16px;
+  background: #040508;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.9);
+  padding: 16px;
+  box-sizing: border-box;
+}
+
 /* FULLSCREEN OVERLAY (Works 100% on iOS Safari, Android, and Desktop) */
 .fullscreenActiveOverlay {
   position: fixed !important;
@@ -243,12 +255,10 @@
   flex-direction: column !important;
   align-items: center !important;
   justify-content: center !important;
-  overflow: hidden !important;
+  overflow: auto !important;
 }
 
-/* In fullscreen, let the stage frames fill the whole overlay. The scaling
-   logic in JS re-measures the frame automatically (via ResizeObserver), so
-   no fixed calc() width/height hacks are needed here anymore. */
+/* In fullscreen, let the stage frames and desktop frame fill the whole overlay. */
 .fullscreenActiveOverlay .landscapeViewportFrame,
 .fullscreenActiveOverlay .uprightStageFrame {
   width: 100% !important;
@@ -258,6 +268,19 @@
   border: none !important;
   box-shadow: none !important;
   background: transparent !important;
+}
+
+.fullscreenActiveOverlay .desktopConsoleFrame {
+  width: 100% !important;
+  max-width: 1300px !important;
+  height: auto !important;
+  max-height: 100dvh !important;
+  border-radius: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 24px !important;
+  overflow-y: auto !important;
 }
 
 .exitFullscreenFloatingBtn {

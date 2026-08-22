@@ -1526,9 +1526,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     ? AttendanceService.getAttendanceForStudent(selectedStudentId, currentUser || undefined)
     : [];
 
-  const allAttendanceRecords = (attendanceVersion >= 0)
-    ? AttendanceService.getAllAttendanceRecords()
-    : [];
+  const allAttendanceRecords = useMemo(() => {
+    if (attendanceVersion < 0) return [];
+    const validStudentIds = new Set(students.map((s) => s.id));
+    return AttendanceService.getAllAttendanceRecords().filter((r) => validStudentIds.has(r.studentId));
+  }, [attendanceVersion, students]);
 
   const getGroupSessionDetails = (dateStr: string, slotStr?: string) => {
     const matchingRecords = allAttendanceRecords.filter((r) => {
@@ -1607,6 +1609,40 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       return dateMatch || slotMatch || commentMatch || studentMatch;
     });
   }, [groupSessionsList, groupTabSearchQuery]);
+
+  const totalGroupAttendeesCount = useMemo(() => {
+    return groupSessionsList.reduce((acc: number, s: (typeof groupSessionsList)[0]) => acc + s.studentIds.length, 0);
+  }, [groupSessionsList]);
+
+  const avgGroupAttendeesCount = useMemo(() => {
+    return groupSessionsList.length > 0
+      ? (totalGroupAttendeesCount / groupSessionsList.length).toFixed(1)
+      : '0';
+  }, [groupSessionsList, totalGroupAttendeesCount]);
+
+  const latestGroupSessionFormatted = useMemo(() => {
+    if (groupSessionsList.length === 0) return 'N/A';
+    const latestDate = groupSessionsList[0].date;
+    try {
+      const d = new Date(latestDate + 'T00:00:00');
+      if (isNaN(d.getTime())) return latestDate;
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch {
+      return latestDate;
+    }
+  }, [groupSessionsList]);
+
+  const formatGroupDateBadge = (dateStr: string) => {
+    try {
+      const d = new Date(dateStr + 'T00:00:00');
+      if (isNaN(d.getTime())) return { formatted: dateStr, day: 'Session' };
+      const formatted = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const day = d.toLocaleDateString('en-US', { weekday: 'short' });
+      return { formatted, day };
+    } catch {
+      return { formatted: dateStr, day: 'Session' };
+    }
+  };
 
   const handleDeleteGroupSession = async (dateStr: string, timeSlotStr: string) => {
     if (window.confirm(`Are you sure you want to delete the group session on ${dateStr} (${timeSlotStr})?`)) {
@@ -1722,13 +1758,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         groupMap.get(key)!.push(r);
       } else {
         const student = students.find((s) => s.id === r.studentId);
+        if (!student) return;
         entries.push({
           id: r.id,
           type: 'INDIVIDUAL',
           studentId: r.studentId,
           student,
           studentIds: [r.studentId],
-          students: student ? [student] : [],
+          students: [student],
           date: r.date,
           timeSlot: r.timeSlot,
           markedBy: r.markedBy,
@@ -1749,6 +1786,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       const attendingStudents = studentIds
         .map((id) => students.find((s) => s.id === id))
         .filter((s): s is EnrolledStudent => Boolean(s));
+
+      if (attendingStudents.length === 0) return;
 
       const distinctComments = Array.from(new Set(records.map((r) => r.comment).filter(Boolean))).join('; ');
       const latestUpdate = records.reduce((latest, r) => {
@@ -3906,7 +3945,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   <div className={styles.pageHeaderRow} style={{ marginBottom: '1rem' }}>
                     <div>
                       <h1 className={styles.pageTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.2">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                           <circle cx="9" cy="7" r="4" />
                           <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
@@ -3924,30 +3963,31 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                   {/* GROUP SESSION STATS KPIS */}
                   <div className={styles.kpiGridGroup}>
-                    <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
+                    <div className={styles.kpiCard}>
                       <div className={styles.kpiLabelRow}>Total Sessions</div>
-                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: 'var(--text-primary)' }}>
-                        {groupSessionsList.length}
-                      </div>
+                      <div className={styles.kpiValue}>{groupSessionsList.length}</div>
+                      <div className={styles.kpiSubText}>Recorded batch sessions</div>
                     </div>
-                    <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
+
+                    <div className={styles.kpiCard}>
                       <div className={styles.kpiLabelRow}>Total Attendees</div>
-                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: 'var(--text-primary)' }}>
-                        {groupSessionsList.reduce((acc: number, s: (typeof groupSessionsList)[0]) => acc + s.studentIds.length, 0)}
-                      </div>
+                      <div className={styles.kpiValue}>{totalGroupAttendeesCount}</div>
+                      <div className={styles.kpiSubText}>Combined student attendances</div>
                     </div>
-                    <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
+
+                    <div className={styles.kpiCard}>
                       <div className={styles.kpiLabelRow}>Avg Attendees/Session</div>
-                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: 'var(--text-primary)' }}>
-                        {groupSessionsList.length > 0
-                          ? (groupSessionsList.reduce((acc: number, s: (typeof groupSessionsList)[0]) => acc + s.studentIds.length, 0) / groupSessionsList.length).toFixed(1)
-                          : '0'}
-                      </div>
+                      <div className={styles.kpiValue}>{avgGroupAttendeesCount}</div>
+                      <div className={styles.kpiSubText}>Students per group session</div>
                     </div>
-                    <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
+
+                    <div className={styles.kpiCard}>
                       <div className={styles.kpiLabelRow}>Latest Session</div>
-                      <div className={styles.kpiValue} style={{ fontSize: '1.1rem', color: 'var(--text-primary)', marginTop: '4px' }}>
-                        {groupSessionsList.length > 0 ? groupSessionsList[0].date : 'N/A'}
+                      <div className={styles.kpiValue} style={{ fontSize: '1.2rem' }}>
+                        {latestGroupSessionFormatted}
+                      </div>
+                      <div className={styles.kpiSubText}>
+                        {groupSessionsList.length > 0 ? groupSessionsList[0].timeSlot : '—'}
                       </div>
                     </div>
                   </div>
@@ -3961,7 +4001,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       </svg>
                       <input
                         type="text"
-                        placeholder="Search by student name, date, or topics covered..."
+                        placeholder="Search by student name, date, or topics..."
                         value={groupTabSearchQuery}
                         onChange={(e) => setGroupTabSearchQuery(e.target.value)}
                         className={styles.searchInput}
@@ -3971,18 +4011,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                   {/* GROUP SESSIONS TABLE */}
                   {filteredGroupSessionsList.length === 0 ? (
-                    <div className={styles.tableCard} style={{ padding: '2.5rem', textAlign: 'center', color: '#8a99ad' }}>
-                      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ margin: '0 auto 0.75rem auto', opacity: 0.5 }}>
-                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                        <circle cx="9" cy="7" r="4" />
-                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                      </svg>
+                    <div className={styles.tableCard} style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                       <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
                         No Group Sessions Found
                       </div>
                       <div style={{ fontSize: '0.8rem' }}>
-                        {groupTabSearchQuery ? 'No group sessions match your search query.' : 'Click "Mark Group Session" above to record your first group session!'}
+                        {groupTabSearchQuery ? 'No group sessions match your search query.' : 'Click "Mark Group Session" above to record your first group session.'}
                       </div>
                     </div>
                   ) : (
@@ -3993,7 +4027,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           <thead>
                             <tr>
                               <th>Date &amp; Time Slot</th>
-                              <th>Attendees Count</th>
+                              <th>Attendees</th>
                               <th>Attending Students</th>
                               <th>Marked By</th>
                               <th>Session Comments</th>
@@ -4001,87 +4035,100 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             </tr>
                           </thead>
                           <tbody>
-                            {filteredGroupSessionsList.map((gs: (typeof groupSessionsList)[0]) => (
-                              <tr key={gs.id}>
-                                <td>
-                                  <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.85rem' }}>{gs.date}</div>
-                                  <div style={{ fontSize: '0.725rem', color: '#38bdf8', fontWeight: 600 }}>{gs.timeSlot}</div>
-                                </td>
-                                <td>
-                                  <span style={{
-                                    background: 'var(--bg-surface)',
-                                    color: 'var(--text-secondary)',
-                                    border: '1px solid var(--border-medium)',
-                                    padding: '3px 10px',
-                                    borderRadius: '12px',
-                                    fontSize: '0.75rem',
-                                    fontWeight: 600,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.35rem'
-                                  }}>
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                                      <circle cx="9" cy="7" r="4"></circle>
-                                      <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-                                      <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-                                    </svg>
-                                    {gs.studentIds.length} Student{gs.studentIds.length === 1 ? '' : 's'}
-                                  </span>
-                                </td>
-                                <td>
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', maxWidth: '340px' }}>
-                                    {gs.students.map((s: EnrolledStudent) => (
-                                      <span
-                                        key={s.id}
-                                        onClick={() => handleOpenStudentCalendar(s.id)}
-                                        style={{
-                                          fontSize: '0.725rem',
-                                          background: 'var(--bg-surface)',
-                                          color: 'var(--text-primary)',
-                                          border: '1px solid var(--border-subtle)',
-                                          padding: '2px 8px',
-                                          borderRadius: '10px',
-                                          fontWeight: 500,
-                                          cursor: 'pointer',
-                                        }}
-                                        title={`Click to view ${s.name}'s calendar`}
+                            {filteredGroupSessionsList.map((gs: (typeof groupSessionsList)[0]) => {
+                              const dateInfo = formatGroupDateBadge(gs.date);
+
+                              return (
+                                <tr key={gs.id}>
+                                  <td>
+                                    <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
+                                      {dateInfo.formatted}
+                                    </div>
+                                    <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                      {gs.timeSlot}
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <span style={{
+                                      background: 'var(--bg-surface)',
+                                      color: 'var(--text-secondary)',
+                                      border: '1px solid var(--border-medium)',
+                                      padding: '3px 10px',
+                                      borderRadius: '12px',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 600,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                    }}>
+                                      {gs.studentIds.length} Student{gs.studentIds.length === 1 ? '' : 's'}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', maxWidth: '340px' }}>
+                                      {gs.students.map((s: EnrolledStudent) => (
+                                        <span
+                                          key={s.id}
+                                          onClick={() => handleOpenStudentCalendar(s.id)}
+                                          style={{
+                                            fontSize: '0.725rem',
+                                            background: 'var(--bg-surface)',
+                                            color: 'var(--text-primary)',
+                                            border: '1px solid var(--border-subtle)',
+                                            padding: '2px 8px',
+                                            borderRadius: '6px',
+                                            fontWeight: 500,
+                                            cursor: 'pointer',
+                                          }}
+                                          title={`Click to view ${s.name}'s calendar`}
+                                        >
+                                          {s.name}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <div style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-primary)' }}>
+                                      {gs.markedByName || gs.markedBy || 'Staff'}
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <div
+                                      style={{
+                                        fontSize: '0.78rem',
+                                        color: gs.comment ? 'var(--text-secondary)' : 'var(--text-muted)',
+                                        maxWidth: '280px',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                      title={gs.comment || ''}
+                                    >
+                                      {gs.comment || '—'}
+                                    </div>
+                                  </td>
+                                  <td style={{ textAlign: 'right' }}>
+                                    <div style={{ display: 'inline-flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEditGroupSession(gs)}
+                                        className={styles.btnSecondary}
+                                        style={{ height: '28px', fontSize: '0.75rem', padding: '0 0.6rem' }}
                                       >
-                                        {s.name}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </td>
-                                <td>
-                                  <div style={{ fontSize: '0.775rem', fontWeight: 600, color: '#e11d48' }}>
-                                    {gs.markedByName || 'Staff'}
-                                  </div>
-                                </td>
-                                <td>
-                                  <div style={{ fontSize: '0.775rem', color: 'var(--text-secondary)', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {gs.comment || 'N/A'}
-                                  </div>
-                                </td>
-                                <td style={{ textAlign: 'right' }}>
-                                  <div style={{ display: 'inline-flex', gap: '0.4rem' }}>
-                                    <button
-                                      onClick={() => handleEditGroupSession(gs)}
-                                      className={styles.btnSecondary}
-                                      style={{ height: '28px', fontSize: '0.75rem', padding: '0 0.6rem' }}
-                                    >
-                                      Edit
-                                    </button>
-                                    <button
-                                      onClick={() => handleDeleteGroupSession(gs.date, gs.timeSlot)}
-                                      className={styles.btnDestructive}
-                                      style={{ height: '28px', fontSize: '0.75rem', padding: '0 0.6rem' }}
-                                    >
-                                      Delete
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
+                                        Edit
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteGroupSession(gs.date, gs.timeSlot)}
+                                        className={styles.btnDestructive}
+                                        style={{ height: '28px', fontSize: '0.75rem', padding: '0 0.6rem' }}
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -4089,76 +4136,79 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                     {/* GROUP SESSIONS MOBILE CARD LIST */}
                     <div className={styles.mobileCardList}>
-                      {filteredGroupSessionsList.map((gs: (typeof groupSessionsList)[0]) => (
-                        <div key={gs.id} className={styles.mobileDataCard}>
-                          <div className={styles.mobileCardHeader}>
-                            <div className={styles.mobileCardTitleBox}>
-                              <div>
-                                <div className={styles.mobileCardTitle}>{gs.date}</div>
-                                <div className={styles.mobileCardSubText} style={{ color: '#38bdf8', fontWeight: 600 }}>{gs.timeSlot}</div>
-                              </div>
-                            </div>
-                            <span className={styles.badge} style={{
-                              background: 'rgba(56, 189, 248, 0.15)',
-                              color: '#38bdf8',
-                              border: '1px solid rgba(56, 189, 248, 0.3)',
-                              fontSize: '0.7rem'
-                            }}>
-                              {gs.studentIds.length} Student{gs.studentIds.length === 1 ? '' : 's'}
-                            </span>
-                          </div>
+                      {filteredGroupSessionsList.map((gs: (typeof groupSessionsList)[0]) => {
+                        const dateInfo = formatGroupDateBadge(gs.date);
 
-                          <div className={styles.mobileCardBody}>
-                            <div className={styles.mobileCardRow}>
-                              <span className={styles.mobileCardLabel}>Marked By</span>
-                              <span className={styles.mobileCardValue} style={{ color: '#e11d48', fontWeight: 600 }}>{gs.markedByName || 'Staff'}</span>
+                        return (
+                          <div key={gs.id} className={styles.mobileDataCard}>
+                            <div className={styles.mobileCardHeader}>
+                              <div className={styles.mobileCardTitleBox}>
+                                <div>
+                                  <div className={styles.mobileCardTitle}>{dateInfo.formatted}</div>
+                                  <div className={styles.mobileCardSubText}>{gs.timeSlot}</div>
+                                </div>
+                              </div>
+                              <span className={styles.badge} style={{ fontSize: '0.7rem' }}>
+                                {gs.studentIds.length} Student{gs.studentIds.length === 1 ? '' : 's'}
+                              </span>
                             </div>
-                            {gs.comment && (
+
+                            <div className={styles.mobileCardBody}>
                               <div className={styles.mobileCardRow}>
-                                <span className={styles.mobileCardLabel}>Comments</span>
-                                <span className={styles.mobileCardValue} style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gs.comment}</span>
+                                <span className={styles.mobileCardLabel}>Marked By</span>
+                                <span className={styles.mobileCardValue}>{gs.markedByName || gs.markedBy || 'Staff'}</span>
                               </div>
-                            )}
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '0.25rem' }}>
-                              {gs.students.map((s: EnrolledStudent) => (
-                                <span
-                                  key={s.id}
-                                  onClick={() => handleOpenStudentCalendar(s.id)}
-                                  style={{
-                                    fontSize: '0.7rem',
-                                    background: 'var(--bg-surface)',
-                                    color: 'var(--text-primary)',
-                                    border: '1px solid var(--border-subtle)',
-                                    padding: '2px 8px',
-                                    borderRadius: '10px',
-                                    fontWeight: 500,
-                                    cursor: 'pointer',
-                                  }}
-                                >
-                                  {s.name}
-                                </span>
-                              ))}
+                              {gs.comment && (
+                                <div className={styles.mobileCardRow}>
+                                  <span className={styles.mobileCardLabel}>Comments</span>
+                                  <span className={styles.mobileCardValue} style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {gs.comment}
+                                  </span>
+                                </div>
+                              )}
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '0.25rem' }}>
+                                {gs.students.map((s: EnrolledStudent) => (
+                                  <span
+                                    key={s.id}
+                                    onClick={() => handleOpenStudentCalendar(s.id)}
+                                    style={{
+                                      fontSize: '0.7rem',
+                                      background: 'var(--bg-surface)',
+                                      color: 'var(--text-primary)',
+                                      border: '1px solid var(--border-subtle)',
+                                      padding: '2px 8px',
+                                      borderRadius: '6px',
+                                      fontWeight: 500,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {s.name}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className={styles.mobileCardActions}>
+                              <button
+                                type="button"
+                                onClick={() => handleEditGroupSession(gs)}
+                                className={styles.btnSecondary}
+                                style={{ height: '32px', fontSize: '0.75rem', flex: 1 }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteGroupSession(gs.date, gs.timeSlot)}
+                                className={styles.btnDestructive}
+                                style={{ height: '32px', fontSize: '0.75rem', flex: 1 }}
+                              >
+                                Delete
+                              </button>
                             </div>
                           </div>
-
-                          <div className={styles.mobileCardActions}>
-                            <button
-                              onClick={() => handleEditGroupSession(gs)}
-                              className={styles.btnSecondary}
-                              style={{ height: '34px', fontSize: '0.775rem' }}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDeleteGroupSession(gs.date, gs.timeSlot)}
-                              className={styles.btnDestructive}
-                              style={{ height: '34px', fontSize: '0.775rem', border: '1px solid var(--border-medium)' }}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                     </>
                   )}
