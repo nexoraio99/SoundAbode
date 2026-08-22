@@ -94,7 +94,58 @@ const formatLocalDateStr = (year: number, monthIndex: number, day: number): stri
   return `${yyyy}-${mm}-${dd}`;
 };
 
+// Helper: Normalize time slot string for resilient matching across formats
+const normalizeTimeSlot = (slot?: string): string => {
+  if (!slot) return '';
+  return slot
+    .replace(/[–—]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/0([0-9]):/g, '$1:')
+    .trim()
+    .toLowerCase();
+};
 
+// Helper: Resolve instructor identity, color, and role badge
+const getInstructorInfo = (rec?: { markedByName?: string; markedBy?: string }) => {
+  if (!rec) return { name: 'Staff', role: 'Instructor', color: 'var(--text-primary)', bg: 'var(--bg-surface)', border: 'var(--border-subtle)' };
+  const name = (rec.markedByName || '').toLowerCase();
+  const by = (rec.markedBy || '').toLowerCase();
+
+  if (name.includes('ashu') || by.includes('ashu')) {
+    return { name: 'Ashu', role: 'Faculty / Mentor', color: 'var(--text-primary)', bg: 'var(--bg-surface)', border: 'var(--border-medium)' };
+  }
+  if (name.includes('vaibhav') || by.includes('vaibhav')) {
+    return { name: 'Vaibhav', role: 'Faculty / Mentor', color: 'var(--text-primary)', bg: 'var(--bg-surface)', border: 'var(--border-medium)' };
+  }
+  if (name.includes('abhinav') || by.includes('abhinav') || by.includes('admin')) {
+    return { name: 'Abhinav', role: 'Lead / Admin', color: 'var(--text-primary)', bg: 'var(--bg-surface)', border: 'var(--border-medium)' };
+  }
+  return {
+    name: rec.markedByName || 'Soundabode Staff',
+    role: 'Instructor',
+    color: 'var(--text-primary)',
+    bg: 'var(--bg-surface)',
+    border: 'var(--border-subtle)',
+  };
+};
+
+export interface ClassLogEntry {
+  id: string;
+  type: 'INDIVIDUAL' | 'GROUP';
+  studentId?: string;
+  student?: EnrolledStudent;
+  studentIds: string[];
+  students: EnrolledStudent[];
+  date: string;
+  timeSlot: string;
+  markedBy?: string;
+  markedByName?: string;
+  markedByRole?: string;
+  status: 'PRESENT' | 'ABSENT' | 'PRACTICE_SESSION' | 'GROUP_SESSION' | 'NA';
+  comment?: string;
+  updatedAt?: string;
+  records: AttendanceRecord[];
+}
 
 export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   // Theme State (Dark / Light)
@@ -169,6 +220,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const [blogSearch, setBlogSearch] = useState('');
   const [blogCategoryFilter, setBlogCategoryFilter] = useState('ALL');
   const [inquiryStatusFilter, setInquiryStatusFilter] = useState<string>('ALL');
+  const [inquirySourceFilter, setInquirySourceFilter] = useState<string>('ALL');
   const [selectedInquiryIds, setSelectedInquiryIds] = useState<string[]>([]);
 
   // Students tab states
@@ -286,7 +338,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const [classesCustomDate, setClassesCustomDate] = useState<string>('');
   const [classesCourseFilter, setClassesCourseFilter] = useState<string>('ALL');
   const [classesSearch, setClassesSearch] = useState<string>('');
-  const [selectedRecordForInspection, setSelectedRecordForInspection] = useState<AttendanceRecord | null>(null);
+  const [selectedRecordForInspection, setSelectedRecordForInspection] = useState<ClassLogEntry | AttendanceRecord | null>(null);
   const [isClassesSyncing, setIsClassesSyncing] = useState<boolean>(false);
   const [classesFeedbackToast, setClassesFeedbackToast] = useState<string | null>(null);
 
@@ -295,7 +347,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const [settingsSuccessMsg, setSettingsSuccessMsg] = useState('');
   const [emailAlertsEnabled, setEmailAlertsEnabled] = useState(true);
   const [attendanceRemindersEnabled, setAttendanceRemindersEnabled] = useState(true);
-  const [realtimeLeadToast, setRealtimeLeadToast] = useState<{ name: string; courseInterest: string } | null>(null);
+  const [realtimeLeadToast, setRealtimeLeadToast] = useState<{ name: string; courseInterest: string; source?: string } | null>(null);
   const [dbStatus, setDbStatus] = useState<'connected' | 'connecting' | 'local'>('local');
 
   // Load data on mount and subscribe to real-time updates
@@ -325,6 +377,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         setRealtimeLeadToast({
           name: newInquiry.name,
           courseInterest: newInquiry.courseInterest,
+          source: newInquiry.attribution?.source || newInquiry.source || 'Direct',
         });
       }
     });
@@ -1401,8 +1454,38 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     return matchesCat && matchesSearch;
   });
 
+  const getSourceBadgeDetails = (inquiry: ContactInquiry) => {
+    const source = inquiry.attribution?.source || (inquiry.source && !['Contact Form', 'Pop-up Quick Enquiry Form'].includes(inquiry.source) ? inquiry.source : 'Direct');
+    const sourceLower = source.toLowerCase();
+
+    if (source === 'Meta Ads' || sourceLower.includes('meta') || sourceLower.includes('facebook') || sourceLower.includes('instagram')) {
+      return { label: 'Meta Ads', className: styles.badgeSourceMeta };
+    }
+    if (source === 'Google Ads' || sourceLower.includes('google')) {
+      return { label: 'Google Ads', className: styles.badgeSourceGoogle };
+    }
+    if (source === 'Organic/Referral' || sourceLower.includes('organic') || sourceLower.includes('referral')) {
+      return { label: 'Organic/Referral', className: styles.badgeSourceOrganic };
+    }
+    if (source.startsWith('Campaign:') || sourceLower.includes('campaign')) {
+      return { label: source, className: styles.badgeSourceCampaign };
+    }
+    return { label: source || 'Direct', className: styles.badgeSourceDirect };
+  };
+
   const filteredInquiries = inquiries.filter((inq) => {
-    return inquiryStatusFilter === 'ALL' || inq.status === inquiryStatusFilter;
+    const matchesStatus = inquiryStatusFilter === 'ALL' || inq.status === inquiryStatusFilter;
+    const resolvedSource = inq.attribution?.source || (inq.source && !['Contact Form', 'Pop-up Quick Enquiry Form'].includes(inq.source) ? inq.source : 'Direct');
+    
+    let matchesSource = true;
+    if (inquirySourceFilter !== 'ALL') {
+      if (inquirySourceFilter === 'Campaign') {
+        matchesSource = resolvedSource.startsWith('Campaign:') || Boolean(inq.attribution?.utm_source);
+      } else {
+        matchesSource = resolvedSource === inquirySourceFilter;
+      }
+    }
+    return matchesStatus && matchesSource;
   });
 
   const filteredAdmissions = admissions.filter((adm) => {
@@ -1626,60 +1709,132 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     return true;
   };
 
+  const allClassesLogEntries = useMemo<ClassLogEntry[]>(() => {
+    const entries: ClassLogEntry[] = [];
+    const groupMap = new Map<string, AttendanceRecord[]>();
+
+    allAttendanceRecords.forEach((r) => {
+      if (r.status === 'GROUP_SESSION') {
+        const key = `${r.date}___${normalizeTimeSlot(r.timeSlot)}`;
+        if (!groupMap.has(key)) {
+          groupMap.set(key, []);
+        }
+        groupMap.get(key)!.push(r);
+      } else {
+        const student = students.find((s) => s.id === r.studentId);
+        entries.push({
+          id: r.id,
+          type: 'INDIVIDUAL',
+          studentId: r.studentId,
+          student,
+          studentIds: [r.studentId],
+          students: student ? [student] : [],
+          date: r.date,
+          timeSlot: r.timeSlot,
+          markedBy: r.markedBy,
+          markedByName: r.markedByName,
+          markedByRole: r.markedByRole,
+          status: r.status,
+          comment: r.comment,
+          updatedAt: r.updatedAt,
+          records: [r],
+        });
+      }
+    });
+
+    groupMap.forEach((records, key) => {
+      if (records.length === 0) return;
+      const first = records[0];
+      const studentIds = Array.from(new Set(records.map((r) => r.studentId)));
+      const attendingStudents = studentIds
+        .map((id) => students.find((s) => s.id === id))
+        .filter((s): s is EnrolledStudent => Boolean(s));
+
+      const distinctComments = Array.from(new Set(records.map((r) => r.comment).filter(Boolean))).join('; ');
+      const latestUpdate = records.reduce((latest, r) => {
+        if (!r.updatedAt) return latest;
+        if (!latest) return r.updatedAt;
+        return new Date(r.updatedAt) > new Date(latest) ? r.updatedAt : latest;
+      }, first.updatedAt || '');
+
+      entries.push({
+        id: `group_${key}`,
+        type: 'GROUP',
+        studentIds,
+        students: attendingStudents,
+        date: first.date,
+        timeSlot: first.timeSlot,
+        markedBy: first.markedBy,
+        markedByName: first.markedByName,
+        markedByRole: first.markedByRole,
+        status: 'GROUP_SESSION',
+        comment: distinctComments || first.comment || '',
+        updatedAt: latestUpdate,
+        records,
+      });
+    });
+
+    return entries.sort((a, b) => {
+      const dateCmp = b.date.localeCompare(a.date);
+      if (dateCmp !== 0) return dateCmp;
+      return (b.updatedAt || '').localeCompare(a.updatedAt || '');
+    });
+  }, [allAttendanceRecords, students]);
+
   const filteredClassesRecords = useMemo(() => {
-    return allAttendanceRecords.filter((r) => {
+    return allClassesLogEntries.filter((entry) => {
       // 1. Teacher Filter
       if (classesTeacherFilter === 'ashu') {
-        const by = (r.markedBy || '').toLowerCase();
-        const name = (r.markedByName || '').toLowerCase();
+        const by = (entry.markedBy || '').toLowerCase();
+        const name = (entry.markedByName || '').toLowerCase();
         if (!by.includes('ashu') && !name.includes('ashu')) return false;
       } else if (classesTeacherFilter === 'vaibhav') {
-        const by = (r.markedBy || '').toLowerCase();
-        const name = (r.markedByName || '').toLowerCase();
+        const by = (entry.markedBy || '').toLowerCase();
+        const name = (entry.markedByName || '').toLowerCase();
         if (!by.includes('vaibhav') && !name.includes('vaibhav')) return false;
       } else if (classesTeacherFilter === 'abhinav' || classesTeacherFilter === 'admin') {
-        const by = (r.markedBy || '').toLowerCase();
-        const name = (r.markedByName || '').toLowerCase();
+        const by = (entry.markedBy || '').toLowerCase();
+        const name = (entry.markedByName || '').toLowerCase();
         if (by.includes('ashu') || name.includes('ashu') || by.includes('vaibhav') || name.includes('vaibhav')) return false;
       }
 
       // 2. Status Filter
-      if (classesStatusFilter !== 'ALL' && r.status !== classesStatusFilter) {
-        return false;
+      if (classesStatusFilter !== 'ALL') {
+        if (entry.status !== classesStatusFilter) return false;
       }
 
       // 3. Date Filter
-      if (!isDateInPreset(r.date, classesDatePreset, classesCustomDate)) {
+      if (!isDateInPreset(entry.date, classesDatePreset, classesCustomDate)) {
         return false;
       }
 
-      const student = students.find((s) => s.id === r.studentId);
-
       // 4. Course Filter
       if (classesCourseFilter !== 'ALL') {
-        if (!student || student.course !== classesCourseFilter) return false;
+        if (entry.type === 'INDIVIDUAL') {
+          if (!entry.student || entry.student.course !== classesCourseFilter) return false;
+        } else {
+          if (!entry.students.some((s) => s.course === classesCourseFilter)) return false;
+        }
       }
 
       // 5. Search Query
       if (classesSearch.trim()) {
         const q = classesSearch.toLowerCase().trim();
-        const studentName = (student?.name || '').toLowerCase();
-        const studentEmail = (student?.email || '').toLowerCase();
-        const studentPhone = (student?.phone || '').toLowerCase();
-        const courseName = (student?.course || '').toLowerCase();
-        const batchName = (student?.batch || '').toLowerCase();
-        const teacherName = (r.markedByName || '').toLowerCase();
-        const teacherEmail = (r.markedBy || '').toLowerCase();
-        const comment = (r.comment || '').toLowerCase();
-        const date = (r.date || '').toLowerCase();
-        const slot = (r.timeSlot || '').toLowerCase();
+        const matchesStudentName = entry.students.some((s) => s.name.toLowerCase().includes(q));
+        const matchesStudentEmail = entry.students.some((s) => (s.email || '').toLowerCase().includes(q));
+        const matchesStudentPhone = entry.students.some((s) => (s.phone || '').toLowerCase().includes(q));
+        const matchesCourse = entry.students.some((s) => (s.course || '').toLowerCase().includes(q));
+        const teacherName = (entry.markedByName || '').toLowerCase();
+        const teacherEmail = (entry.markedBy || '').toLowerCase();
+        const comment = (entry.comment || '').toLowerCase();
+        const date = (entry.date || '').toLowerCase();
+        const slot = (entry.timeSlot || '').toLowerCase();
 
         const matches =
-          studentName.includes(q) ||
-          studentEmail.includes(q) ||
-          studentPhone.includes(q) ||
-          courseName.includes(q) ||
-          batchName.includes(q) ||
+          matchesStudentName ||
+          matchesStudentEmail ||
+          matchesStudentPhone ||
+          matchesCourse ||
           teacherName.includes(q) ||
           teacherEmail.includes(q) ||
           comment.includes(q) ||
@@ -1692,14 +1847,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       return true;
     });
   }, [
-    allAttendanceRecords,
+    allClassesLogEntries,
     classesTeacherFilter,
     classesStatusFilter,
     classesDatePreset,
     classesCustomDate,
     classesCourseFilter,
     classesSearch,
-    students,
   ]);
 
   const ashuAnalytics = useMemo(() => {
@@ -1797,18 +1951,31 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       'Teacher Name',
       'Teacher Email',
       'Teacher Role',
-      'Student Name',
-      'Student Email',
-      'Student Phone',
+      'Student Name(s)',
+      'Student Email(s)',
+      'Student Phone(s)',
       'Course',
-      'Batch',
+      'Batch / Type',
       'Attendance Status',
       'Remarks / Topics Covered',
       'Marked At',
     ];
 
     const rows = filteredClassesRecords.map((rec) => {
-      const student = students.find((s) => s.id === rec.studentId);
+      const studentNames = rec.type === 'GROUP'
+        ? rec.students.map((s) => s.name).join('; ') || rec.studentIds.join('; ')
+        : (rec.student?.name || rec.studentId || '');
+      const studentEmails = rec.type === 'GROUP'
+        ? rec.students.map((s) => s.email).filter(Boolean).join('; ')
+        : (rec.student?.email || '');
+      const studentPhones = rec.type === 'GROUP'
+        ? rec.students.map((s) => s.phone).filter(Boolean).join('; ')
+        : (rec.student?.phone || '');
+      const courses = rec.type === 'GROUP'
+        ? Array.from(new Set(rec.students.map((s) => s.course).filter(Boolean))).join('; ') || 'Group Masterclass'
+        : (rec.student?.course || '');
+      const batch = rec.type === 'GROUP' ? 'Group Session' : (rec.student?.batch || '');
+
       return [
         `"${rec.id}"`,
         `"${rec.date}"`,
@@ -1816,12 +1983,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         `"${(rec.markedByName || 'Staff').replace(/"/g, '""')}"`,
         `"${(rec.markedBy || '').replace(/"/g, '""')}"`,
         `"${rec.markedByRole || 'teacher'}"`,
-        `"${(student?.name || rec.studentId).replace(/"/g, '""')}"`,
-        `"${(student?.email || '').replace(/"/g, '""')}"`,
-        `"${(student?.phone || '').replace(/"/g, '""')}"`,
-        `"${(student?.course || '').replace(/"/g, '""')}"`,
-        `"${(student?.batch || '').replace(/"/g, '""')}"`,
-        `"${rec.status}"`,
+        `"${studentNames.replace(/"/g, '""')}"`,
+        `"${studentEmails.replace(/"/g, '""')}"`,
+        `"${studentPhones.replace(/"/g, '""')}"`,
+        `"${courses.replace(/"/g, '""')}"`,
+        `"${batch.replace(/"/g, '""')}"`,
+        `"${rec.status === 'GROUP_SESSION' ? `Group (${rec.students.length} students)` : rec.status}"`,
         `"${(rec.comment || '').replace(/"/g, '""')}"`,
         `"${rec.updatedAt || ''}"`,
       ].join(',');
@@ -1846,16 +2013,24 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
     const rowsHtml = filteredClassesRecords
       .map((rec) => {
-        const student = students.find((s) => s.id === rec.studentId);
+        const studentNames = rec.type === 'GROUP'
+          ? `Group: ${rec.students.map((s) => s.name).join(', ') || `${rec.students.length} Students`}`
+          : (rec.student?.name || rec.studentId || '—');
+        const course = rec.type === 'GROUP'
+          ? Array.from(new Set(rec.students.map((s) => s.course).filter(Boolean))).join(', ') || 'Group Masterclass'
+          : (rec.student?.course || '—');
+        const batch = rec.type === 'GROUP' ? 'Group Session' : (rec.student?.batch || '—');
+        const status = rec.status === 'GROUP_SESSION' ? `Group (${rec.students.length})` : rec.status;
+
         return `
           <tr>
             <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${escapeHtml(rec.date)}</td>
             <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(rec.timeSlot)}</td>
             <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${escapeHtml(rec.markedByName || 'Staff')} (${escapeHtml(rec.markedBy || '')})</td>
-            <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${escapeHtml(student?.name || rec.studentId)}</td>
-            <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(student?.course || '—')}</td>
-            <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(student?.batch || '—')}</td>
-            <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${escapeHtml(rec.status)}</td>
+            <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${escapeHtml(studentNames)}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(course)}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(batch)}</td>
+            <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${escapeHtml(status)}</td>
             <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(rec.comment || '—')}</td>
           </tr>
         `;
@@ -2651,6 +2826,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       <th>Prospect</th>
                       <th>Program</th>
                       <th>Contact Details</th>
+                      <th>Source</th>
                       <th>Status</th>
                       <th style={{ textAlign: 'right' }}>Action</th>
                     </tr>
@@ -2658,6 +2834,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   <tbody>
                     {inquiries.slice(0, 5).map((inq) => {
                       const avatar = getAvatarDetails(inq.name);
+                      const sourceBadge = getSourceBadgeDetails(inq);
                       return (
                         <tr key={inq.id}>
                           <td>
@@ -2676,6 +2853,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           </td>
                           <td>
                             <div style={{ fontSize: '0.775rem', color: 'var(--text-muted)' }}>{inq.email}</div>
+                          </td>
+                          <td>
+                            <span className={`${styles.badge} ${sourceBadge.className}`} title={`Lead Source: ${sourceBadge.label}`}>
+                              <span className={styles.statusDot} />
+                              {sourceBadge.label}
+                            </span>
                           </td>
                           <td>
                             <button
@@ -3360,28 +3543,70 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         </thead>
                         <tbody>
                           {filteredClassesRecords.map((rec) => {
-                            const student = students.find((s) => s.id === rec.studentId);
+                            const isGroup = rec.type === 'GROUP';
                             const isAshu = (rec.markedByName || '').toLowerCase().includes('ashu') || (rec.markedBy || '').toLowerCase().includes('ashu');
                             const isVaibhav = (rec.markedByName || '').toLowerCase().includes('vaibhav') || (rec.markedBy || '').toLowerCase().includes('vaibhav');
+                            const teacherName = isAshu ? 'Ashu' : isVaibhav ? 'Vaibhav' : (rec.markedByName || 'Staff');
 
                             return (
                               <tr key={rec.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedRecordForInspection(rec)}>
                                 <td className={styles.colStudent}>
-                                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
-                                    {student?.name || 'Student ' + rec.studentId}
-                                  </div>
-                                  <div className={styles.monoCell} style={{ fontSize: '0.72rem' }}>
-                                    {student?.phone || rec.studentId}
-                                  </div>
+                                  {isGroup ? (
+                                    <div>
+                                      <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
+                                        Group Session ({rec.students.length} Students)
+                                      </div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.35rem' }}>
+                                        {rec.students.map((st) => (
+                                          <span
+                                            key={st.id}
+                                            style={{
+                                              fontSize: '0.72rem',
+                                              background: 'var(--bg-surface)',
+                                              color: 'var(--text-primary)',
+                                              border: '1px solid var(--border-subtle)',
+                                              padding: '1px 6px',
+                                              borderRadius: '4px',
+                                              fontWeight: 500,
+                                            }}
+                                          >
+                                            {st.name}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
+                                        {rec.student?.name || 'Student ' + rec.studentId}
+                                      </div>
+                                      <div className={styles.monoCell} style={{ fontSize: '0.72rem' }}>
+                                        {rec.student?.phone || rec.studentId}
+                                      </div>
+                                    </>
+                                  )}
                                 </td>
 
                                 <td className={styles.colCourse}>
-                                  <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 500 }}>
-                                    {student?.course || '—'}
-                                  </div>
-                                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                    {student?.batch || 'Regular'}
-                                  </div>
+                                  {isGroup ? (
+                                    <>
+                                      <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 500 }}>
+                                        {Array.from(new Set(rec.students.map((s) => s.course).filter(Boolean))).join(', ') || 'Group Masterclass'}
+                                      </div>
+                                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                        Group Session
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 500 }}>
+                                        {rec.student?.course || '—'}
+                                      </div>
+                                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                        {rec.student?.batch || 'Regular'}
+                                      </div>
+                                    </>
+                                  )}
                                 </td>
 
                                 <td className={styles.colSchedule}>
@@ -3395,7 +3620,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                                 <td className={styles.colTeacher}>
                                   <div className={styles.teacherTag}>
-                                    {isAshu ? 'Ashu' : isVaibhav ? 'Vaibhav' : (rec.markedByName || 'Staff')}
+                                    {teacherName}
                                   </div>
                                   <div className={styles.teacherTagSub}>
                                     {rec.markedBy}
@@ -3403,30 +3628,33 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 </td>
 
                                 <td className={styles.colStatus}>
-                                  {rec.status === 'PRESENT' && (
-                                    <span className={`${styles.statusTag} ${styles.statusPresent}`}>
-                                      Present
-                                    </span>
-                                  )}
-                                  {rec.status === 'ABSENT' && (
-                                    <span className={`${styles.statusTag} ${styles.statusAbsent}`}>
-                                      Absent
-                                    </span>
-                                  )}
-                                  {rec.status === 'PRACTICE_SESSION' && (
+                                  {isGroup ? (
                                     <span className={`${styles.statusTag} ${styles.statusNeutral}`}>
-                                      Practice
+                                      Group ({rec.students.length})
                                     </span>
-                                  )}
-                                  {rec.status === 'GROUP_SESSION' && (
-                                    <span className={`${styles.statusTag} ${styles.statusNeutral}`}>
-                                      Group
-                                    </span>
-                                  )}
-                                  {rec.status === 'NA' && (
-                                    <span className={`${styles.statusTag} ${styles.statusNeutral}`}>
-                                      NA
-                                    </span>
+                                  ) : (
+                                    <>
+                                      {rec.status === 'PRESENT' && (
+                                        <span className={`${styles.statusTag} ${styles.statusPresent}`}>
+                                          Present
+                                        </span>
+                                      )}
+                                      {rec.status === 'ABSENT' && (
+                                        <span className={`${styles.statusTag} ${styles.statusAbsent}`}>
+                                          Absent
+                                        </span>
+                                      )}
+                                      {rec.status === 'PRACTICE_SESSION' && (
+                                        <span className={`${styles.statusTag} ${styles.statusNeutral}`}>
+                                          Practice
+                                        </span>
+                                      )}
+                                      {rec.status === 'NA' && (
+                                        <span className={`${styles.statusTag} ${styles.statusNeutral}`}>
+                                          NA
+                                        </span>
+                                      )}
+                                    </>
                                   )}
                                 </td>
 
@@ -3452,17 +3680,33 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                     >
                                       Inspect
                                     </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedStudentId(rec.studentId);
-                                        setActiveTab('attendance');
-                                      }}
-                                      className={styles.btnSecondary}
-                                      style={{ height: '26px', fontSize: '0.72rem', padding: '0 0.5rem' }}
-                                    >
-                                      Sheet
-                                    </button>
+                                    {!isGroup && rec.studentId ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedStudentId(rec.studentId!);
+                                          setActiveTab('attendance');
+                                        }}
+                                        className={styles.btnSecondary}
+                                        style={{ height: '26px', fontSize: '0.72rem', padding: '0 0.5rem' }}
+                                      >
+                                        Sheet
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedStudentId(null);
+                                          setGroupSessionDate(rec.date);
+                                          setAttendanceSubTab('group');
+                                          setActiveTab('attendance');
+                                        }}
+                                        className={styles.btnSecondary}
+                                        style={{ height: '26px', fontSize: '0.72rem', padding: '0 0.5rem' }}
+                                      >
+                                        Batch
+                                      </button>
+                                    )}
                                   </div>
                                 </td>
                               </tr>
@@ -3476,7 +3720,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   {/* MOBILE CARDS LIST VIEW */}
                   <div className={styles.mobileCardList}>
                     {filteredClassesRecords.map((rec) => {
-                      const student = students.find((s) => s.id === rec.studentId);
+                      const isGroup = rec.type === 'GROUP';
                       const isAshu = (rec.markedByName || '').toLowerCase().includes('ashu') || (rec.markedBy || '').toLowerCase().includes('ashu');
                       const isVaibhav = (rec.markedByName || '').toLowerCase().includes('vaibhav') || (rec.markedBy || '').toLowerCase().includes('vaibhav');
                       const teacherName = isAshu ? 'Ashu' : isVaibhav ? 'Vaibhav' : (rec.markedByName || 'Abhinav');
@@ -3485,21 +3729,40 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         <div key={rec.id} className={styles.mobileDataCard} onClick={() => setSelectedRecordForInspection(rec)}>
                           <div className={styles.mobileCardHeader}>
                             <div className={styles.mobileCardTitleBox}>
-                              <div className={styles.mobileCardTitle}>{student?.name || 'Student ' + rec.studentId}</div>
+                              <div className={styles.mobileCardTitle}>
+                                {isGroup ? `Group Session (${rec.students.length} Students)` : (rec.student?.name || 'Student ' + rec.studentId)}
+                              </div>
                               <div className={styles.mobileCardSubText}>
-                                {student?.course || 'Enrolled Student'} {student?.batch ? `• ${student.batch}` : ''}
+                                {isGroup ? (Array.from(new Set(rec.students.map((s) => s.course).filter(Boolean))).join(', ') || 'Group Masterclass') : `${rec.student?.course || 'Enrolled Student'} ${rec.student?.batch ? `• ${rec.student.batch}` : ''}`}
                               </div>
                             </div>
                             <div>
-                              {rec.status === 'PRESENT' && <span className={`${styles.statusTag} ${styles.statusPresent}`}>Present</span>}
-                              {rec.status === 'ABSENT' && <span className={`${styles.statusTag} ${styles.statusAbsent}`}>Absent</span>}
-                              {rec.status === 'PRACTICE_SESSION' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Practice</span>}
-                              {rec.status === 'GROUP_SESSION' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Group</span>}
-                              {rec.status === 'NA' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>NA</span>}
+                              {isGroup ? (
+                                <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Group ({rec.students.length})</span>
+                              ) : (
+                                <>
+                                  {rec.status === 'PRESENT' && <span className={`${styles.statusTag} ${styles.statusPresent}`}>Present</span>}
+                                  {rec.status === 'ABSENT' && <span className={`${styles.statusTag} ${styles.statusAbsent}`}>Absent</span>}
+                                  {rec.status === 'PRACTICE_SESSION' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Practice</span>}
+                                  {rec.status === 'NA' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>NA</span>}
+                                </>
+                              )}
                             </div>
                           </div>
 
                           <div className={styles.mobileCardBody}>
+                            {isGroup && (
+                              <div style={{ marginBottom: '0.35rem' }}>
+                                <span className={styles.mobileCardLabel} style={{ display: 'block', marginBottom: '0.25rem' }}>Students:</span>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                                  {rec.students.map((st) => (
+                                    <span key={st.id} style={{ fontSize: '0.72rem', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', padding: '1px 5px', borderRadius: '4px', color: 'var(--text-primary)' }}>
+                                      {st.name}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                             <div className={styles.mobileCardRow}>
                               <span className={styles.mobileCardLabel}>Date &amp; Slot</span>
                               <span className={styles.monoCellStrong}>
@@ -3527,17 +3790,33 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             >
                               Inspect
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedStudentId(rec.studentId);
-                                setActiveTab('attendance');
-                              }}
-                              className={styles.btnSecondary}
-                              style={{ height: '28px', fontSize: '0.72rem', padding: '0 0.6rem' }}
-                            >
-                              Sheet
-                            </button>
+                            {!isGroup && rec.studentId ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedStudentId(rec.studentId!);
+                                  setActiveTab('attendance');
+                                }}
+                                className={styles.btnSecondary}
+                                style={{ height: '28px', fontSize: '0.72rem', padding: '0 0.6rem' }}
+                              >
+                                Sheet
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedStudentId(null);
+                                  setGroupSessionDate(rec.date);
+                                  setAttendanceSubTab('group');
+                                  setActiveTab('attendance');
+                                }}
+                                className={styles.btnSecondary}
+                                style={{ height: '28px', fontSize: '0.72rem', padding: '0 0.6rem' }}
+                              >
+                                Batch
+                              </button>
+                            )}
                           </div>
                         </div>
                       );
@@ -3602,19 +3881,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </button>
                   </div>
 
-                  <button
-                    onClick={() => handleOpenGroupAttendanceModal()}
-                    className={styles.btnPrimary}
-                    style={{ gap: '0.45rem', fontWeight: 600, fontSize: '0.8rem' }}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                      <circle cx="9" cy="7" r="4" />
-                      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                    </svg>
-                    Mark Group Session
-                  </button>
+                  {attendanceSubTab === 'group' && (
+                    <button
+                      onClick={() => handleOpenGroupAttendanceModal()}
+                      className={styles.btnPrimary}
+                      style={{ gap: '0.45rem', fontWeight: 600, fontSize: '0.8rem' }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                      </svg>
+                      Mark Group Session
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -3645,19 +3926,19 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   <div className={styles.kpiGridGroup}>
                     <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
                       <div className={styles.kpiLabelRow}>Total Sessions</div>
-                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: '#38bdf8' }}>
+                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: 'var(--text-primary)' }}>
                         {groupSessionsList.length}
                       </div>
                     </div>
                     <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
                       <div className={styles.kpiLabelRow}>Total Attendees</div>
-                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: '#34d399' }}>
+                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: 'var(--text-primary)' }}>
                         {groupSessionsList.reduce((acc: number, s: (typeof groupSessionsList)[0]) => acc + s.studentIds.length, 0)}
                       </div>
                     </div>
                     <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
                       <div className={styles.kpiLabelRow}>Avg Attendees/Session</div>
-                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: '#fbbf24' }}>
+                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: 'var(--text-primary)' }}>
                         {groupSessionsList.length > 0
                           ? (groupSessionsList.reduce((acc: number, s: (typeof groupSessionsList)[0]) => acc + s.studentIds.length, 0) / groupSessionsList.length).toFixed(1)
                           : '0'}
@@ -3894,22 +4175,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         <span>Pune Studio Roster</span>
                       </div>
                     </div>
-
-                    <div className={styles.attendanceHeaderActions}>
-                      <button
-                        onClick={() => handleOpenGroupAttendanceModal()}
-                        className={styles.btnPrimary}
-                        style={{ gap: '0.45rem', fontWeight: 600 }}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                          <circle cx="9" cy="7" r="4" />
-                          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                        </svg>
-                        Mark Group Session Attendance
-                      </button>
-                    </div>
                   </div>
 
                   {/* STUDENTS ROSTER DESKTOP TABLE */}
@@ -4145,31 +4410,31 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   <div className={styles.kpiGridStudentStats}>
                     <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
                       <div className={styles.kpiLabelRow}>Rate</div>
-                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: attendancePercentage >= 80 ? '#34d399' : '#fbbf24' }}>
+                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: 'var(--text-primary)' }}>
                         {attendancePercentage}%
                       </div>
                     </div>
                     <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
                       <div className={styles.kpiLabelRow}>Present</div>
-                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: '#34d399' }}>
+                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: 'var(--text-primary)' }}>
                         {totalPresent}
                       </div>
                     </div>
                     <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
                       <div className={styles.kpiLabelRow}>Absent</div>
-                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: '#f87171' }}>
+                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: 'var(--text-primary)' }}>
                         {totalAbsent}
                       </div>
                     </div>
                     <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
                       <div className={styles.kpiLabelRow}>Practice</div>
-                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: '#c084fc' }}>
+                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: 'var(--text-primary)' }}>
                         {totalPractice}
                       </div>
                     </div>
                     <div className={styles.kpiCard} style={{ padding: '0.85rem 1rem' }}>
                       <div className={styles.kpiLabelRow}>Group</div>
-                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: '#38bdf8' }}>
+                      <div className={styles.kpiValue} style={{ fontSize: '1.5rem', color: 'var(--text-primary)' }}>
                         {totalGroup}
                       </div>
                     </div>
@@ -4225,12 +4490,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             key={item.dateStr}
                             onClick={() => {
                               setSelectedDateStr(item.dateStr);
-                              handleOpenAttendanceModal(undefined, item.dateStr);
                             }}
                             className={`${styles.calendarDayCell} ${hasSessions ? styles.calendarDayCellSession : styles.calendarDayCellMuted
                               } ${isSelected ? styles.calendarDayCellActive : ''}`}
                             style={{ cursor: 'pointer' }}
-                            title={`Click to mark attendance for ${item.dateStr}`}
+                            title={`${item.dateStr}: ${hasSessions ? `${dayRecords.length} class(es) logged` : 'Click to inspect / mark attendance'}`}
                           >
                             <span className={styles.calendarDayNumber}>{item.day}</span>
 
@@ -4241,6 +4505,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 const groupTitle = groupInfo && groupInfo.count > 0
                                   ? `GROUP SESSION (${groupInfo.count} Present: ${groupInfo.students.map((s) => s.name).join(', ')})`
                                   : 'GROUP SESSION';
+                                const instructor = getInstructorInfo(r);
 
                                 return (
                                   <span
@@ -4254,7 +4519,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                             ? styles.dotGroup
                                             : styles.dotPractice
                                     }
-                                    title={`${r.timeSlot}: ${r.status === 'PRACTICE_SESSION' || r.status === 'NA' ? 'PRACTICE SESSION' : isGroup ? groupTitle : r.status}`}
+                                    title={`${r.timeSlot} • Instructor: ${instructor.name} • ${r.status === 'PRACTICE_SESSION' || r.status === 'NA' ? 'PRACTICE SESSION' : isGroup ? groupTitle : r.status}`}
                                   />
                                 );
                               })}
@@ -4265,16 +4530,23 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </div>
                   </div>
 
-                  {/* TIME SLOTS INSPECTOR FOR SELECTED DATE */}
+                  {/* TIME SLOTS & CONDUCTED CLASSES INSPECTOR FOR SELECTED DATE */}
                   <div className={styles.tableCard} style={{ marginTop: '1.25rem', padding: '1.25rem' }}>
                     <div className={styles.timeSlotInspectorHeader}>
-                      <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
-                        Time Slots for {selectedDateStr}
-                      </h3>
+                      <div>
+                        <h3 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+                          Classes &amp; Attendance for {selectedDateStr}
+                        </h3>
+                        <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                          {activeAttendanceRecords.filter((r) => r.date === selectedDateStr).length > 0
+                            ? `${activeAttendanceRecords.filter((r) => r.date === selectedDateStr).length} session(s) recorded for this student`
+                            : 'No attendance marked for this date yet'}
+                        </div>
+                      </div>
                       <button
                         onClick={() => handleOpenAttendanceModal(undefined, selectedDateStr)}
-                        className={styles.btnSecondary}
-                        style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem', gap: '0.35rem' }}
+                        className={styles.btnPrimary}
+                        style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', gap: '0.35rem', fontWeight: 600 }}
                       >
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                           <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
@@ -4283,10 +4555,130 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       </button>
                     </div>
 
+                    {/* DETAILED CLASS LOG CARDS FOR SELECTED DATE */}
+                    {(() => {
+                      const selectedDayRecords = activeAttendanceRecords.filter((r) => r.date === selectedDateStr);
+                      if (selectedDayRecords.length === 0) return null;
+
+                      return (
+                        <div style={{ marginTop: '1rem', marginBottom: '1.25rem' }}>
+                          <div style={{ fontSize: '0.725rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
+                            Conducted Sessions on this Date ({selectedDayRecords.length})
+                          </div>
+                          {selectedDayRecords.map((r) => {
+                            const inst = getInstructorInfo(r);
+                            const isGroup = r.status === 'GROUP_SESSION';
+                            const slotGroupInfo = isGroup ? getGroupSessionDetails(selectedDateStr, r.timeSlot) : null;
+
+                            return (
+                              <div key={r.id} className={styles.sessionRecordCard}>
+                                <div className={styles.sessionRecordHeader}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#e11d48" strokeWidth="2.5">
+                                        <circle cx="12" cy="12" r="10" />
+                                        <polyline points="12 6 12 12 16 14" />
+                                      </svg>
+                                      {r.timeSlot}
+                                    </div>
+
+                                    {/* PROMINENT INSTRUCTOR BADGE */}
+                                    <span
+                                      className={styles.instructorPill}
+                                      style={{
+                                        background: inst.bg,
+                                        color: inst.color,
+                                        border: `1px solid ${inst.border}`,
+                                      }}
+                                    >
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                        <circle cx="12" cy="7" r="4" />
+                                      </svg>
+                                      Instructor: {inst.name}
+                                    </span>
+
+                                    {/* STATUS BADGE */}
+                                    <span
+                                      style={{
+                                        fontSize: '0.72rem',
+                                        fontWeight: 700,
+                                        padding: '2px 8px',
+                                        borderRadius: '4px',
+                                        background: 'var(--bg-card)',
+                                        color: 'var(--text-primary)',
+                                        border: '1px solid var(--border-medium)',
+                                      }}
+                                    >
+                                      {r.status === 'PRACTICE_SESSION' || r.status === 'NA'
+                                        ? 'PRACTICE SESSION'
+                                        : isGroup
+                                          ? 'GROUP SESSION'
+                                          : r.status}
+                                    </span>
+                                  </div>
+
+                                  <button
+                                    onClick={() => handleOpenAttendanceModal(r.timeSlot)}
+                                    className={styles.btnSecondary}
+                                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', gap: '0.3rem', height: '26px' }}
+                                    title="Edit this attendance record"
+                                  >
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                                      <path d="M12 20h9" />
+                                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                                    </svg>
+                                    Edit
+                                  </button>
+                                </div>
+
+                                {r.comment && (
+                                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', background: 'var(--bg-card)', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Topic / Notes:</span> {r.comment}
+                                  </div>
+                                )}
+
+                                {isGroup && slotGroupInfo && slotGroupInfo.students.length > 0 && (
+                                  <div style={{ marginTop: '3px', background: 'rgba(56, 189, 248, 0.06)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(56, 189, 248, 0.15)' }}>
+                                    <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#38bdf8', marginBottom: '4px' }}>
+                                      Attending Students ({slotGroupInfo.count}):
+                                    </div>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                      {slotGroupInfo.students.map((st) => (
+                                        <span
+                                          key={st.id}
+                                          style={{
+                                            fontSize: '0.675rem',
+                                            background: 'var(--bg-surface)',
+                                            color: 'var(--text-primary)',
+                                            border: '1px solid var(--border-subtle)',
+                                            padding: '2px 6px',
+                                            borderRadius: '4px',
+                                            fontWeight: 500,
+                                          }}
+                                        >
+                                          {st.name}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+
+                    {/* QUICK TIME SLOTS GRID */}
+                    <div style={{ fontSize: '0.725rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem', marginTop: '0.75rem' }}>
+                      Standard Time Slots
+                    </div>
                     <div className={styles.timeSlotGrid}>
                       {['11:00 AM - 01:00 PM', '02:00 PM - 04:00 PM', '04:00 PM - 06:00 PM'].map((slot) => {
+                        const normSlot = normalizeTimeSlot(slot);
                         const slotRecords = activeAttendanceRecords.filter(
-                          (r) => r.date === selectedDateStr && r.timeSlot === slot
+                          (r) => r.date === selectedDateStr && normalizeTimeSlot(r.timeSlot) === normSlot
                         );
                         const slotGroupInfo = getGroupSessionDetails(selectedDateStr, slot);
 
@@ -4302,86 +4694,48 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 slotRecords.map((r) => {
                                   const isGroup = r.status === 'GROUP_SESSION';
                                   const count = slotGroupInfo.count;
+                                  const inst = getInstructorInfo(r);
 
                                   return (
-                                    <div key={r.id} style={{ fontSize: '0.725rem', marginTop: '3px', lineHeight: '1.4' }}>
-                                      <span style={{
-                                        color: r.status === 'PRESENT'
-                                          ? '#34d399'
-                                          : r.status === 'ABSENT'
-                                            ? '#f87171'
-                                            : r.status === 'GROUP_SESSION'
-                                              ? '#38bdf8'
-                                              : '#c084fc',
-                                        fontWeight: 600
-                                      }}>
-                                        ● {r.status === 'PRACTICE_SESSION' || r.status === 'NA'
-                                            ? 'PRACTICE SESSION'
-                                            : isGroup
-                                              ? `GROUP SESSION (${count > 0 ? `${count} Student${count === 1 ? '' : 's'} Present` : 'Group Session'})`
-                                              : r.status}
-                                      </span>
-                                      {r.comment ? <span style={{ color: '#94a3b8' }}> ({r.comment})</span> : null}
-                                      {!isTeacher && (
-                                        <span style={{ fontSize: '0.675rem', background: 'var(--bg-surface)', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)', padding: '1px 5px', borderRadius: '4px', marginLeft: '6px', fontWeight: 500 }}>
-                                          By {r.markedByName || 'Staff'}
+                                    <div key={r.id} style={{ fontSize: '0.725rem', marginTop: '4px', lineHeight: '1.4' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                                        <span style={{
+                                          color: 'var(--text-primary)',
+                                          fontWeight: 700
+                                        }}>
+                                          ● {r.status === 'PRACTICE_SESSION' || r.status === 'NA'
+                                              ? 'PRACTICE SESSION'
+                                              : isGroup
+                                                ? `GROUP SESSION (${count > 0 ? `${count} Present` : 'Group'})`
+                                                : r.status}
                                         </span>
-                                      )}
 
-                                      {/* LIST ATTENDING STUDENTS IF GROUP SESSION */}
-                                      {isGroup && slotGroupInfo.students.length > 0 && (
-                                        <div style={{ marginTop: '5px', background: 'rgba(56, 189, 248, 0.08)', padding: '5px 8px', borderRadius: '6px', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
-                                          <div style={{ fontSize: '0.675rem', fontWeight: 700, color: '#38bdf8', marginBottom: '3px' }}>
-                                            Present ({count}):
-                                          </div>
-                                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
-                                            {slotGroupInfo.students.map((st) => (
-                                              <span
-                                                key={st.id}
-                                                style={{
-                                                  fontSize: '0.65rem',
-                                                  background: 'var(--bg-surface)',
-                                                  color: 'var(--text-primary)',
-                                                  border: '1px solid var(--border-subtle)',
-                                                  padding: '1px 5px',
-                                                  borderRadius: '4px',
-                                                  fontWeight: 500,
-                                                }}
-                                              >
-                                                {st.name}
-                                              </span>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      )}
+                                        <span
+                                          style={{
+                                            fontSize: '0.675rem',
+                                            background: 'var(--bg-card)',
+                                            color: 'var(--text-secondary)',
+                                            border: '1px solid var(--border-subtle)',
+                                            padding: '1px 5px',
+                                            borderRadius: '4px',
+                                            fontWeight: 600,
+                                          }}
+                                        >
+                                          {inst.name}
+                                        </span>
+                                      </div>
+                                      {r.comment ? <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', marginTop: '2px' }}>{r.comment}</div> : null}
                                     </div>
                                   );
                                 })
                               ) : slotGroupInfo.count > 0 ? (
                                 <div style={{ fontSize: '0.725rem', marginTop: '3px' }}>
-                                  <span style={{ color: '#38bdf8', fontWeight: 600 }}>
+                                  <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
                                     ● GROUP SESSION ({slotGroupInfo.count} Student{slotGroupInfo.count === 1 ? '' : 's'} Present)
                                   </span>
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '4px' }}>
-                                    {slotGroupInfo.students.map((st) => (
-                                      <span
-                                        key={st.id}
-                                        style={{
-                                          fontSize: '0.65rem',
-                                          background: 'rgba(56, 189, 248, 0.1)',
-                                          color: '#38bdf8',
-                                          border: '1px solid rgba(56, 189, 248, 0.2)',
-                                          padding: '1px 5px',
-                                          borderRadius: '4px',
-                                        }}
-                                      >
-                                        {st.name}
-                                      </span>
-                                    ))}
-                                  </div>
                                 </div>
                               ) : (
-                                <div style={{ fontSize: '0.725rem', color: '#8a99ad', marginTop: '2px' }}>
+                                <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                                   Unmarked • Click to edit
                                 </div>
                               )}
@@ -4589,18 +4943,55 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           {/* TAB 4: STUDENT LEADS CRM */}
           {!isTeacher && activeTab === 'inquiries' && (
             <div>
-              <div className={styles.pageHeaderRow}>
-                <div>
-                  <h1 className={styles.pageTitle}>Lead Management</h1>
-                  <div className={styles.pageMetaBadge}>
-                    <span>{inquiries.length} total prospect inquiries</span>
-                  </div>
+              {/* CENTERED PAGE HEADER */}
+              <div style={{ textAlign: 'center', marginBottom: '1.25rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <h1 className={styles.pageTitle} style={{ textAlign: 'center', margin: 0 }}>Lead Management</h1>
+                <div className={styles.pageMetaBadge} style={{ marginTop: '0.45rem', display: 'inline-flex', justifyContent: 'center' }}>
+                  <span>{inquiries.length} total prospect inquiries</span>
                 </div>
               </div>
 
-              <div className={styles.filterBar} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.775rem', color: 'var(--text-secondary)', cursor: 'pointer', fontWeight: 500 }}>
+              {/* FILTERS & SELECTION CONTROLS CONTAINER */}
+              <div className={styles.leadsControlPanel}>
+                {/* 1. SIDE-BY-SIDE SOURCE & STATUS FILTERS */}
+                <div className={styles.leadsFiltersRow}>
+                  <div className={styles.leadFilterItem}>
+                    <div className={styles.leadFilterLabel}>Source:</div>
+                    <select
+                      value={inquirySourceFilter}
+                      onChange={(e) => setInquirySourceFilter(e.target.value)}
+                      className={styles.selectInput}
+                      style={{ width: '100%' }}
+                    >
+                      <option value="ALL">All Sources</option>
+                      <option value="Meta Ads">Meta Ads</option>
+                      <option value="Google Ads">Google Ads</option>
+                      <option value="Organic/Referral">Organic / Referral</option>
+                      <option value="Direct">Direct</option>
+                      <option value="Campaign">Campaigns</option>
+                    </select>
+                  </div>
+
+                  <div className={styles.leadFilterItem}>
+                    <div className={styles.leadFilterLabel}>Status:</div>
+                    <select
+                      value={inquiryStatusFilter}
+                      onChange={(e) => setInquiryStatusFilter(e.target.value)}
+                      className={styles.selectInput}
+                      style={{ width: '100%' }}
+                    >
+                      <option value="ALL">All Prospects ({inquiries.length})</option>
+                      <option value="NEW">New Leads</option>
+                      <option value="CONTACTED">Contacted</option>
+                      <option value="ENROLLED">Enrolled</option>
+                      <option value="ARCHIVED">Archived</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* 2. SELECT ALL LEADS (BELOW SOURCE AND STATUS) */}
+                <div className={styles.leadsSelectAllRow}>
+                  <label className={styles.selectAllPill}>
                     <input
                       type="checkbox"
                       checked={
@@ -4612,21 +5003,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     />
                     <span>Select All Leads ({filteredInquiries.length})</span>
                   </label>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <div style={{ fontSize: '0.775rem', color: '#8a99ad' }}>Filter status:</div>
-                  <select
-                    value={inquiryStatusFilter}
-                    onChange={(e) => setInquiryStatusFilter(e.target.value)}
-                    className={styles.selectInput}
-                  >
-                    <option value="ALL">All Prospects ({inquiries.length})</option>
-                    <option value="NEW">New Leads</option>
-                    <option value="CONTACTED">Contacted</option>
-                    <option value="ENROLLED">Enrolled</option>
-                    <option value="ARCHIVED">Archived</option>
-                  </select>
                 </div>
               </div>
 
@@ -4699,8 +5075,15 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
                     </svg>
                     <div className={styles.emptyStateTitle}>No prospect leads found</div>
-                    <div className={styles.emptyStateDesc}>There are no inquiries matching your selected status filter.</div>
-                    <button onClick={() => setInquiryStatusFilter('ALL')} className={styles.btnSecondary} style={{ marginTop: '0.5rem' }}>
+                    <div className={styles.emptyStateDesc}>There are no inquiries matching your selected filter criteria.</div>
+                    <button
+                      onClick={() => {
+                        setInquiryStatusFilter('ALL');
+                        setInquirySourceFilter('ALL');
+                      }}
+                      className={styles.btnSecondary}
+                      style={{ marginTop: '0.5rem' }}
+                    >
                       Show All Prospects
                     </button>
                   </div>
@@ -4728,6 +5111,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             <th>Prospect</th>
                             <th>Interested Program</th>
                             <th>Contact Details</th>
+                            <th>Source</th>
                             <th>Message</th>
                             <th>Status</th>
                             <th style={{ textAlign: 'right' }}>Action</th>
@@ -4737,6 +5121,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           {filteredInquiries.map((inq) => {
                             const avatar = getAvatarDetails(inq.name);
                             const isSelected = selectedInquiryIds.includes(inq.id);
+                            const sourceBadge = getSourceBadgeDetails(inq);
                             return (
                               <tr key={inq.id} style={isSelected ? { backgroundColor: 'rgba(239, 68, 68, 0.05)' } : {}}>
                                 <td style={{ textAlign: 'center' }}>
@@ -4766,6 +5151,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                     {inq.email}
                                   </a>
                                   <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>{inq.phone}</div>
+                                </td>
+                                <td>
+                                  <span className={`${styles.badge} ${sourceBadge.className}`} title={`Lead Source: ${sourceBadge.label}`}>
+                                    <span className={styles.statusDot} />
+                                    {sourceBadge.label}
+                                  </span>
                                 </td>
                                 <td style={{ maxWidth: '240px' }}>
                                   <div style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.775rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
@@ -4819,6 +5210,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     {filteredInquiries.map((inq) => {
                       const avatar = getAvatarDetails(inq.name);
                       const isSelected = selectedInquiryIds.includes(inq.id);
+                      const sourceBadge = getSourceBadgeDetails(inq);
                       return (
                         <div key={inq.id} className={styles.mobileDataCard} style={isSelected ? { border: '1px solid rgba(239, 68, 68, 0.4)', background: 'rgba(239, 68, 68, 0.03)' } : {}}>
                           <div className={styles.mobileCardHeader}>
@@ -4863,6 +5255,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                               <span className={styles.mobileCardValue}>{inq.courseInterest}</span>
                             </div>
                             <div className={styles.mobileCardRow}>
+                              <span className={styles.mobileCardLabel}>Source</span>
+                              <span className={`${styles.badge} ${sourceBadge.className}`} style={{ fontSize: '0.65rem' }}>
+                                <span className={styles.statusDot} />
+                                {sourceBadge.label}
+                              </span>
+                            </div>
+                            <div className={styles.mobileCardRow}>
                               <span className={styles.mobileCardLabel}>Phone</span>
                               <span className={styles.mobileCardValue}>{inq.phone || 'N/A'}</span>
                             </div>
@@ -4877,7 +5276,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                               className={styles.btnSecondary}
                               style={{ height: '34px', fontSize: '0.775rem' }}
                             >
-                              View Full Message
+                              View Full Details
                             </button>
                             <button
                               onClick={() => handleDeleteInquiry(inq.id)}
@@ -5900,6 +6299,63 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 <span className={styles.leadSubmittedAt}>
                   Received {new Date(expandedLeadMessage.submittedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
                 </span>
+              </section>
+
+              <section className={styles.leadAttributionCard}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <span className={styles.leadSectionLabel}>Lead Attribution &amp; First-Touch Tracking</span>
+                  {(() => {
+                    const badge = getSourceBadgeDetails(expandedLeadMessage);
+                    return (
+                      <span className={`${styles.badge} ${badge.className}`} style={{ fontSize: '0.65rem' }}>
+                        <span className={styles.statusDot} />
+                        {badge.label}
+                      </span>
+                    );
+                  })()}
+                </div>
+                <div className={styles.attributionGrid}>
+                  <div className={styles.attributionItem}>
+                    <span className={styles.attributionKey}>Resolved Source</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.source || expandedLeadMessage.source || 'Direct'}</span>
+                  </div>
+                  <div className={styles.attributionItem}>
+                    <span className={styles.attributionKey}>Landing Page</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.landing_page || '/'}</span>
+                  </div>
+                  <div className={styles.attributionItemFull}>
+                    <span className={styles.attributionKey}>Referrer URL</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.referrer || '(Direct / None)'}</span>
+                  </div>
+                  <div className={styles.attributionItem}>
+                    <span className={styles.attributionKey}>UTM Source</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_source || '—'}</span>
+                  </div>
+                  <div className={styles.attributionItem}>
+                    <span className={styles.attributionKey}>UTM Medium</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_medium || '—'}</span>
+                  </div>
+                  <div className={styles.attributionItem}>
+                    <span className={styles.attributionKey}>UTM Campaign</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_campaign || '—'}</span>
+                  </div>
+                  <div className={styles.attributionItem}>
+                    <span className={styles.attributionKey}>UTM Content</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_content || '—'}</span>
+                  </div>
+                  <div className={styles.attributionItem}>
+                    <span className={styles.attributionKey}>UTM Term</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_term || '—'}</span>
+                  </div>
+                  <div className={styles.attributionItem}>
+                    <span className={styles.attributionKey}>Google Click ID (GCLID)</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.gclid || '—'}</span>
+                  </div>
+                  <div className={styles.attributionItem}>
+                    <span className={styles.attributionKey}>Meta Click ID (FBCLID)</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.fbclid || '—'}</span>
+                  </div>
+                </div>
               </section>
 
               <section className={styles.leadMessageCard}>
@@ -7668,10 +8124,16 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       {/* RECORD DETAIL INSPECTION MODAL (ADMIN CLASSES SECTION) */}
       {selectedRecordForInspection && (() => {
         const rec = selectedRecordForInspection;
-        const student = students.find((s) => s.id === rec.studentId);
+        const isGroup = (rec as any).type === 'GROUP';
+        const groupStudents: EnrolledStudent[] = isGroup
+          ? (rec as ClassLogEntry).students
+          : [];
+        const student = !isGroup
+          ? (students.find((s) => s.id === (rec as any).studentId) || (rec as any).student)
+          : null;
         const isAshu = (rec.markedByName || '').toLowerCase().includes('ashu') || (rec.markedBy || '').toLowerCase().includes('ashu');
         const isVaibhav = (rec.markedByName || '').toLowerCase().includes('vaibhav') || (rec.markedBy || '').toLowerCase().includes('vaibhav');
-        const studentAllRecords = allAttendanceRecords.filter((r) => r.studentId === rec.studentId);
+        const studentAllRecords = !isGroup && (rec as any).studentId ? allAttendanceRecords.filter((r) => r.studentId === (rec as any).studentId) : [];
         const studentAshuCount = studentAllRecords.filter((r) => (r.markedByName || '').toLowerCase().includes('ashu') || (r.markedBy || '').toLowerCase().includes('ashu')).length;
         const studentVaibhavCount = studentAllRecords.filter((r) => (r.markedByName || '').toLowerCase().includes('vaibhav') || (r.markedBy || '').toLowerCase().includes('vaibhav')).length;
 
@@ -7690,7 +8152,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      color: '#38bdf8',
+                      color: 'var(--text-primary)',
                     }}
                   >
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -7699,9 +8161,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </svg>
                   </div>
                   <div>
-                    <h3 className={styles.modalTitle}>Class Attendance Detail</h3>
+                    <h3 className={styles.modalTitle}>{isGroup ? 'Group Class Session Detail' : 'Class Attendance Detail'}</h3>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      Session record &amp; teacher submission verification
+                      {isGroup ? `${groupStudents.length} Students Attended • Session Verification` : 'Session record & teacher submission verification'}
                     </div>
                   </div>
                 </div>
@@ -7712,12 +8174,40 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 {/* CLEAN INSPECTION LIST */}
                 <div className={styles.inspectionList}>
                   <div className={styles.inspectionRow}>
-                    <span className={styles.inspectionKey}>Student</span>
+                    <span className={styles.inspectionKey}>{isGroup ? `Students (${groupStudents.length})` : 'Student'}</span>
                     <div className={styles.inspectionVal}>
-                      <div style={{ fontWeight: 600 }}>{student?.name || 'Student ' + rec.studentId}</div>
-                      <div className={styles.monoCell} style={{ fontSize: '0.75rem' }}>
-                        ID: {rec.studentId} • {student?.course || 'Enrolled Student'} ({student?.batch || 'Regular'})
-                      </div>
+                      {isGroup ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                            Group Masterclass ({groupStudents.length} Students)
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.2rem' }}>
+                            {groupStudents.map((st) => (
+                              <div
+                                key={st.id}
+                                style={{
+                                  fontSize: '0.75rem',
+                                  background: 'var(--bg-surface)',
+                                  color: 'var(--text-primary)',
+                                  border: '1px solid var(--border-medium)',
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                }}
+                              >
+                                <strong style={{ color: 'var(--text-primary)' }}>{st.name}</strong>
+                                {st.course ? <span style={{ color: 'var(--text-muted)', marginLeft: '4px' }}>({st.course})</span> : null}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ fontWeight: 600 }}>{student?.name || 'Student ' + (rec as any).studentId}</div>
+                          <div className={styles.monoCell} style={{ fontSize: '0.75rem' }}>
+                            ID: {(rec as any).studentId} • {student?.course || 'Enrolled Student'} ({student?.batch || 'Regular'})
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -7742,11 +8232,17 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   <div className={styles.inspectionRow}>
                     <span className={styles.inspectionKey}>Attendance Status</span>
                     <div className={styles.inspectionVal}>
-                      {rec.status === 'PRESENT' && <span className={`${styles.statusTag} ${styles.statusPresent}`}>Present in Studio</span>}
-                      {rec.status === 'ABSENT' && <span className={`${styles.statusTag} ${styles.statusAbsent}`}>Absent / Missed</span>}
-                      {rec.status === 'PRACTICE_SESSION' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Practice Session</span>}
-                      {rec.status === 'GROUP_SESSION' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Group Masterclass</span>}
-                      {rec.status === 'NA' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Not Applicable</span>}
+                      {isGroup ? (
+                        <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Group Masterclass ({groupStudents.length} Students)</span>
+                      ) : (
+                        <>
+                          {rec.status === 'PRESENT' && <span className={`${styles.statusTag} ${styles.statusPresent}`}>Present in Studio</span>}
+                          {rec.status === 'ABSENT' && <span className={`${styles.statusTag} ${styles.statusAbsent}`}>Absent / Missed</span>}
+                          {rec.status === 'PRACTICE_SESSION' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Practice Session</span>}
+                          {rec.status === 'GROUP_SESSION' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Group Masterclass</span>}
+                          {rec.status === 'NA' && <span className={`${styles.statusTag} ${styles.statusNeutral}`}>Not Applicable</span>}
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -7769,21 +8265,23 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </div>
                   </div>
 
-                  <div className={styles.inspectionRow}>
-                    <span className={styles.inspectionKey}>Student History</span>
-                    <div className={styles.inspectionVal}>
-                      <span className={styles.monoCell}>
-                        {studentAllRecords.length} total classes logged ({studentAshuCount} with Ashu, {studentVaibhavCount} with Vaibhav)
-                      </span>
+                  {!isGroup && (
+                    <div className={styles.inspectionRow}>
+                      <span className={styles.inspectionKey}>Student History</span>
+                      <div className={styles.inspectionVal}>
+                        <span className={styles.monoCell}>
+                          {studentAllRecords.length} total classes logged ({studentAshuCount} with Ashu, {studentVaibhavCount} with Vaibhav)
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
 
               {/* MODAL FOOTER ACTIONS */}
               <div className={styles.modalFooter} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
                 <div style={{ display: 'flex', gap: '0.4rem' }}>
-                  {student?.phone && (
+                  {!isGroup && student?.phone && (
                     <a
                       href={safeWhatsAppUrl(student.phone, `Hello ${student.name}, this is Soundabode Studios regarding your class session on ${rec.date} (${rec.timeSlot}).`)}
                       target="_blank"
@@ -7794,7 +8292,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       WhatsApp
                     </a>
                   )}
-                  {student?.email && (
+                  {!isGroup && student?.email && (
                     <a
                       href={safeMailto(student.email, `Soundabode Studios - Class Update (${rec.date})`, `Hello ${student.name},\n\nRegarding your class session on ${rec.date} at ${rec.timeSlot}.`)}
                       className={styles.btnSecondary}
@@ -7806,18 +8304,35 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 </div>
 
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedStudentId(rec.studentId);
-                      setActiveTab('attendance');
-                      setSelectedRecordForInspection(null);
-                    }}
-                    className={styles.btnPrimary}
-                    style={{ fontSize: '0.78rem', height: '32px' }}
-                  >
-                    Student Sheet
-                  </button>
+                  {!isGroup && (rec as any).studentId ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedStudentId((rec as any).studentId);
+                        setActiveTab('attendance');
+                        setSelectedRecordForInspection(null);
+                      }}
+                      className={styles.btnPrimary}
+                      style={{ fontSize: '0.78rem', height: '32px' }}
+                    >
+                      Student Sheet
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedStudentId(null);
+                        setGroupSessionDate(rec.date);
+                        setAttendanceSubTab('group');
+                        setActiveTab('attendance');
+                        setSelectedRecordForInspection(null);
+                      }}
+                      className={styles.btnPrimary}
+                      style={{ fontSize: '0.78rem', height: '32px' }}
+                    >
+                      Open Attendance Batch
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setSelectedRecordForInspection(null)}
@@ -7845,6 +8360,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
             <div className={styles.toastTitle}>NEW LEAD SUBMISSION RECORDED</div>
             <div className={styles.toastBody}>
               <strong>{realtimeLeadToast.name}</strong> • {realtimeLeadToast.courseInterest}
+              {realtimeLeadToast.source && (
+                <span style={{ marginLeft: '0.45rem', opacity: 0.85, fontSize: '0.72rem', background: 'rgba(255,255,255,0.15)', padding: '1px 6px', borderRadius: '4px' }}>
+                  {realtimeLeadToast.source}
+                </span>
+              )}
             </div>
           </div>
           <button

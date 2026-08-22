@@ -311,7 +311,81 @@ async function connectDB() {
 
 connectDB();
 
+// ─── ATTRIBUTION & SOURCE RESOLUTION ──────────────────────────────────────────
+function resolveLeadSource(attribution) {
+  if (!attribution || typeof attribution !== 'object') {
+    return 'Direct';
+  }
+
+  const fbclid = String(attribution.fbclid || '').trim();
+  const gclid = String(attribution.gclid || '').trim();
+  const utm_source = String(attribution.utm_source || '').trim();
+  const utm_medium = String(attribution.utm_medium || '').trim();
+  const referrer = String(attribution.referrer || '').trim();
+
+  const utmSourceLower = utm_source.toLowerCase();
+  const utmMediumLower = utm_medium.toLowerCase();
+
+  // 1. fbclid present OR utm_source is "facebook"/"instagram"/"meta" -> "Meta Ads"
+  if (fbclid || utmSourceLower === 'facebook' || utmSourceLower === 'instagram' || utmSourceLower === 'meta') {
+    return 'Meta Ads';
+  }
+
+  // 2. gclid present OR (utm_source is "google" AND utm_medium is "cpc"/"ppc"/"paid") -> "Google Ads"
+  if (
+    gclid ||
+    (utmSourceLower === 'google' &&
+      (utmMediumLower === 'cpc' || utmMediumLower === 'ppc' || utmMediumLower === 'adwords' || utmMediumLower === 'paid'))
+  ) {
+    return 'Google Ads';
+  }
+
+  // 3. utm_source present (anything else) -> "Campaign: {utm_source}"
+  if (utm_source) {
+    return `Campaign: ${utm_source}`;
+  }
+
+  // 4. referrer exists and is NOT our own domain -> "Organic/Referral"
+  if (referrer) {
+    try {
+      const refUrl = new URL(referrer.startsWith('http') ? referrer : `https://${referrer}`);
+      const isOwnDomain =
+        refUrl.hostname.endsWith('soundabode.com') ||
+        refUrl.hostname === 'soundabode.com' ||
+        refUrl.hostname === 'localhost' ||
+        refUrl.hostname === '127.0.0.1';
+
+      if (!isOwnDomain) {
+        return 'Organic/Referral';
+      }
+    } catch {
+      if (!referrer.includes('soundabode.com') && !referrer.startsWith('/')) {
+        return 'Organic/Referral';
+      }
+    }
+  }
+
+  // 5. no referrer, no utm, no click id -> "Direct"
+  return 'Direct';
+}
+
 // ─── SCHEMAS & MODELS ──────────────────────────────────────────────────────────
+const attributionSchema = new mongoose.Schema(
+  {
+    source: { type: String, default: 'Direct' },
+    utm_source: { type: String, default: '' },
+    utm_medium: { type: String, default: '' },
+    utm_campaign: { type: String, default: '' },
+    utm_content: { type: String, default: '' },
+    utm_term: { type: String, default: '' },
+    fbclid: { type: String, default: '' },
+    gclid: { type: String, default: '' },
+    referrer: { type: String, default: '' },
+    landing_page: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
 const inquirySchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
   name: { type: String, required: true },
@@ -320,6 +394,7 @@ const inquirySchema = new mongoose.Schema({
   courseInterest: { type: String, default: 'General Inquiry' },
   message: { type: String, default: '' },
   source: { type: String, default: 'Contact Form' },
+  attribution: { type: attributionSchema, default: () => ({ source: 'Direct' }) },
   submittedAt: { type: Date, default: Date.now },
   status: { type: String, enum: ['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'], default: 'NEW' },
   notes: { type: String, default: '' },
@@ -574,13 +649,43 @@ async function autoSeedIfEmpty() {
       ],
     });
 
-    // Ensure all inquiry documents in MongoDB Atlas have the 'source' field populated
+    // Ensure all inquiry documents in MongoDB Atlas have the 'source' and 'attribution' field populated
     const unassignedInquiries = await InquiryModel.find({ $or: [{ source: { $exists: false } }, { source: '' }, { source: null }] });
     for (const inq of unassignedInquiries) {
       const detectedSource = (inq.message && inq.message.toLowerCase().includes('pop-up'))
         ? 'Pop-up Quick Enquiry Form'
         : 'Contact Form';
       await InquiryModel.updateOne({ _id: inq._id }, { $set: { source: detectedSource } });
+    }
+
+    const inquiriesWithoutAttribution = await InquiryModel.find({
+      $or: [{ attribution: { $exists: false } }, { attribution: null }, { 'attribution.source': { $exists: false } }],
+    });
+    for (const inq of inquiriesWithoutAttribution) {
+      const resolved = resolveLeadSource(inq.attribution || {});
+      const fallbackSource =
+        inq.source && inq.source !== 'Contact Form' && inq.source !== 'Pop-up Quick Enquiry Form'
+          ? inq.source
+          : resolved;
+      await InquiryModel.updateOne(
+        { _id: inq._id },
+        {
+          $set: {
+            attribution: {
+              source: fallbackSource || 'Direct',
+              utm_source: inq.attribution?.utm_source || '',
+              utm_medium: inq.attribution?.utm_medium || '',
+              utm_campaign: inq.attribution?.utm_campaign || '',
+              utm_content: inq.attribution?.utm_content || '',
+              utm_term: inq.attribution?.utm_term || '',
+              fbclid: inq.attribution?.fbclid || '',
+              gclid: inq.attribution?.gclid || '',
+              referrer: inq.attribution?.referrer || '',
+              landing_page: inq.attribution?.landing_page || '/',
+            },
+          },
+        }
+      );
     }
 
     // Deduplicate AdmissionModel entries
@@ -1231,10 +1336,11 @@ async function forwardToGoogleSheets(rawPayload) {
   const leadCourse =
     payload.course || payload.courseInterest || payload.courseOpted || 'General Inquiry';
   const leadSource =
+    (payload.attribution && payload.attribution.source) ||
     payload.source ||
-    (payload.message.includes('Pop-up') ? 'Pop-up Quick Enquiry Form' : 'Contact Form');
+    (payload.message && payload.message.includes('Pop-up') ? 'Pop-up Quick Enquiry Form' : 'Contact Form');
 
-  console.log('[INFO] [Server] New lead received:', leadName, leadPhone, leadCourse);
+  console.log('[INFO] [Server] New lead received:', leadName, leadPhone, leadCourse, `[Source: ${leadSource}]`);
 
   const jsonPayload = {
     fullName: String(leadName),
@@ -1342,6 +1448,22 @@ app.post('/api/inquiries', async (req, res) => {
     if (!inquiryData.id) inquiryData.id = `inq-${Date.now()}`;
     if (!inquiryData.submittedAt) inquiryData.submittedAt = new Date().toISOString();
     if (!inquiryData.status) inquiryData.status = 'NEW';
+
+    // Normalize attribution and resolve source label
+    const rawAttribution = inquiryData.attribution || {};
+    const resolvedSource = resolveLeadSource(rawAttribution);
+    inquiryData.attribution = {
+      source: resolvedSource,
+      utm_source: String(rawAttribution.utm_source || ''),
+      utm_medium: String(rawAttribution.utm_medium || ''),
+      utm_campaign: String(rawAttribution.utm_campaign || ''),
+      utm_content: String(rawAttribution.utm_content || ''),
+      utm_term: String(rawAttribution.utm_term || ''),
+      fbclid: String(rawAttribution.fbclid || ''),
+      gclid: String(rawAttribution.gclid || ''),
+      referrer: String(rawAttribution.referrer || ''),
+      landing_page: String(rawAttribution.landing_page || ''),
+    };
 
     // Forward to Google Sheets server-side
     forwardToGoogleSheets(inquiryData);

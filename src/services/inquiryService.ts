@@ -1,5 +1,6 @@
 import { AuthService } from './authService';
 import { GoogleSheetsService } from './googleSheetsService';
+import { getStoredAttribution, LeadAttribution, trackLeadConversionEvent } from '../utils/attribution';
 
 import { getApiBaseUrl } from './apiConfig';
 
@@ -11,6 +12,7 @@ export interface ContactInquiry {
   courseInterest: string;
   message: string;
   source?: string;
+  attribution?: LeadAttribution;
   submittedAt: string;
   status: 'NEW' | 'CONTACTED' | 'ENROLLED' | 'ARCHIVED';
   notes?: string;
@@ -171,14 +173,22 @@ export class InquiryService {
 
   public static addInquiry(inquiry: Omit<ContactInquiry, 'id' | 'submittedAt' | 'status'>): ContactInquiry {
     const inquiries = this.getStoredInquiries();
+    const attribution = inquiry.attribution || getStoredAttribution();
     const newInquiry: ContactInquiry = {
       ...inquiry,
+      attribution,
       id: `inq-${Date.now()}`,
       submittedAt: new Date().toISOString(),
       status: 'NEW',
     };
     const updated = [newInquiry, ...inquiries];
     this.saveInquiries(updated, newInquiry);
+
+    // Fire Lead conversion event to Meta Pixel (Lead) & Google Analytics (generate_lead)
+    trackLeadConversionEvent({
+      course: newInquiry.courseInterest,
+      source: newInquiry.attribution?.source || newInquiry.source || 'Direct',
+    });
 
     // Primary: Sync to backend API (backend handles Google Sheets forwarding with deduplication)
     // Fallback: If backend is offline/unreachable, submit directly to Google Sheets from client

@@ -11,6 +11,7 @@ import WhyChooseSoundabodeSection from './components/sections/WhyChooseSoundabod
 import FaqSection from './components/sections/FaqSection';
 import SEO from './components/common/SEO';
 import { PolicyType } from './pages/PolicyPages/PolicyPage';
+import { captureFirstTouchAttribution } from './utils/attribution';
 
 const ContactPage = lazy(() => import('./pages/ContactPage/ContactPage').then((m) => ({ default: m.ContactPage })));
 const BlogPage = lazy(() => import('./pages/BlogPage/BlogPage').then((m) => ({ default: m.BlogPage })));
@@ -71,15 +72,29 @@ export const App: React.FC = () => {
   const [currentRoute, setCurrentRoute] = useState(getRouteFromLocation);
   const hasTrackedInitialPageView = useRef(false);
 
-  // The base Pixel snippet in index.html tracks the first load. Because this is
+  useEffect(() => {
+    // Capture first-touch marketing attribution parameters into sessionStorage
+    captureFirstTouchAttribution();
+  }, []);
+
+  // The base GA4 and Meta Pixel snippets in index.html track the first load. Because this is
   // a single-page app, track each subsequent client-side navigation as well.
   useEffect(() => {
     if (!hasTrackedInitialPageView.current) {
       hasTrackedInitialPageView.current = true;
       return;
     }
+    // Meta Pixel
     const fbq = (window as Window & { fbq?: (...args: unknown[]) => void }).fbq;
     fbq?.('track', 'PageView');
+
+    // Google Analytics 4 (GA4)
+    const gtag = (window as Window & { gtag?: (...args: unknown[]) => void }).gtag;
+    const pagePath = window.location.pathname + window.location.search;
+    gtag?.('config', 'G-R1S70NX6HZ', {
+      page_path: pagePath,
+      page_title: document.title,
+    });
   }, [currentRoute.page, currentRoute.slug]);
 
   useEffect(() => {
