@@ -207,9 +207,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     }
   }, [isTeacher, activeTab]);
 
-  // Loading Skeleton simulation toggle for Overview
-  const [isLoadingSkeleton, setIsLoadingSkeleton] = useState<boolean>(false);
-
   // Data states
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [inquiries, setInquiries] = useState<ContactInquiry[]>([]);
@@ -1519,6 +1516,64 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const newInquiryCount = inquiries.filter((i) => i.status === 'NEW').length;
   const enrolledCount = inquiries.filter((i) => i.status === 'ENROLLED').length;
   const conversionRate = inquiries.length > 0 ? Math.round((enrolledCount / inquiries.length) * 100) : 0;
+  const newAdmissionsCount = useMemo(() => admissions.filter((a) => a.status === 'NEW').length, [admissions]);
+  const djStudentsCount = useMemo(() => students.filter((s) => (s.course || '').toLowerCase().includes('dj')).length, [students]);
+  const empStudentsCount = useMemo(() => students.filter((s) => !(s.course || '').toLowerCase().includes('dj')).length, [students]);
+
+  // Real Dynamic Course Distribution
+  const dynamicCourseStats = useMemo(() => {
+    let djCount = 0;
+    let empCount = 0;
+    let audioCount = 0;
+
+    students.forEach((s) => {
+      const c = (s.course || '').toLowerCase();
+      if (c.includes('dj')) djCount++;
+      else if (c.includes('audio') || c.includes('sound')) audioCount++;
+      else empCount++;
+    });
+
+    const total = students.length || 1;
+    return [
+      { name: 'DJ Performance & Pioneer Decks', count: djCount, percentage: Math.round((djCount / total) * 100) || 0, color: '#f8fafc', trackBg: 'rgba(255, 255, 255, 0.08)' },
+      { name: 'Electronic Music Production (Ableton Live)', count: empCount, percentage: Math.round((empCount / total) * 100) || 0, color: '#cbd5e1', trackBg: 'rgba(255, 255, 255, 0.08)' },
+      { name: 'Audio Engineering & Sound Design', count: audioCount, percentage: Math.round((audioCount / total) * 100) || 0, color: '#94a3b8', trackBg: 'rgba(255, 255, 255, 0.08)' },
+    ];
+  }, [students]);
+
+  // Real Dynamic 6-Month Intake & Velocity Trend
+  const intakeMonthlyTrend = useMemo(() => {
+    const now = new Date();
+    const list: { label: string; yearMonth: string; inqCount: number; admCount: number; total: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label = d.toLocaleString('en-US', { month: 'short' });
+      list.push({ label, yearMonth: ym, inqCount: 0, admCount: 0, total: 0 });
+    }
+
+    inquiries.forEach((inq) => {
+      const ym = (inq.submittedAt || '').slice(0, 7);
+      const target = list.find((m) => m.yearMonth === ym);
+      if (target) {
+        target.inqCount++;
+        target.total++;
+      }
+    });
+
+    admissions.forEach((adm) => {
+      const ym = (adm.submittedAt || '').slice(0, 7);
+      const target = list.find((m) => m.yearMonth === ym);
+      if (target) {
+        target.admCount++;
+        target.total++;
+      }
+    });
+
+    const maxVal = Math.max(...list.map((m) => m.total), 4);
+    const totalVolume = list.reduce((acc, m) => acc + m.total, 0);
+    return { list, maxVal, totalVolume };
+  }, [inquiries, admissions]);
 
   // Active Selected Student details & records for Attendance
   const activeStudent = selectedStudentId ? AttendanceService.getStudentById(selectedStudentId) : undefined;
@@ -2689,248 +2744,414 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           {/* TAB 1: OVERVIEW & ANALYTICS DASHBOARD */}
           {!isTeacher && activeTab === 'overview' && (
             <div>
+              {/* EXECUTIVE HEADER & QUICK ACTION BAR */}
               <div className={styles.pageHeaderRow}>
                 <div>
-                  <h1 className={styles.pageTitle}>Overview</h1>
+                  <h1 className={styles.pageTitle}>Executive Overview</h1>
                   <div className={styles.pageMetaBadge}>
-                    <span>Updated just now</span>
+                    <span>SoundAbode Studios Command Center</span>
                     <span>•</span>
-                    <span>5 active studio modules in Pune</span>
+                    <span>{students.length} Enrolled</span>
+                    <span>•</span>
+                    <span>{admissions.length} Applications</span>
                   </div>
                 </div>
 
-                <button
-                  onClick={() => setIsLoadingSkeleton(!isLoadingSkeleton)}
-                  className={styles.btnSecondary}
-                  style={{ fontSize: '0.75rem' }}
-                >
-                  {isLoadingSkeleton ? 'Show Real Data' : 'Simulate Loading'}
-                </button>
+                <div style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={handleOpenNewStudentModal}
+                    className={styles.btnPrimary}
+                    style={{ fontSize: '0.75rem', height: '32px', padding: '0 0.85rem' }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                    Enroll Student
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('attendance')}
+                    className={styles.btnSecondary}
+                    style={{ fontSize: '0.75rem', height: '32px', padding: '0 0.75rem' }}
+                  >
+                    Take Attendance
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('admissions')}
+                    className={styles.btnSecondary}
+                    style={{ fontSize: '0.75rem', height: '32px', padding: '0 0.75rem' }}
+                  >
+                    View Admissions
+                  </button>
+                </div>
               </div>
 
-              {/* ASYMMETRIC METRIC CARDS (NO REPETITIVE CORNER CHIPS) */}
+              {/* 4 SMART INTERACTIVE KPI CARDS */}
               <div className={styles.kpiGrid}>
-                {isLoadingSkeleton ? (
-                  <>
-                    <div className={`${styles.kpiCard} ${styles.skeletonBox}`} style={{ height: '90px' }} />
-                    <div className={`${styles.kpiCard} ${styles.skeletonBox}`} style={{ height: '90px' }} />
-                    <div className={`${styles.kpiCard} ${styles.skeletonBox}`} style={{ height: '90px' }} />
-                    <div className={`${styles.kpiCard} ${styles.skeletonBox}`} style={{ height: '90px' }} />
-                  </>
-                ) : (
-                  <>
-                    {/* CARD 1: INLINE LABEL WITH ICON */}
-                    <div className={styles.kpiCard}>
-                      <div className={styles.kpiLabelRow}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
-                          <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-                        </svg>
-                        Total Inquiries
-                      </div>
-                      <div className={styles.kpiValue}>{inquiries.length}</div>
-                      <div className={styles.kpiSubText}>
-                        Live prospect leads
-                      </div>
+                {/* CARD 1: ACTIVE TRAINEES */}
+                <div
+                  className={styles.kpiCard}
+                  onClick={() => setActiveTab('students')}
+                  title="View all enrolled students"
+                >
+                  <div className={styles.kpiTopRow}>
+                    <span className={styles.kpiLabel}>Enrolled Trainees</span>
+                    <div className={styles.kpiIconChip}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                      </svg>
                     </div>
+                  </div>
+                  <div className={styles.kpiValue}>{students.length}</div>
+                  <div className={styles.kpiSubRow}>
+                    <span>{djStudentsCount} DJ</span>
+                    <span>•</span>
+                    <span>{empStudentsCount} EMP</span>
+                  </div>
+                </div>
 
-                    {/* CARD 2: BIG NUMBER + INLINE BADGE (NO ICON CHIP AT ALL) */}
-                    <div className={styles.kpiCard}>
-                      <div className={styles.kpiLabelRow}>Enrolled Students</div>
-                      <div className={styles.kpiValue}>{students.length}</div>
-                      <div className={styles.kpiSubText}>
-                        <span className={`${styles.badge} ${styles.badgeEnrolled}`} style={{ padding: '0.1rem 0.4rem' }}>
-                          Active in Studio
-                        </span>
-                      </div>
+                {/* CARD 2: ADMISSION APPLICATIONS */}
+                <div
+                  className={styles.kpiCard}
+                  onClick={() => setActiveTab('admissions')}
+                  title="View all official admission submissions"
+                >
+                  <div className={styles.kpiTopRow}>
+                    <span className={styles.kpiLabel}>Admissions Pipeline</span>
+                    <div className={styles.kpiIconChip}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="16" y1="13" x2="8" y2="13" />
+                        <line x1="16" y1="17" x2="8" y2="17" />
+                        <polyline points="10 9 9 9 8 9" />
+                      </svg>
                     </div>
+                  </div>
+                  <div className={styles.kpiValue}>{admissions.length}</div>
+                  <div className={styles.kpiSubRow}>
+                    {newAdmissionsCount > 0 ? (
+                      <span>{newAdmissionsCount} Pending Review</span>
+                    ) : (
+                      <span>All Processed</span>
+                    )}
+                  </div>
+                </div>
 
-                    {/* CARD 3: STAT + LINEAR PROGRESS INDICATOR */}
-                    <div className={styles.kpiCard}>
-                      <div className={styles.kpiLabelRow}>Conversion Rate</div>
-                      <div className={styles.kpiValue}>{conversionRate}%</div>
-                      <div className={styles.progressBarTrack} style={{ marginTop: '0.6rem' }}>
-                        <div className={styles.progressBarFill} style={{ width: `${conversionRate}%`, background: '#e11d48' }} />
-                      </div>
+                {/* CARD 3: PROSPECT INQUIRIES */}
+                <div
+                  className={styles.kpiCard}
+                  onClick={() => setActiveTab('inquiries')}
+                  title="View lead funnel & inquiries"
+                >
+                  <div className={styles.kpiTopRow}>
+                    <span className={styles.kpiLabel}>Prospect Funnel</span>
+                    <div className={styles.kpiIconChip}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+                        <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+                      </svg>
                     </div>
+                  </div>
+                  <div className={styles.kpiValue}>{inquiries.length}</div>
+                  <div className={styles.kpiSubRow}>
+                    <span>{newInquiryCount} New Leads</span>
+                    <span>•</span>
+                    <span>{conversionRate}% Converted</span>
+                  </div>
+                </div>
 
-                    {/* CARD 4: TEXT METRIC WITH COUNT BREAKDOWN */}
-                    <div className={styles.kpiCard}>
-                      <div className={styles.kpiLabelRow}>Published Articles</div>
-                      <div className={styles.kpiValue}>{posts.length}</div>
-                      <div className={styles.kpiSubText}>Live on soundabode.com/blog</div>
+                {/* CARD 4: STUDIO ATTENDANCE RATE */}
+                <div
+                  className={styles.kpiCard}
+                  onClick={() => setActiveTab('attendance')}
+                  title="View daily and group attendance tracking"
+                >
+                  <div className={styles.kpiTopRow}>
+                    <span className={styles.kpiLabel}>Studio Sessions</span>
+                    <div className={styles.kpiIconChip}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                        <line x1="16" y1="2" x2="16" y2="6" />
+                        <line x1="8" y1="2" x2="8" y2="6" />
+                        <line x1="3" y1="10" x2="21" y2="10" />
+                      </svg>
                     </div>
-                  </>
-                )}
+                  </div>
+                  <div className={styles.kpiValue}>{allAttendanceRecords.length}</div>
+                  <div className={styles.kpiSubRow}>
+                    <span>{allAttendanceRecords.length > 0 ? 'Active Logs' : 'Ready to Mark'}</span>
+                  </div>
+                </div>
               </div>
 
-              {/* CHARTS GRID (FLAT SURFACE, NO GRADIENT BLUR) */}
+              {/* REAL DATA ANALYTICS: 6-MONTH INTAKE TREND & COURSE BREAKDOWN */}
               <div className={styles.chartsGrid}>
+                {/* 6-MONTH INTAKE VELOCITY */}
                 <div className={styles.chartCard}>
                   <div className={styles.chartHeader}>
-                    <h3 className={styles.chartTitle}>Inquiries &amp; Student Volume</h3>
-                  </div>
-
-                  {isLoadingSkeleton ? (
-                    <div className={styles.skeletonBox} style={{ width: '100%', height: '170px' }} />
-                  ) : (
-                    <div style={{ width: '100%', height: '170px' }}>
-                      <svg width="100%" height="100%" viewBox="0 0 500 150" preserveAspectRatio="none">
-                        <line x1="0" y1="30" x2="500" y2="30" stroke="rgba(255,255,255,0.04)" strokeDasharray="3 3" />
-                        <line x1="0" y1="75" x2="500" y2="75" stroke="rgba(255,255,255,0.04)" strokeDasharray="3 3" />
-                        <line x1="0" y1="120" x2="500" y2="120" stroke="rgba(255,255,255,0.04)" strokeDasharray="3 3" />
-
-                        {/* Flat stroke & subtle flat opacity fill (NO blur or gradient filters) */}
-                        <path
-                          d="M 0,120 Q 80,45 160,65 T 320,30 T 500,55 L 500,150 L 0,150 Z"
-                          fill="rgba(225, 29, 72, 0.08)"
-                        />
-
-                        <path
-                          d="M 0,120 Q 80,45 160,65 T 320,30 T 500,55"
-                          fill="none"
-                          stroke="#e11d48"
-                          strokeWidth="2"
-                        />
-
-                        <circle cx="160" cy="65" r="3" fill="#ffffff" stroke="#e11d48" strokeWidth="2" />
-                        <circle cx="320" cy="30" r="3" fill="#ffffff" stroke="#e11d48" strokeWidth="2" />
-                        <circle cx="500" cy="55" r="3" fill="#ffffff" stroke="#e11d48" strokeWidth="2" />
-                      </svg>
-
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: '#64748b', marginTop: '0.2rem' }}>
-                        <span>Mar</span>
-                        <span>Apr</span>
-                        <span>May</span>
-                        <span>Jun</span>
-                        <span>Jul</span>
-                        <span>Aug</span>
+                    <div>
+                      <h3 className={styles.chartTitle}>6-Month Intake &amp; Lead Flow</h3>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                        {intakeMonthlyTrend.totalVolume} total submissions recorded across past 6 months
                       </div>
                     </div>
+
+                    <div style={{ display: 'flex', gap: '0.65rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ width: '8px', height: '8px', background: '#64748b', borderRadius: '2px', display: 'inline-block' }} />
+                        Inquiries
+                      </span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ width: '8px', height: '8px', background: '#f8fafc', borderRadius: '2px', display: 'inline-block' }} />
+                        Admissions
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className={styles.intakeChartContainer}>
+                    {intakeMonthlyTrend.list.map((m) => {
+                      const inqHeightPct = Math.max(8, Math.round((m.inqCount / intakeMonthlyTrend.maxVal) * 100));
+                      const admHeightPct = Math.max(8, Math.round((m.admCount / intakeMonthlyTrend.maxVal) * 100));
+                      return (
+                        <div key={m.yearMonth} className={styles.intakeBarCol}>
+                          <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                            {m.total}
+                          </div>
+                          <div className={styles.intakeBarsWrap}>
+                            <div
+                              className={styles.intakeBarInq}
+                              style={{ height: `${m.inqCount > 0 ? inqHeightPct : 4}%` }}
+                              title={`${m.label}: ${m.inqCount} Inquiries`}
+                            />
+                            <div
+                              className={styles.intakeBarAdm}
+                              style={{ height: `${m.admCount > 0 ? admHeightPct : 4}%` }}
+                              title={`${m.label}: ${m.admCount} Admissions`}
+                            />
+                          </div>
+                          <span className={styles.intakeMonthLabel}>{m.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* DYNAMIC COURSE ENROLLMENT BREAKDOWN */}
+                <div className={styles.chartCard}>
+                  <div className={styles.chartHeader}>
+                    <div>
+                      <h3 className={styles.chartTitle}>Live Course Distribution</h3>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                        Breakdown across {students.length} active studio students
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', marginTop: '0.35rem' }}>
+                    {dynamicCourseStats.map((cs) => (
+                      <div key={cs.name}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.775rem', marginBottom: '0.35rem' }}>
+                          <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{cs.name}</span>
+                          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                            {cs.count} <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', fontWeight: 400 }}>({cs.percentage}%)</span>
+                          </span>
+                        </div>
+                        <div className={styles.progressBarTrack} style={{ background: cs.trackBg, height: '6px' }}>
+                          <div
+                            style={{
+                              width: `${cs.percentage}%`,
+                              height: '100%',
+                              background: cs.color,
+                              borderRadius: '3px',
+                              transition: 'width 0.4s ease',
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* DUAL OPERATIONAL QUEUES */}
+              <div className={styles.overviewDualGrid}>
+                {/* QUEUE 1: RECENT ADMISSION APPLICATIONS */}
+                <div className={styles.tableCard}>
+                  <div className={styles.tableHeaderBar}>
+                    <div>
+                      <h3 className={styles.tableHeaderTitle}>Recent Admissions</h3>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Official DJ / EMP registrations</span>
+                    </div>
+                    <button onClick={() => setActiveTab('admissions')} className={styles.btnGhost} style={{ gap: '0.35rem', fontSize: '0.725rem' }}>
+                      All ({admissions.length})
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
+                    </button>
+                  </div>
+
+                  {admissions.length === 0 ? (
+                    <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                      No admission applications received yet.
+                    </div>
+                  ) : (
+                    <table className={styles.dataTable}>
+                      <thead>
+                        <tr>
+                          <th>Applicant</th>
+                          <th>Course</th>
+                          <th>Status</th>
+                          <th style={{ textAlign: 'right' }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {admissions.slice(0, 4).map((adm) => {
+                          const avatar = getAvatarDetails(`${adm.firstName} ${adm.lastName}`);
+                          return (
+                            <tr key={adm.id}>
+                              <td>
+                                <div className={styles.studentCell}>
+                                  {adm.photoUrl && safeImageUrl(adm.photoUrl) ? (
+                                    <img
+                                      src={safeImageUrl(adm.photoUrl)}
+                                      alt={`${adm.firstName} ${adm.lastName}`}
+                                      className={styles.avatarCircle}
+                                      style={{ objectFit: 'cover', border: '1.5px solid rgba(255, 255, 255, 0.2)' }}
+                                    />
+                                  ) : (
+                                    <div
+                                      className={styles.avatarCircle}
+                                      style={{ background: avatar.bg, border: `1px solid ${avatar.border}` }}
+                                    >
+                                      {avatar.initials}
+                                    </div>
+                                  )}
+                                  <div>
+                                    <div className={styles.studentName} style={{ fontWeight: 600 }}>{adm.firstName} {adm.lastName}</div>
+                                    <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{adm.formNo}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 500 }}>{adm.courseOpted}</span>
+                              </td>
+                              <td>
+                                <button
+                                  onClick={() => cycleAdmissionStatus(adm.id, adm.status)}
+                                  className={`${styles.badge} ${adm.status === 'NEW'
+                                      ? styles.badgeNew
+                                      : adm.status === 'CONTACTED'
+                                        ? styles.badgeContacted
+                                        : adm.status === 'ENROLLED'
+                                          ? styles.badgeEnrolled
+                                          : styles.badgeArchived
+                                    }`}
+                                  style={{ cursor: 'pointer' }}
+                                  title="Click to cycle status"
+                                >
+                                  <span className={styles.statusDot} />
+                                  {adm.status}
+                                </button>
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                <button
+                                  onClick={() => setSelectedAdmissionForModal(adm)}
+                                  className={styles.btnSecondary}
+                                  style={{ fontSize: '0.7rem', height: '24px', padding: '0 0.5rem' }}
+                                >
+                                  View
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   )}
                 </div>
 
-                <div className={styles.chartCard}>
-                  <div className={styles.chartHeader}>
-                    <h3 className={styles.chartTitle}>Course Distribution</h3>
+                {/* QUEUE 2: RECENT PROSPECT INQUIRIES */}
+                <div className={styles.tableCard}>
+                  <div className={styles.tableHeaderBar}>
+                    <div>
+                      <h3 className={styles.tableHeaderTitle}>Recent Prospects</h3>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Incoming leads &amp; inquiries</span>
+                    </div>
+                    <button onClick={() => setActiveTab('inquiries')} className={styles.btnGhost} style={{ gap: '0.35rem', fontSize: '0.725rem' }}>
+                      All ({inquiries.length})
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
+                    </button>
                   </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.25rem' }}>
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                        <span>Ableton EMP</span>
-                        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>48%</span>
-                      </div>
-                      <div className={styles.progressBarTrack}>
-                        <div style={{ width: '48%', height: '100%', background: '#e11d48', borderRadius: '3px' }} />
-                      </div>
+                  {inquiries.length === 0 ? (
+                    <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                      No incoming prospect inquiries.
                     </div>
-
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                        <span>Pioneer DJ</span>
-                        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>32%</span>
-                      </div>
-                      <div className={styles.progressBarTrack}>
-                        <div style={{ width: '32%', height: '100%', background: '#3b82f6', borderRadius: '3px' }} />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                        <span>Audio Engineering</span>
-                        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>20%</span>
-                      </div>
-                      <div className={styles.progressBarTrack}>
-                        <div style={{ width: '20%', height: '100%', background: '#10b981', borderRadius: '3px' }} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* RECENT INQUIRIES DATA TABLE */}
-              <div className={styles.tableCard}>
-                <div className={styles.tableHeaderBar}>
-                  <h3 className={styles.tableHeaderTitle}>Recent Prospects</h3>
-                  <button onClick={() => setActiveTab('inquiries')} className={styles.btnGhost} style={{ gap: '0.35rem' }}>
-                    View All Leads ({inquiries.length})
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
-                  </button>
-                </div>
-
-                <table className={styles.dataTable}>
-                  <thead>
-                    <tr>
-                      <th>Prospect</th>
-                      <th>Program</th>
-                      <th>Contact Details</th>
-                      <th>Source</th>
-                      <th>Status</th>
-                      <th style={{ textAlign: 'right' }}>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {inquiries.slice(0, 5).map((inq) => {
-                      const avatar = getAvatarDetails(inq.name);
-                      const sourceBadge = getSourceBadgeDetails(inq);
-                      return (
-                        <tr key={inq.id}>
-                          <td>
-                            <div className={styles.studentCell}>
-                              <div
-                                className={styles.avatarCircle}
-                                style={{ background: avatar.bg, border: `1px solid ${avatar.border}` }}
-                              >
-                                {avatar.initials}
-                              </div>
-                              <div className={styles.studentName}>{inq.name}</div>
-                            </div>
-                          </td>
-                          <td>
-                            <span style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>{inq.courseInterest}</span>
-                          </td>
-                          <td>
-                            <div style={{ fontSize: '0.775rem', color: 'var(--text-muted)' }}>{inq.email}</div>
-                          </td>
-                          <td>
-                            <span className={`${styles.badge} ${sourceBadge.className}`} title={`Lead Source: ${sourceBadge.label}`}>
-                              <span className={styles.statusDot} />
-                              {sourceBadge.label}
-                            </span>
-                          </td>
-                          <td>
-                            <button
-                              onClick={() => cycleInquiryStatus(inq.id, inq.status)}
-                              className={`${styles.badge} ${inq.status === 'NEW'
-                                  ? styles.badgeNew
-                                  : inq.status === 'CONTACTED'
-                                    ? styles.badgeContacted
-                                    : inq.status === 'ENROLLED'
-                                      ? styles.badgeEnrolled
-                                      : styles.badgeArchived
-                                }`}
-                              style={{ cursor: 'pointer' }}
-                              title="Click to cycle status"
-                            >
-                              <span className={styles.statusDot} />
-                              {inq.status}
-                            </button>
-                          </td>
-                          <td style={{ textAlign: 'right' }}>
-                            <button
-                              onClick={() => handleDeleteInquiry(inq.id)}
-                              className={styles.btnDestructive}
-                              title="Delete inquiry"
-                            >
-                              Delete
-                            </button>
-                          </td>
+                  ) : (
+                    <table className={styles.dataTable}>
+                      <thead>
+                        <tr>
+                          <th>Lead</th>
+                          <th>Interest</th>
+                          <th>Source</th>
+                          <th>Status</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody>
+                        {inquiries.slice(0, 4).map((inq) => {
+                          const avatar = getAvatarDetails(inq.name);
+                          const sourceBadge = getSourceBadgeDetails(inq);
+                          return (
+                            <tr key={inq.id}>
+                              <td>
+                                <div className={styles.studentCell}>
+                                  <div
+                                    className={styles.avatarCircle}
+                                    style={{ background: avatar.bg, border: `1px solid ${avatar.border}` }}
+                                  >
+                                    {avatar.initials}
+                                  </div>
+                                  <div>
+                                    <div className={styles.studentName} style={{ fontWeight: 600 }}>{inq.name}</div>
+                                    <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{inq.phone || inq.email}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{inq.courseInterest}</span>
+                              </td>
+                              <td>
+                                <span className={`${styles.badge} ${sourceBadge.className}`} style={{ fontSize: '0.68rem', padding: '0.1rem 0.4rem' }}>
+                                  {sourceBadge.label}
+                                </span>
+                              </td>
+                              <td>
+                                <button
+                                  onClick={() => cycleInquiryStatus(inq.id, inq.status)}
+                                  className={`${styles.badge} ${inq.status === 'NEW'
+                                      ? styles.badgeNew
+                                      : inq.status === 'CONTACTED'
+                                        ? styles.badgeContacted
+                                        : inq.status === 'ENROLLED'
+                                          ? styles.badgeEnrolled
+                                          : styles.badgeArchived
+                                    }`}
+                                  style={{ cursor: 'pointer' }}
+                                  title="Click to cycle status"
+                                >
+                                  <span className={styles.statusDot} />
+                                  {inq.status}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
               </div>
             </div>
           )}

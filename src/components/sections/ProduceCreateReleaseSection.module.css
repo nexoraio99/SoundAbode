@@ -57,9 +57,16 @@
 .produceParagraph {
   font-size: 0.88rem;
   color: rgba(255, 255, 255, 0.72);
-  line-height: 1.6;
+  line-height: 1.65;
   font-weight: 400;
   margin: 0;
+  text-align: justify;
+  text-justify: inter-word;
+  text-align-last: left;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  -ms-hyphens: auto;
+  text-wrap: pretty;
 }
 
 .learnMoreBtn {
@@ -230,6 +237,11 @@
   .produceParagraph {
     font-size: 0.85rem;
     line-height: 1.55;
+    text-align: justify;
+    text-justify: inter-word;
+    text-align-last: left;
+    hyphens: auto;
+    -webkit-hyphens: auto;
   }
 
   .mediaTopRow {

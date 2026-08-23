@@ -50,15 +50,13 @@
   position: relative;
   background: rgba(6, 6, 6, 0.70);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  padding: 1.8rem 1.4rem 2.8rem;
+  border-radius: 12px;
+  padding: 1.15rem 1.25rem 2.25rem;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 1rem;
-  min-height: 230px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  align-items: flex-start;
+  gap: 0.55rem;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   transition: all 0.25s ease;
@@ -82,48 +80,54 @@
 }
 
 .gearCard:hover {
-  transform: translateY(-4px);
+  transform: translateY(-3px);
   border-color: rgba(239, 68, 68, 0.4);
   background: rgba(22, 21, 21, 0.70);
 }
 
-.cardIconBox {
-  color: #ef4444;
+.cardHeader {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 0.55rem;
+  width: 100%;
+  text-align: center;
+}
+
+.cardIconBox {
+  color: #ef4444;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   opacity: 0.95;
 }
 
-.cardContent {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-}
-
 .cardTitle {
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   font-weight: 800;
   color: #ffffff;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   margin: 0;
+  line-height: 1.2;
 }
 
 .cardDescription {
-  font-size: 0.84rem;
-  color: rgba(255, 255, 255, 0.7);
-  line-height: 1.55;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.45;
   font-weight: 400;
   margin: 0;
+  text-align: left;
+  width: 100%;
 }
 
 .detailsBtn {
   position: absolute;
-  bottom: 1rem;
-  right: 1.2rem;
-  font-size: 0.78rem;
+  bottom: 0.7rem;
+  right: 1rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: #ef4444;
   cursor: pointer;

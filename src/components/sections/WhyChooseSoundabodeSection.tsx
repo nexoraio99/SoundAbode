@@ -41,68 +41,70 @@ export const WhyChooseSoundabodeSection: React.FC = () => {
         <div className={styles.cardsGrid}>
           {/* Card 1 */}
           <div className={styles.benefitCard}>
-            <div className={styles.cardIcon}>
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
-                <rect x="2" y="6" width="20" height="12" rx="2" />
-                <circle cx="8" cy="12" r="2.5" />
-                <circle cx="16" cy="12" r="2.5" />
-                <path d="M12 6v12" />
-              </svg>
+            <div className={styles.cardHeader}>
+              <div className={styles.cardIcon}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
+                  <rect x="2" y="6" width="20" height="12" rx="2" />
+                  <circle cx="8" cy="12" r="2.5" />
+                  <circle cx="16" cy="12" r="2.5" />
+                  <path d="M12 6v12" />
+                </svg>
+              </div>
+              <h3 className={styles.cardTitle}>
+                HANDS-ON STUDIO <span className={styles.accentRed}>TRAINING</span>
+              </h3>
             </div>
-            <h3 className={styles.cardTitle}>
-              HANDS-ON STUDIO <span className={styles.accentRed}>TRAINING</span>
-            </h3>
             <div className={styles.cardBody}>
               <p>100% hands-on studio training</p>
               <p>Access to India&apos;s most advanced production setups</p>
             </div>
-            <button className={styles.learnMoreBtn}>
-              <span>Learn more</span>
-              <span className={styles.btnArrow}>→</span>
-            </button>
+            <span className={styles.learnMoreBtn}>
+              Learn more <span className={styles.btnArrow}>→</span>
+            </span>
           </div>
 
           {/* Card 2 */}
           <div className={styles.benefitCard}>
-            <div className={styles.cardIcon}>
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
-                <line x1="18" y1="20" x2="18" y2="10" />
-                <line x1="12" y1="20" x2="12" y2="4" />
-                <line x1="6" y1="20" x2="6" y2="14" />
-              </svg>
+            <div className={styles.cardHeader}>
+              <div className={styles.cardIcon}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
+                  <line x1="18" y1="20" x2="18" y2="10" />
+                  <line x1="12" y1="20" x2="12" y2="4" />
+                  <line x1="6" y1="20" x2="6" y2="14" />
+                </svg>
+              </div>
+              <h3 className={styles.cardTitle}>
+                MENTORS &amp; <span className={styles.accentRed}>PERFORMANCE</span>
+              </h3>
             </div>
-            <h3 className={styles.cardTitle}>
-              MENTORS &amp; <span className={styles.accentRed}>PERFORMANCE</span>
-            </h3>
             <div className={styles.cardBody}>
               <p>Industry mentors &amp; touring DJs</p>
               <p>Real performance opportunities (Pune &amp; across India)</p>
             </div>
-            <button className={styles.learnMoreBtn}>
-              <span>Learn more</span>
-              <span className={styles.btnArrow}>→</span>
-            </button>
+            <span className={styles.learnMoreBtn}>
+              Learn more <span className={styles.btnArrow}>→</span>
+            </span>
           </div>
 
           {/* Card 3 */}
           <div className={styles.benefitCard}>
-            <div className={styles.cardIcon}>
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
-                <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
-              </svg>
+            <div className={styles.cardHeader}>
+              <div className={styles.cardIcon}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
+                  <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+                </svg>
+              </div>
+              <h3 className={styles.cardTitle}>
+                ARTIST SUPPORT &amp; <span className={styles.accentRed}>FLEXIBILITY</span>
+              </h3>
             </div>
-            <h3 className={styles.cardTitle}>
-              ARTIST SUPPORT &amp;<br />
-              <span className={styles.accentRed}>FLEXIBILITY</span>
-            </h3>
             <div className={styles.cardBody}>
               <p>Artist branding &amp; release support</p>
               <p>Online + offline learning modes</p>
             </div>
-            <button className={styles.learnMoreBtn}>
-              <span>Learn more</span>
-              <span className={styles.btnArrow}>→</span>
-            </button>
+            <span className={styles.learnMoreBtn}>
+              Learn more <span className={styles.btnArrow}>→</span>
+            </span>
           </div>
         </div>
       </div>
