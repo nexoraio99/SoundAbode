@@ -94,7 +94,20 @@ export const AdmissionPage: React.FC<AdmissionPageProps> = ({ formType, onNaviga
   };
 
   const selectedCourseObj = currentCourses.find((c) => c.id === selectedCourseId) || currentCourses[0];
-  const activeFormNo = AdmissionService.getNextFormNumber(formType);
+  const [activeFormNo, setActiveFormNo] = React.useState<string>('...');
+
+  React.useEffect(() => {
+    let cancelled = false;
+    AdmissionService.getNextFormNumber(formType).then((no) => {
+      if (!cancelled) setActiveFormNo(no);
+    });
+    const unsubscribe = AdmissionService.subscribe(() => {
+      AdmissionService.getNextFormNumber(formType).then((no) => {
+        if (!cancelled) setActiveFormNo(no);
+      });
+    });
+    return () => { cancelled = true; unsubscribe(); };
+  }, [formType]);
 
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -112,7 +125,7 @@ export const AdmissionPage: React.FC<AdmissionPageProps> = ({ formType, onNaviga
     }
   }, []);
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
 
@@ -136,7 +149,7 @@ export const AdmissionPage: React.FC<AdmissionPageProps> = ({ formType, onNaviga
     setIsSubmitting(true);
 
     try {
-      const submission = AdmissionService.submitAdmissionForm({
+      const submission = await AdmissionService.submitAdmissionForm({
         formType,
         firstName: firstName.trim(),
         lastName: lastName.trim(),

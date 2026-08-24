@@ -235,7 +235,21 @@ export class AdmissionService {
     return local;
   }
 
-  public static getNextFormNumber(formType: 'DJ' | 'EMP'): string {
+  public static async getNextFormNumber(formType: 'DJ' | 'EMP'): Promise<string> {
+    // 1. Try to get the authoritative next number from the server (always in sync with MongoDB)
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch(`${API_BASE_URL}/admissions/next-form-number?formType=${formType}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.formNo) return data.formNo;
+        }
+      } catch {
+        // fall through to local computation
+      }
+    }
+
+    // 2. Offline fallback: compute from local storage (best-effort)
     const admissions = this.getStoredAdmissions();
     const typeAdmissions = admissions.filter((a) => a.formType === formType);
     const startSeq = formType === 'DJ' ? 1000 : 2000;
@@ -288,11 +302,12 @@ export class AdmissionService {
     };
   }
 
-  public static submitAdmissionForm(
+  public static async submitAdmissionForm(
     formData: Omit<AdmissionSubmission, 'id' | 'formNo' | 'submittedAt' | 'status'>
-  ): AdmissionSubmission {
+  ): Promise<AdmissionSubmission> {
     const admissions = this.getStoredAdmissions();
-    const formNo = this.getNextFormNumber(formData.formType);
+    // Fetch form number from server (authoritative) or fall back to local
+    const formNo = await this.getNextFormNumber(formData.formType);
 
     const newAdmission: AdmissionSubmission = {
       ...formData,
@@ -320,7 +335,7 @@ export class AdmissionService {
     // Always send to Google Sheets as a safety net (client-side)
     GoogleSheetsService.submitToGoogleSheets(sheetsPayload);
 
-    // Sync to backend API (which saves to MongoDB + also forwards to Google Sheets)
+    // Sync to backend API (which saves to MongoDB + reassigns formNo server-side)
     if (typeof window !== 'undefined') {
       fetch(`${API_BASE_URL}/admissions`, {
         method: 'POST',
@@ -337,7 +352,16 @@ export class AdmissionService {
               'Reason:', data.dbError || 'Unknown'
             );
           } else {
-            console.log('✅ Admission synced to backend & MongoDB successfully:', newAdmission.formNo);
+            // Server always reassigns formNo from MongoDB — update local copy
+            if (data && data.formNo && data.formNo !== newAdmission.formNo) {
+              const current = this.getStoredAdmissions();
+              const idx = current.findIndex((a) => a.id === newAdmission.id);
+              if (idx !== -1) {
+                current[idx] = { ...current[idx], formNo: data.formNo };
+                this.saveAdmissions(current);
+              }
+            }
+            console.log('✅ Admission synced to backend & MongoDB successfully:', data.formNo || newAdmission.formNo);
           }
         })
         .catch((err) => {

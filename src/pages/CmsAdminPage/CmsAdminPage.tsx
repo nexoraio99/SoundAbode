@@ -5730,7 +5730,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                     )}
                                     <div>
                                       <div className={styles.studentName} style={{ fontWeight: 600 }}>{item.firstName} {item.lastName}</div>
-                                      <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>Father: {item.fatherName}</div>
                                     </div>
                                   </div>
                                 </td>

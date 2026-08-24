@@ -108,15 +108,20 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
   const [activeFormNo, setActiveFormNo] = useState<string>('');
 
   useEffect(() => {
-    // Sync with remote admissions and calculate sequence for current series
+    let cancelled = false;
+    // Sync with remote admissions then fetch authoritative next form number
     AdmissionService.getAllAdmissions();
-    setActiveFormNo(AdmissionService.getNextFormNumber(formType));
-
-    const unsubscribe = AdmissionService.subscribe(() => {
-      setActiveFormNo(AdmissionService.getNextFormNumber(formType));
+    AdmissionService.getNextFormNumber(formType).then((no) => {
+      if (!cancelled) setActiveFormNo(no);
     });
 
-    return () => unsubscribe();
+    const unsubscribe = AdmissionService.subscribe(() => {
+      AdmissionService.getNextFormNumber(formType).then((no) => {
+        if (!cancelled) setActiveFormNo(no);
+      });
+    });
+
+    return () => { cancelled = true; unsubscribe(); };
   }, [formType]);
 
   if (!isOpen) return null;
@@ -126,7 +131,7 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
   const selectedCourseObj = currentCourses.find((c) => c.id === selectedCourseId) || currentCourses[0];
   const [cellPhoneErrorMsg, setCellPhoneErrorMsg] = useState('');
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
     setCellPhoneErrorMsg('');
@@ -156,7 +161,7 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
     setIsSubmitting(true);
 
     try {
-      const submission = AdmissionService.submitAdmissionForm({
+      const submission = await AdmissionService.submitAdmissionForm({
         formType,
         firstName: firstName.trim(),
         lastName: lastName.trim(),

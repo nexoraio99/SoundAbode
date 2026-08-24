@@ -1517,6 +1517,43 @@ app.delete('/api/inquiries/:id', requireAuth, async (req, res) => {
 });
 
 // ─── ADMISSIONS ────────────────────────────────────────────────────────────────
+
+// Helper: compute the next sequential form number from MongoDB.
+// Always queries the live DB so it can never produce a duplicate.
+async function getNextFormNo(formType) {
+  const prefix = formType === 'EMP' ? 'EMP' : 'DJ';
+  const startSeq = formType === 'EMP' ? 2000 : 1000;
+  let maxSeq = startSeq;
+  if (mongoose.connection.readyState === 1) {
+    const all = await AdmissionModel.find(
+      { formType },
+      { formNo: 1, _id: 0 }
+    );
+    all.forEach(({ formNo }) => {
+      const m = (formNo || '').match(/(?:DJ|EMP)-(\d+)/i);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (!isNaN(n) && n > maxSeq) maxSeq = n;
+      }
+    });
+  }
+  return `SAS/V-9/${prefix}-${maxSeq + 1}`;
+}
+
+// Public endpoint — lets the form preview the next form number before submitting
+app.get('/api/admissions/next-form-number', async (req, res) => {
+  try {
+    const formType = (req.query.formType || 'DJ').toUpperCase();
+    if (formType !== 'DJ' && formType !== 'EMP') {
+      return res.status(400).json({ error: 'formType must be DJ or EMP' });
+    }
+    const formNo = await getNextFormNo(formType);
+    return res.json({ formNo });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/admissions', requireAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState === 1) {
@@ -1537,10 +1574,17 @@ app.post('/api/admissions', async (req, res) => {
     if (!admissionData.submittedAt) admissionData.submittedAt = new Date().toISOString();
     if (!admissionData.status) admissionData.status = 'NEW';
 
+    // ── Form number is ALWAYS assigned server-side from MongoDB ──────────────
+    // This ensures the sequence is correct and no two submissions ever share
+    // the same form number, regardless of what the client sends.
+    const formType = admissionData.formType || 'DJ';
+    admissionData.formNo = await getNextFormNo(formType);
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Forward to Google Sheets server-side
     forwardToGoogleSheets({
       ...admissionData,
-      source: `Official Admission Form (${admissionData.formType || 'DJ/EMP'})`,
+      source: `Official Admission Form (${formType})`,
     });
 
     // Attempt MongoDB save
