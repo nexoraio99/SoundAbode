@@ -20,6 +20,8 @@ services:
         sync: false
       - key: VAIBHAV_PASSCODE
         sync: false
+      - key: VRISHAN_PASSCODE
+        sync: false
       - key: CORS_ORIGIN
         value: https://soundabode.com,https://www.soundabode.com
       - key: GOOGLE_SHEETS_URL

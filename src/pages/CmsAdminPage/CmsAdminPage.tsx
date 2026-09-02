@@ -117,6 +117,9 @@ const getInstructorInfo = (rec?: { markedByName?: string; markedBy?: string }) =
   if (name.includes('vaibhav') || by.includes('vaibhav')) {
     return { name: 'Vaibhav', role: 'Faculty / Mentor', color: 'var(--text-primary)', bg: 'var(--bg-surface)', border: 'var(--border-medium)' };
   }
+  if (name.includes('vrishan') || by.includes('vrishan')) {
+    return { name: 'Vrishan', role: 'Faculty / Mentor', color: 'var(--text-primary)', bg: 'var(--bg-surface)', border: 'var(--border-medium)' };
+  }
   if (name.includes('abhinav') || by.includes('abhinav') || by.includes('admin')) {
     return { name: 'Abhinav', role: 'Lead / Admin', color: 'var(--text-primary)', bg: 'var(--bg-surface)', border: 'var(--border-medium)' };
   }
@@ -329,7 +332,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   }>(defaultFeeForm());
 
   // CLASSES SECTION (ADMIN ONLY) STATES & FILTERS
-  const [classesTeacherFilter, setClassesTeacherFilter] = useState<'ALL' | 'ashu' | 'vaibhav' | 'abhinav' | 'admin'>('ALL');
+  const [classesTeacherFilter, setClassesTeacherFilter] = useState<'ALL' | 'ashu' | 'vaibhav' | 'vrishan' | 'abhinav' | 'admin'>('ALL');
   const [classesStatusFilter, setClassesStatusFilter] = useState<string>('ALL');
   const [classesDatePreset, setClassesDatePreset] = useState<'ALL' | 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'THIS_MONTH' | 'CUSTOM'>('ALL');
   const [classesCustomDate, setClassesCustomDate] = useState<string>('');
@@ -1736,13 +1739,22 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     });
   }, [allAttendanceRecords]);
 
+  const teacherVrishanRecords = useMemo(() => {
+    return allAttendanceRecords.filter((r) => {
+      const by = (r.markedBy || '').toLowerCase();
+      const name = (r.markedByName || '').toLowerCase();
+      return by.includes('vrishan') || name.includes('vrishan');
+    });
+  }, [allAttendanceRecords]);
+
   const teacherAbhinavRecords = useMemo(() => {
     return allAttendanceRecords.filter((r) => {
       const by = (r.markedBy || '').toLowerCase();
       const name = (r.markedByName || '').toLowerCase();
       const isAshu = by.includes('ashu') || name.includes('ashu');
       const isVaibhav = by.includes('vaibhav') || name.includes('vaibhav');
-      return !isAshu && !isVaibhav;
+      const isVrishan = by.includes('vrishan') || name.includes('vrishan');
+      return !isAshu && !isVaibhav && !isVrishan;
     });
   }, [allAttendanceRecords]);
 
@@ -1886,10 +1898,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         const by = (entry.markedBy || '').toLowerCase();
         const name = (entry.markedByName || '').toLowerCase();
         if (!by.includes('vaibhav') && !name.includes('vaibhav')) return false;
+      } else if (classesTeacherFilter === 'vrishan') {
+        const by = (entry.markedBy || '').toLowerCase();
+        const name = (entry.markedByName || '').toLowerCase();
+        if (!by.includes('vrishan') && !name.includes('vrishan')) return false;
       } else if (classesTeacherFilter === 'abhinav' || classesTeacherFilter === 'admin') {
         const by = (entry.markedBy || '').toLowerCase();
         const name = (entry.markedByName || '').toLowerCase();
-        if (by.includes('ashu') || name.includes('ashu') || by.includes('vaibhav') || name.includes('vaibhav')) return false;
+        if (by.includes('ashu') || name.includes('ashu') || by.includes('vaibhav') || name.includes('vaibhav') || by.includes('vrishan') || name.includes('vrishan')) return false;
       }
 
       // 2. Status Filter
@@ -2007,6 +2023,35 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       datesCount: dates.length,
     };
   }, [teacherVaibhavRecords, students]);
+
+  const vrishanAnalytics = useMemo(() => {
+    const total = teacherVrishanRecords.length;
+    const present = teacherVrishanRecords.filter((r) => r.status === 'PRESENT').length;
+    const absent = teacherVrishanRecords.filter((r) => r.status === 'ABSENT').length;
+    const practice = teacherVrishanRecords.filter((r) => r.status === 'PRACTICE_SESSION').length;
+    const groupRecords = teacherVrishanRecords.filter((r) => r.status === 'GROUP_SESSION');
+    const group = groupRecords.length;
+    const groupSessionsCount = new Set(groupRecords.map((r) => `${r.date}_${r.timeSlot}`)).size;
+    const uniqueStudentIds = Array.from(new Set(teacherVrishanRecords.map((r) => r.studentId)));
+    const uniqueStudents = uniqueStudentIds.map((id) => students.find((s) => s.id === id)).filter((s): s is EnrolledStudent => Boolean(s));
+    const dates = Array.from(new Set(teacherVrishanRecords.map((r) => r.date))).sort().reverse();
+    const lastActiveDate = dates[0] || 'No sessions yet';
+    const presentRate = total > 0 ? Math.round(((present + practice + group) / total) * 100) : 0;
+
+    return {
+      total,
+      present,
+      absent,
+      practice,
+      group,
+      groupSessionsCount,
+      uniqueStudentCount: uniqueStudentIds.length,
+      uniqueStudents,
+      lastActiveDate,
+      presentRate,
+      datesCount: dates.length,
+    };
+  }, [teacherVrishanRecords, students]);
 
   const abhinavAnalytics = useMemo(() => {
     const total = teacherAbhinavRecords.length;
@@ -2146,7 +2191,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         </head>
         <body>
           <h1>Soundabode Studios - Teacher Classes & Attendance Master Ledger</h1>
-          <p>Generated on ${new Date().toLocaleString('en-IN')} | Total Records: ${filteredClassesRecords.length} | Teachers: Ashu &amp; Vaibhav</p>
+          <p>Generated on ${new Date().toLocaleString('en-IN')} | Total Records: ${filteredClassesRecords.length} | Teachers: Ashu, Vaibhav &amp; Vrishan</p>
           <table>
             <thead>
               <tr>
@@ -3425,6 +3470,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     <span>•</span>
                     <span>Vaibhav ({teacherVaibhavRecords.length})</span>
                     <span>•</span>
+                    <span>Vrishan ({teacherVrishanRecords.length})</span>
+                    <span>•</span>
                     <span>Abhinav ({teacherAbhinavRecords.length})</span>
                   </div>
                 </div>
@@ -3558,6 +3605,42 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   </div>
                 </div>
 
+                {/* Vrishan Block */}
+                <div className={styles.summaryStatBlock}>
+                  <div className={styles.summaryStatHeader}>
+                    <span className={styles.summaryStatTitle}>Teacher Vrishan</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = classesTeacherFilter === 'vrishan' ? 'ALL' : 'vrishan';
+                        setClassesTeacherFilter(next);
+                      }}
+                      className={styles.filterPill}
+                      style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
+                    >
+                      {classesTeacherFilter === 'vrishan' ? 'Active' : 'Filter'}
+                    </button>
+                  </div>
+                  <div className={styles.summaryStatCount}>{vrishanAnalytics.total}</div>
+                  <div className={styles.summaryStatMeta}>
+                    <span className={styles.summaryStatMetaItem}>
+                      Present: <span className={styles.summaryStatMetaNum}>{vrishanAnalytics.present}</span>
+                    </span>
+                    <span>•</span>
+                    <span className={styles.summaryStatMetaItem}>
+                      Group: <span className={styles.summaryStatMetaNum}>{vrishanAnalytics.groupSessionsCount}{vrishanAnalytics.group > 0 ? ` (${vrishanAnalytics.group} st)` : ''}</span>
+                    </span>
+                    <span>•</span>
+                    <span className={styles.summaryStatMetaItem}>
+                      Students: <span className={styles.summaryStatMetaNum}>{vrishanAnalytics.uniqueStudentCount}</span>
+                    </span>
+                    <span>•</span>
+                    <span className={styles.summaryStatMetaItem}>
+                      Rate: <span className={styles.summaryStatMetaNum}>{vrishanAnalytics.presentRate}%</span>
+                    </span>
+                  </div>
+                </div>
+
                 {/* Abhinav Block */}
                 <div className={styles.summaryStatBlock}>
                   <div className={styles.summaryStatHeader}>
@@ -3676,6 +3759,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     className={`${styles.filterPill} ${classesTeacherFilter === 'vaibhav' ? styles.filterPillActive : ''}`}
                   >
                     Vaibhav ({teacherVaibhavRecords.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setClassesTeacherFilter('vrishan')}
+                    className={`${styles.filterPill} ${classesTeacherFilter === 'vrishan' ? styles.filterPillActive : ''}`}
+                  >
+                    Vrishan ({teacherVrishanRecords.length})
                   </button>
                   <button
                     type="button"
@@ -3806,7 +3896,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             const isGroup = rec.type === 'GROUP';
                             const isAshu = (rec.markedByName || '').toLowerCase().includes('ashu') || (rec.markedBy || '').toLowerCase().includes('ashu');
                             const isVaibhav = (rec.markedByName || '').toLowerCase().includes('vaibhav') || (rec.markedBy || '').toLowerCase().includes('vaibhav');
-                            const teacherName = isAshu ? 'Ashu' : isVaibhav ? 'Vaibhav' : (rec.markedByName || 'Staff');
+                            const isVrishan = (rec.markedByName || '').toLowerCase().includes('vrishan') || (rec.markedBy || '').toLowerCase().includes('vrishan');
+                            const teacherName = isAshu ? 'Ashu' : isVaibhav ? 'Vaibhav' : isVrishan ? 'Vrishan' : (rec.markedByName || 'Staff');
 
                             return (
                               <tr key={rec.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedRecordForInspection(rec)}>
@@ -3983,7 +4074,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       const isGroup = rec.type === 'GROUP';
                       const isAshu = (rec.markedByName || '').toLowerCase().includes('ashu') || (rec.markedBy || '').toLowerCase().includes('ashu');
                       const isVaibhav = (rec.markedByName || '').toLowerCase().includes('vaibhav') || (rec.markedBy || '').toLowerCase().includes('vaibhav');
-                      const teacherName = isAshu ? 'Ashu' : isVaibhav ? 'Vaibhav' : (rec.markedByName || 'Abhinav');
+                      const isVrishan = (rec.markedByName || '').toLowerCase().includes('vrishan') || (rec.markedBy || '').toLowerCase().includes('vrishan');
+                      const teacherName = isAshu ? 'Ashu' : isVaibhav ? 'Vaibhav' : isVrishan ? 'Vrishan' : (rec.markedByName || 'Abhinav');
 
                       return (
                         <div key={rec.id} className={styles.mobileDataCard} onClick={() => setSelectedRecordForInspection(rec)}>
@@ -8403,9 +8495,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           : null;
         const isAshu = (rec.markedByName || '').toLowerCase().includes('ashu') || (rec.markedBy || '').toLowerCase().includes('ashu');
         const isVaibhav = (rec.markedByName || '').toLowerCase().includes('vaibhav') || (rec.markedBy || '').toLowerCase().includes('vaibhav');
+        const isVrishan = (rec.markedByName || '').toLowerCase().includes('vrishan') || (rec.markedBy || '').toLowerCase().includes('vrishan');
         const studentAllRecords = !isGroup && (rec as any).studentId ? allAttendanceRecords.filter((r) => r.studentId === (rec as any).studentId) : [];
         const studentAshuCount = studentAllRecords.filter((r) => (r.markedByName || '').toLowerCase().includes('ashu') || (r.markedBy || '').toLowerCase().includes('ashu')).length;
         const studentVaibhavCount = studentAllRecords.filter((r) => (r.markedByName || '').toLowerCase().includes('vaibhav') || (r.markedBy || '').toLowerCase().includes('vaibhav')).length;
+        const studentVrishanCount = studentAllRecords.filter((r) => (r.markedByName || '').toLowerCase().includes('vrishan') || (r.markedBy || '').toLowerCase().includes('vrishan')).length;
 
         return (
           <div className={styles.modalOverlay} onClick={() => setSelectedRecordForInspection(null)}>
@@ -8492,7 +8586,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   <div className={styles.inspectionRow}>
                     <span className={styles.inspectionKey}>Marked By Teacher</span>
                     <div className={styles.inspectionVal}>
-                      <span style={{ fontWeight: 600 }}>{isAshu ? 'Ashu' : isVaibhav ? 'Vaibhav' : (rec.markedByName || 'Staff')}</span>
+                      <span style={{ fontWeight: 600 }}>{isAshu ? 'Ashu' : isVaibhav ? 'Vaibhav' : isVrishan ? 'Vrishan' : (rec.markedByName || 'Staff')}</span>
                       <div className={styles.monoCell} style={{ fontSize: '0.75rem' }}>
                         {rec.markedBy} (Role: {rec.markedByRole || 'teacher'})
                       </div>
@@ -8540,7 +8634,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       <span className={styles.inspectionKey}>Student History</span>
                       <div className={styles.inspectionVal}>
                         <span className={styles.monoCell}>
-                          {studentAllRecords.length} total classes logged ({studentAshuCount} with Ashu, {studentVaibhavCount} with Vaibhav)
+                          {studentAllRecords.length} total classes logged ({studentAshuCount} with Ashu, {studentVaibhavCount} with Vaibhav, {studentVrishanCount} with Vrishan)
                         </span>
                       </div>
                     </div>

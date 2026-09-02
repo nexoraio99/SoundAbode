@@ -16,6 +16,7 @@ This guide walks you through deploying the **Soundabode** full-stack web applica
    - `ADMIN_PASSCODE`: Secure passcode for admin access.
    - `ASHU_PASSCODE`: Secure passcode for Ashu account.
    - `VAIBHAV_PASSCODE`: Secure passcode for Vaibhav account.
+   - `VRISHAN_PASSCODE`: Secure passcode for Vrishan account.
    - `GOOGLE_SHEETS_URL`: Your Google Apps Script webhook URL.
 6. Click **Apply**. Render will build and deploy your API web service.
 7. Once deployed, note down your Render Web Service URL (e.g. `https://soundabode-server.onrender.com`).

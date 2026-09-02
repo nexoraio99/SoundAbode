@@ -21,7 +21,7 @@ export interface AttendanceRecord {
   status: AttendanceStatus;
   comment: string;
   markedBy: string; // email or user id
-  markedByName: string; // e.g. "Ashu", "Vaibhav", "Soundabode Admin"
+  markedByName: string; // e.g. "Ashu", "Vaibhav", "Vrishan", "Soundabode Admin"
   markedByRole: 'admin' | 'teacher';
   updatedAt: string;
 }
@@ -436,7 +436,7 @@ export class AttendanceService {
       return studentRecords;
     }
 
-    // Teacher role (e.g. Ashu or Vaibhav) - ONLY return records marked by THIS teacher
+    // Teacher role (e.g. Ashu, Vaibhav, Vrishan) - ONLY return records marked by THIS teacher
     const uEmail = (user.email || '').toLowerCase();
     const uName = (user.name || '').toLowerCase();
 
@@ -447,8 +447,10 @@ export class AttendanceService {
       if (mName && mName === uName) return true;
       if (uEmail.includes('ashu') && (mBy.includes('ashu') || mName.includes('ashu'))) return true;
       if (uEmail.includes('vaibhav') && (mBy.includes('vaibhav') || mName.includes('vaibhav'))) return true;
+      if (uEmail.includes('vrishan') && (mBy.includes('vrishan') || mName.includes('vrishan'))) return true;
       if (uName.includes('ashu') && (mBy.includes('ashu') || mName.includes('ashu'))) return true;
       if (uName.includes('vaibhav') && (mBy.includes('vaibhav') || mName.includes('vaibhav'))) return true;
+      if (uName.includes('vrishan') && (mBy.includes('vrishan') || mName.includes('vrishan'))) return true;
       return false;
     });
   }
@@ -480,8 +482,10 @@ export class AttendanceService {
       if (rName && rName === mName) return true;
       if (mBy.includes('ashu') && (rBy.includes('ashu') || rName.includes('ashu'))) return true;
       if (mBy.includes('vaibhav') && (rBy.includes('vaibhav') || rName.includes('vaibhav'))) return true;
+      if (mBy.includes('vrishan') && (rBy.includes('vrishan') || rName.includes('vrishan'))) return true;
       if (mName.includes('ashu') && (rBy.includes('ashu') || rName.includes('ashu'))) return true;
       if (mName.includes('vaibhav') && (rBy.includes('vaibhav') || rName.includes('vaibhav'))) return true;
+      if (mName.includes('vrishan') && (rBy.includes('vrishan') || rName.includes('vrishan'))) return true;
       return false;
     });
 

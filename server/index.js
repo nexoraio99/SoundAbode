@@ -1153,6 +1153,7 @@ const PRESET_USERS = {
   'abhinav@soundabode.com': { name: 'Abhinav', role: 'admin', passEnv: 'ADMIN_PASSCODE' },
   'ashu@soundabode.com': { name: 'Ashu', role: 'teacher', passEnv: 'ASHU_PASSCODE' },
   'vaibhav@soundabode.com': { name: 'Vaibhav', role: 'teacher', passEnv: 'VAIBHAV_PASSCODE' },
+  'vrishan@soundabode.com': { name: 'Vrishan', role: 'teacher', passEnv: 'VRISHAN_PASSCODE' },
 };
 
 app.post('/api/auth/login', authLimiter, (req, res) => {
@@ -2170,6 +2171,7 @@ function printStartupDashboard(port) {
   const adminPassSet = Boolean(process.env.ADMIN_PASSCODE);
   const ashuPassSet = Boolean(process.env.ASHU_PASSCODE);
   const vaibhavPassSet = Boolean(process.env.VAIBHAV_PASSCODE);
+  const vrishanPassSet = Boolean(process.env.VRISHAN_PASSCODE);
 
   console.log('\n' + '='.repeat(80));
   console.log('               SOUNDABODE BACKEND API - CONNECTED MODULES MATRIX             ');
@@ -2195,6 +2197,7 @@ function printStartupDashboard(port) {
   console.log(`  1. abhinav@soundabode.com [Role: admin]   Passcode ENV: ${adminPassSet ? '[OK] ADMIN_PASSCODE set' : '[WARN] Default / Missing'}`);
   console.log(`  2. ashu@soundabode.com    [Role: teacher] Passcode ENV: ${ashuPassSet ? '[OK] ASHU_PASSCODE set' : '[WARN] Default / Missing'}`);
   console.log(`  3. vaibhav@soundabode.com [Role: teacher] Passcode ENV: ${vaibhavPassSet ? '[OK] VAIBHAV_PASSCODE set' : '[WARN] Default / Missing'}`);
+  console.log(`  4. vrishan@soundabode.com [Role: teacher] Passcode ENV: ${vrishanPassSet ? '[OK] VRISHAN_PASSCODE set' : '[WARN] Default / Missing'}`);
 
   console.log('\n[DATABASE SCHEMAS & MONGOOSE MODELS]');
   console.log('  1. Inquiry          -> Model: Inquiry          (Leads, Contact & Pop-up Inquiries)');
