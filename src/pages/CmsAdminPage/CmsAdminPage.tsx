@@ -94,6 +94,11 @@ const formatLocalDateStr = (year: number, monthIndex: number, day: number): stri
   return `${yyyy}-${mm}-${dd}`;
 };
 
+const getTodayDateStr = (): string => {
+  const now = new Date();
+  return formatLocalDateStr(now.getFullYear(), now.getMonth(), now.getDate());
+};
+
 // Helper: Normalize time slot string for resilient matching across formats
 const normalizeTimeSlot = (slot?: string): string => {
   if (!slot) return '';
@@ -246,11 +251,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
   // ATTENDANCE FEATURE STATES (Flowchart Integration)
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
-  const [calendarDate, setCalendarDate] = useState<Date>(new Date(2026, 7, 1)); // August 2026
-  const [selectedDateStr, setSelectedDateStr] = useState<string>('2026-08-01');
+  const [calendarDate, setCalendarDate] = useState<Date>(() => new Date());
+  const [selectedDateStr, setSelectedDateStr] = useState<string>(() => getTodayDateStr());
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string>('11:00 AM - 01:00 PM');
   const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState<boolean>(false);
-  const [attendanceFormDate, setAttendanceFormDate] = useState<string>('2026-08-01');
+  const [attendanceFormDate, setAttendanceFormDate] = useState<string>(() => getTodayDateStr());
   const [customTimeStart, setCustomTimeStart] = useState<string>('11:00');
   const [customTimeEnd, setCustomTimeEnd] = useState<string>('13:00');
   const [attendanceFormStatus, setAttendanceFormStatus] = useState<AttendanceStatus>('PRESENT');
@@ -260,7 +265,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
   // Modal states for Group Session Batch Attendance
   const [isGroupAttendanceModalOpen, setIsGroupAttendanceModalOpen] = useState<boolean>(false);
-  const [groupSessionDate, setGroupSessionDate] = useState<string>('2026-08-01');
+  const [groupSessionDate, setGroupSessionDate] = useState<string>(() => getTodayDateStr());
   const [groupCustomTimeStart, setGroupCustomTimeStart] = useState<string>('11:00');
   const [groupCustomTimeEnd, setGroupCustomTimeEnd] = useState<string>('13:00');
   const [groupSessionStatus, setGroupSessionStatus] = useState<AttendanceStatus>('GROUP_SESSION');
@@ -959,10 +964,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   // ATTENDANCE FLOWCHART HANDLERS
   const handleOpenStudentCalendar = (studentId: string) => {
     setSelectedStudentId(studentId);
+    const now = new Date();
+    setCalendarDate(new Date(now.getFullYear(), now.getMonth(), 1));
+    setSelectedDateStr(getTodayDateStr());
   };
 
   const handleOpenAttendanceModal = (slot?: string, date?: string) => {
-    const targetDate = date || selectedDateStr;
+    const targetDate = date || selectedDateStr || getTodayDateStr();
     const targetSlot = slot || selectedTimeSlot || '11:00 AM - 01:00 PM';
 
     setAttendanceFormDate(targetDate);
@@ -1071,7 +1079,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   };
 
   const handleOpenGroupAttendanceModal = (dateStr?: string) => {
-    const targetDate = dateStr || selectedDateStr || new Date().toISOString().split('T')[0];
+    const targetDate = dateStr || selectedDateStr || getTodayDateStr();
     setGroupSessionDate(targetDate);
 
     const existingGroupRecords = AttendanceService.getAllAttendanceRecords().filter(
@@ -1340,9 +1348,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     .period-row { margin: 13px 0; font-size: 12.5px; }
     .comment-section { margin: 14px 0; padding: 10px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 12px; line-height: 1.5; }
     .comment-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; margin-bottom: 4px; }
-    .sig-footer { margin-top: 28px; display: flex; justify-content: flex-end; text-align: center; position: relative; }
+    .sig-footer { margin-top: 18px; display: flex; justify-content: flex-end; text-align: center; position: relative; }
     .sig-box { font-size: 11px; color: #475569; position: relative; display: inline-block; padding: 0 10px; }
-    .sig-line { width: 140px; border-bottom: 1.5px solid #1e293b; margin: 0 auto 6px; height: 30px; }
+    .sig-img { display: block; max-width: 145px; height: 46px; margin: 0 auto -14px; object-fit: contain; position: relative; z-index: 2; }
+    .sig-line { width: 140px; border-bottom: 1.5px solid #1e293b; margin: 0 auto 6px; position: relative; z-index: 1; }
   </style>
 </head>
 <body>
@@ -1399,6 +1408,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
   <div class="sig-footer">
     <div class="sig-box">
+      <img src="${window.location.origin}/signature.png" class="sig-img" alt="Authorised Signature" />
       <div class="sig-line"></div>
       Director<br/>Authorised Signatory
     </div>
@@ -4611,7 +4621,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                     <button
                                       onClick={() => {
                                         setSelectedStudentId(student.id);
-                                        handleOpenAttendanceModal(undefined, selectedDateStr);
+                                        handleOpenAttendanceModal(undefined, getTodayDateStr());
                                       }}
                                       className={styles.btnPrimary}
                                       style={{ height: '28px', fontSize: '0.75rem', padding: '0 0.6rem' }}
@@ -4699,7 +4709,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             <button
                               onClick={() => {
                                 setSelectedStudentId(student.id);
-                                handleOpenAttendanceModal(undefined, selectedDateStr);
+                                handleOpenAttendanceModal(undefined, getTodayDateStr());
                               }}
                               className={styles.btnPrimary}
                               style={{ height: '34px', fontSize: '0.775rem' }}
