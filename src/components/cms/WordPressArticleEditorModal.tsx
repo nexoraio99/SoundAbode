@@ -1038,18 +1038,18 @@ export const WordPressArticleEditorModal: React.FC<WordPressArticleEditorModalPr
                         value={formData.authorAvatarUrl}
                         onChange={(e) => setFormData({ ...formData, authorAvatarUrl: e.target.value })}
                         className={styles.inputControl}
-                        placeholder="https://images.unsplash.com/..."
+                        placeholder="https://raw.githubusercontent.com/nexoraio99/cdn-soundabode-assets/main/IMG_1400.JPG"
                       />
-                      {formData.authorAvatarUrl && (
-                        <div className={styles.avatarPreviewRow}>
-                          <img
-                            src={safeImageUrl(formData.authorAvatarUrl)}
-                            alt="Author avatar"
-                            className={styles.avatarPreviewThumb}
-                          />
-                          <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Avatar preview</span>
-                        </div>
-                      )}
+                      <div className={styles.avatarPreviewRow}>
+                        <img
+                          src={safeImageUrl(formData.authorAvatarUrl) || 'https://raw.githubusercontent.com/nexoraio99/cdn-soundabode-assets/main/IMG_1400.JPG'}
+                          alt={formData.authorName || 'Abhinav'}
+                          className={styles.avatarPreviewThumb}
+                        />
+                        <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                          {formData.authorAvatarUrl ? 'Avatar preview' : 'Default (Abhinav) preview'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
