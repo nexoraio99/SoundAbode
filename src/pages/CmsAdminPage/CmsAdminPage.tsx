@@ -14,6 +14,7 @@ import { escapeHtml, safeImageUrl, safeWhatsAppUrl, sanitizePrintHtml } from '..
 import { IssueService, DeveloperIssue, DEVELOPER_EMAIL, SENDER_EMAIL } from '../../services/issueService';
 import { ReminderService } from '../../services/reminderService';
 import { FeeReceipt, FeeService } from '../../services/feeService';
+import { WordPressArticleEditorModal } from '../../components/cms/WordPressArticleEditorModal';
 
 interface CmsAdminPageProps {
   onNavigate?: (page: string) => void;
@@ -279,8 +280,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   // Modal states for Lead Message Viewer
   const [expandedLeadMessage, setExpandedLeadMessage] = useState<ContactInquiry | null>(null);
 
-  // Modal states for Blog Editor
-  const [isBlogModalOpen, setIsBlogModalOpen] = useState(false);
+  // States for Blog Editor
+  const [articleSubTab, setArticleSubTab] = useState<'list' | 'editor'>('list');
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [blogFormData, setBlogFormData] = useState({
     title: '',
@@ -636,7 +637,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       noIndex: false,
       schemaType: 'BlogPosting',
     });
-    setIsBlogModalOpen(true);
+    setArticleSubTab('editor');
   };
 
   const openEditBlogModal = (post: BlogPost) => {
@@ -670,50 +671,50 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       noIndex: post.noIndex || false,
       schemaType: post.schemaType || 'BlogPosting',
     });
-    setIsBlogModalOpen(true);
+    setArticleSubTab('editor');
   };
 
-  const handleSaveBlog = (e: React.FormEvent) => {
-    e.preventDefault();
-    const parsedTags = blogFormData.tags
-      ? blogFormData.tags.split(',').map((t) => t.trim()).filter(Boolean)
+  const handleSaveBlog = (savedData?: typeof blogFormData) => {
+    const dataToSave = savedData || blogFormData;
+    const parsedTags = dataToSave.tags
+      ? dataToSave.tags.split(',').map((t) => t.trim()).filter(Boolean)
       : [];
 
     const generatedSlug =
-      blogFormData.slug.trim() ||
-      blogFormData.title
+      dataToSave.slug.trim() ||
+      dataToSave.title
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)+/g, '');
 
     const postPayload: BlogPost = {
       id: editingPostId || String(Date.now()),
-      title: blogFormData.title,
+      title: dataToSave.title,
       slug: generatedSlug,
-      excerpt: blogFormData.excerpt,
-      content: blogFormData.content,
-      category: blogFormData.category,
-      coverImage: blogFormData.coverImage,
-      readTimeMinutes: Number(blogFormData.readTimeMinutes) || 5,
+      excerpt: dataToSave.excerpt,
+      content: dataToSave.content,
+      category: dataToSave.category,
+      coverImage: dataToSave.coverImage,
+      readTimeMinutes: Number(dataToSave.readTimeMinutes) || 5,
       publishedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       author: {
-        name: blogFormData.authorName,
-        role: blogFormData.authorRole,
-        avatarUrl: blogFormData.authorAvatarUrl,
+        name: dataToSave.authorName,
+        role: dataToSave.authorRole,
+        avatarUrl: dataToSave.authorAvatarUrl,
       },
-      isFeatured: blogFormData.isFeatured,
+      isFeatured: dataToSave.isFeatured,
       tags: parsedTags,
       // SEO fields
-      metaTitle: blogFormData.metaTitle || undefined,
-      metaDescription: blogFormData.metaDescription || undefined,
-      focusKeyword: blogFormData.focusKeyword || undefined,
-      canonicalUrl: blogFormData.canonicalUrl || undefined,
-      ogTitle: blogFormData.ogTitle || undefined,
-      ogDescription: blogFormData.ogDescription || undefined,
-      ogImage: blogFormData.ogImage || undefined,
-      twitterCard: blogFormData.twitterCard,
-      noIndex: blogFormData.noIndex,
-      schemaType: blogFormData.schemaType,
+      metaTitle: dataToSave.metaTitle || undefined,
+      metaDescription: dataToSave.metaDescription || undefined,
+      focusKeyword: dataToSave.focusKeyword || undefined,
+      canonicalUrl: dataToSave.canonicalUrl || undefined,
+      ogTitle: dataToSave.ogTitle || undefined,
+      ogDescription: dataToSave.ogDescription || undefined,
+      ogImage: dataToSave.ogImage || undefined,
+      twitterCard: dataToSave.twitterCard,
+      noIndex: dataToSave.noIndex,
+      schemaType: dataToSave.schemaType,
     };
 
     if (editingPostId) {
@@ -723,7 +724,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     }
 
     refreshData();
-    setIsBlogModalOpen(false);
+    setArticleSubTab('list');
   };
 
   const handleDeleteBlog = async (id: string, title: string) => {
@@ -5138,176 +5139,280 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   </div>
                 </div>
                 {/* Single Primary Red CTA for Articles Page */}
-                <button onClick={openNewBlogModal} className={styles.btnPrimary} style={{ gap: '0.4rem' }}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
-                  New Article
+                <button
+                  onClick={() => {
+                    if (articleSubTab === 'editor') {
+                      setArticleSubTab('list');
+                    } else {
+                      openNewBlogModal();
+                    }
+                  }}
+                  className={styles.btnPrimary}
+                  style={{ gap: '0.4rem' }}
+                >
+                  {articleSubTab === 'editor' ? (
+                    <>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <line x1="19" y1="12" x2="5" y2="12" />
+                        <polyline points="12 19 5 12 12 5" />
+                      </svg>
+                      View All Articles
+                    </>
+                  ) : (
+                    <>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                      </svg>
+                      New Article
+                    </>
+                  )}
                 </button>
               </div>
 
-              {/* FILTER BAR */}
-              <div className={styles.filterBar}>
-                <input
-                  type="text"
-                  placeholder="Search articles..."
-                  value={blogSearch}
-                  onChange={(e) => setBlogSearch(e.target.value)}
-                  className={styles.searchInput}
-                />
-
-                <select
-                  value={blogCategoryFilter}
-                  onChange={(e) => setBlogCategoryFilter(e.target.value)}
-                  className={styles.selectInput}
-                >
-                  <option value="ALL">All Categories</option>
-                  <option value="PRODUCTION">PRODUCTION</option>
-                  <option value="DJING">DJING</option>
-                  <option value="GENERAL">GENERAL</option>
-                  <option value="ACADEMY NEWS">ACADEMY NEWS</option>
-                  <option value="GEAR & TECH">GEAR &amp; TECH</option>
-                </select>
-              </div>
-
-              {/* POSTS TABLE / EMPTY STATE */}
-              {filteredPosts.length === 0 ? (
-                <div className={styles.tableCard}>
-                  <div className={styles.emptyStateCard}>
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              {/* SUB-TABS NAVIGATION BAR ABOVE SEARCH */}
+              <div className={styles.attendanceSubTabNav} style={{ marginTop: '0.75rem', marginBottom: '1.25rem' }}>
+                <div className={styles.attendanceSubTabBtns}>
+                  <button
+                    type="button"
+                    onClick={() => setArticleSubTab('list')}
+                    className={`${styles.attendanceSubTabBtn} ${articleSubTab === 'list' ? styles.attendanceSubTabBtnActive : ''}`}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                       <polyline points="14 2 14 8 20 8" />
                     </svg>
-                    <div className={styles.emptyStateTitle}>No articles matching filters</div>
-                    <div className={styles.emptyStateDesc}>Try clearing your search query or switching categories.</div>
-                    <button
-                      onClick={() => {
-                        setBlogSearch('');
-                        setBlogCategoryFilter('ALL');
-                      }}
-                      className={styles.btnSecondary}
-                      style={{ marginTop: '0.5rem' }}
-                    >
-                      Clear Filters
-                    </button>
-                  </div>
+                    Published Articles
+                    <span className={styles.badge} style={{ marginLeft: '0.25rem', fontSize: '0.68rem', padding: '0.1rem 0.45rem' }}>
+                      {posts.length}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (articleSubTab !== 'editor') {
+                        openNewBlogModal();
+                      }
+                    }}
+                    className={`${styles.attendanceSubTabBtn} ${articleSubTab === 'editor' ? styles.attendanceSubTabBtnActive : ''}`}
+                  >
+                    {editingPostId ? (
+                      <>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                        </svg>
+                        Edit Article
+                      </>
+                    ) : (
+                      <>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <line x1="12" y1="5" x2="12" y2="19" />
+                          <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
+                        Create New Article
+                      </>
+                    )}
+                  </button>
                 </div>
-              ) : (
+
+                {articleSubTab === 'editor' && (
+                  <button
+                    type="button"
+                    onClick={() => setArticleSubTab('list')}
+                    className={styles.btnSecondary}
+                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', gap: '0.35rem' }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="19" y1="12" x2="5" y2="12" />
+                      <polyline points="12 19 5 12 12 5" />
+                    </svg>
+                    Back to Articles List
+                  </button>
+                )}
+              </div>
+
+              {/* INLINE WORDPRESS CMS EDITOR VIEW (NO MODAL OVERLAY) */}
+              {articleSubTab === 'editor' && (
+                <div style={{ marginBottom: '2rem' }}>
+                  <WordPressArticleEditorModal
+                    isInline={true}
+                    isOpen={true}
+                    editingPostId={editingPostId}
+                    initialData={blogFormData}
+                    onClose={() => setArticleSubTab('list')}
+                    onSave={handleSaveBlog}
+                  />
+                </div>
+              )}
+
+              {/* ARTICLES LIST VIEW */}
+              {articleSubTab === 'list' && (
                 <>
-                  {/* DESKTOP TABLE VIEW */}
-                  <div className={styles.desktopTableContainer}>
+                  {/* FILTER BAR */}
+                  <div className={styles.filterBar}>
+                    <input
+                      type="text"
+                      placeholder="Search articles..."
+                      value={blogSearch}
+                      onChange={(e) => setBlogSearch(e.target.value)}
+                      className={styles.searchInput}
+                    />
+
+                    <select
+                      value={blogCategoryFilter}
+                      onChange={(e) => setBlogCategoryFilter(e.target.value)}
+                      className={styles.selectInput}
+                    >
+                      <option value="ALL">All Categories</option>
+                      <option value="PRODUCTION">PRODUCTION</option>
+                      <option value="DJING">DJING</option>
+                      <option value="GENERAL">GENERAL</option>
+                      <option value="ACADEMY NEWS">ACADEMY NEWS</option>
+                      <option value="GEAR & TECH">GEAR &amp; TECH</option>
+                    </select>
+                  </div>
+
+                  {/* POSTS TABLE / EMPTY STATE */}
+                  {filteredPosts.length === 0 ? (
                     <div className={styles.tableCard}>
-                      <table className={styles.dataTable}>
-                        <thead>
-                          <tr>
-                            <th>Article</th>
-                            <th>Category</th>
-                            <th>Author</th>
-                            <th>Published</th>
-                            <th style={{ textAlign: 'right' }}>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredPosts.map((post) => {
-                            const name = post.author?.name || (post as any).authorName || 'Soundabode Team';
-                            const role = post.author?.role || (post as any).authorRole || 'Certified Instructor';
-                            const avatarUrl = post.author?.avatarUrl || (post as any).authorAvatarUrl || '';
-                            const authorAvatar = getAvatarDetails(name, avatarUrl);
-
-                            return (
-                              <tr key={post.id}>
-                                <td style={{ maxWidth: '340px' }}>
-                                  <div className={styles.postCellTitle}>{post.title}</div>
-                                  <div className={styles.postCellMeta}>{(post.excerpt || '').slice(0, 75)}...</div>
-                                </td>
-                                <td>
-                                  <span className={styles.badge} style={{ background: 'var(--bg-surface)', color: 'var(--text-muted)', borderColor: 'var(--border-subtle)' }}>
-                                    {post.category}
-                                  </span>
-                                </td>
-                                <td>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    {safeImageUrl(authorAvatar.avatarUrl) ? (
-                                      <img
-                                        src={safeImageUrl(authorAvatar.avatarUrl)}
-                                        alt={name}
-                                        style={{ width: '28px', height: '28px', borderRadius: '9999px', objectFit: 'cover' }}
-                                      />
-                                    ) : (
-                                      <div
-                                        className={styles.avatarCircle}
-                                        style={{ width: '28px', height: '28px', fontSize: '0.675rem', background: authorAvatar.bg, border: `1px solid ${authorAvatar.border}` }}
-                                      >
-                                        {authorAvatar.initials}
-                                      </div>
-                                    )}
-                                    <div>
-                                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 500 }}>{name}</div>
-                                      <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{role}</div>
-                                    </div>
-                                  </div>
-                                </td>
-                                <td style={{ fontSize: '0.75rem', color: '#64748b' }}>{post.publishedAt}</td>
-                                <td style={{ textAlign: 'right' }}>
-                                  <div style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
-                                    <button onClick={() => openEditBlogModal(post)} className={styles.btnGhost}>
-                                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <path d="M12 20h9" />
-                                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                                      </svg>
-                                      Edit
-                                    </button>
-                                    <button
-                                      onClick={() => handleDeleteBlog(post.id, post.title)}
-                                      className={styles.btnDestructive}
-                                      title="Delete post"
-                                    >
-                                      Delete
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                      <div className={styles.emptyStateCard}>
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                        </svg>
+                        <div className={styles.emptyStateTitle}>No articles matching filters</div>
+                        <div className={styles.emptyStateDesc}>Try clearing your search query or switching categories.</div>
+                        <button
+                          onClick={() => {
+                            setBlogSearch('');
+                            setBlogCategoryFilter('ALL');
+                          }}
+                          className={styles.btnSecondary}
+                          style={{ marginTop: '0.5rem' }}
+                        >
+                          Clear Filters
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <>
+                      {/* DESKTOP TABLE VIEW */}
+                      <div className={styles.desktopTableContainer}>
+                        <div className={styles.tableCard}>
+                          <table className={styles.dataTable}>
+                            <thead>
+                              <tr>
+                                <th>Article</th>
+                                <th>Category</th>
+                                <th>Author</th>
+                                <th>Published</th>
+                                <th style={{ textAlign: 'right' }}>Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filteredPosts.map((post) => {
+                                const name = post.author?.name || (post as any).authorName || 'Soundabode Team';
+                                const role = post.author?.role || (post as any).authorRole || 'Certified Instructor';
+                                const avatarUrl = post.author?.avatarUrl || (post as any).authorAvatarUrl || '';
+                                const authorAvatar = getAvatarDetails(name, avatarUrl);
 
-                  {/* MOBILE CARDS VIEW */}
-                  <div className={styles.mobileCardList}>
-                    {filteredPosts.map((post) => {
-                      const name = post.author?.name || (post as any).authorName || 'Soundabode Team';
-                      return (
-                        <div key={post.id} className={styles.mobileDataCard}>
-                          <div className={styles.mobileCardHeader}>
-                            <div style={{ flex: 1 }}>
-                              <div className={styles.mobileCardTitle}>{post.title}</div>
-                              <div className={styles.mobileCardSubText}>{post.publishedAt} • By {name}</div>
-                            </div>
-                            <span className={styles.badge} style={{ background: 'var(--bg-surface)', color: 'var(--text-secondary)', fontSize: '0.65rem' }}>
-                              {post.category}
-                            </span>
-                          </div>
-
-                          <div className={styles.mobileCardBody}>
-                            <div style={{ fontSize: '0.775rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-                              {(post.excerpt || '').slice(0, 110)}...
-                            </div>
-                          </div>
-
-                          <div className={styles.mobileCardActions}>
-                            <button onClick={() => openEditBlogModal(post)} className={styles.btnSecondary} style={{ height: '34px', fontSize: '0.775rem' }}>
-                              Edit Article
-                            </button>
-                            <button onClick={() => handleDeleteBlog(post.id, post.title)} className={styles.btnDestructive} style={{ height: '34px', padding: '0 0.6rem' }}>
-                              Delete
-                            </button>
-                          </div>
+                                return (
+                                  <tr key={post.id}>
+                                    <td style={{ maxWidth: '340px' }}>
+                                      <div className={styles.postCellTitle}>{post.title}</div>
+                                      <div className={styles.postCellMeta}>{(post.excerpt || '').slice(0, 75)}...</div>
+                                    </td>
+                                    <td>
+                                      <span className={styles.badge} style={{ background: 'var(--bg-surface)', color: 'var(--text-muted)', borderColor: 'var(--border-subtle)' }}>
+                                        {post.category}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        {safeImageUrl(authorAvatar.avatarUrl) ? (
+                                          <img
+                                            src={safeImageUrl(authorAvatar.avatarUrl)}
+                                            alt={name}
+                                            style={{ width: '28px', height: '28px', borderRadius: '9999px', objectFit: 'cover' }}
+                                          />
+                                        ) : (
+                                          <div
+                                            className={styles.avatarCircle}
+                                            style={{ width: '28px', height: '28px', fontSize: '0.675rem', background: authorAvatar.bg, border: `1px solid ${authorAvatar.border}` }}
+                                          >
+                                            {authorAvatar.initials}
+                                          </div>
+                                        )}
+                                        <div>
+                                          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 500 }}>{name}</div>
+                                          <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{role}</div>
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td style={{ fontSize: '0.75rem', color: '#64748b' }}>{post.publishedAt}</td>
+                                    <td style={{ textAlign: 'right' }}>
+                                      <div style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
+                                        <button onClick={() => openEditBlogModal(post)} className={styles.btnGhost}>
+                                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <path d="M12 20h9" />
+                                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                                          </svg>
+                                          Edit
+                                        </button>
+                                        <button
+                                          onClick={() => handleDeleteBlog(post.id, post.title)}
+                                          className={styles.btnDestructive}
+                                          title="Delete post"
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
-                      );
-                    })}
-                  </div>
+                      </div>
+
+                      {/* MOBILE CARDS VIEW */}
+                      <div className={styles.mobileCardList}>
+                        {filteredPosts.map((post) => {
+                          const name = post.author?.name || (post as any).authorName || 'Soundabode Team';
+                          return (
+                            <div key={post.id} className={styles.mobileDataCard}>
+                              <div className={styles.mobileCardHeader}>
+                                <div style={{ flex: 1 }}>
+                                  <div className={styles.mobileCardTitle}>{post.title}</div>
+                                  <div className={styles.mobileCardSubText}>{post.publishedAt} • By {name}</div>
+                                </div>
+                                <span className={styles.badge} style={{ background: 'var(--bg-surface)', color: 'var(--text-secondary)', fontSize: '0.65rem' }}>
+                                  {post.category}
+                                </span>
+                              </div>
+
+                              <div className={styles.mobileCardBody}>
+                                <div style={{ fontSize: '0.775rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
+                                  {(post.excerpt || '').slice(0, 110)}...
+                                </div>
+                              </div>
+
+                              <div className={styles.mobileCardActions}>
+                                <button onClick={() => openEditBlogModal(post)} className={styles.btnSecondary} style={{ height: '34px', fontSize: '0.775rem' }}>
+                                  Edit Article
+                                </button>
+                                <button onClick={() => handleDeleteBlog(post.id, post.title)} className={styles.btnDestructive} style={{ height: '34px', padding: '0 0.6rem' }}>
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -7508,310 +7613,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         </div>
       )}
 
-      {/* BLOG POST & AUTHOR EDIT MODAL */}
-      {isBlogModalOpen && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modalCard}>
-            <div className={styles.modalHeader}>
-              <h2 className={styles.modalTitle}>
-                {editingPostId ? 'Edit Article & Author Details' : 'Create New Article'}
-              </h2>
-              <button onClick={() => setIsBlogModalOpen(false)} className={styles.closeModalBtn}>
-                ✕
-              </button>
-            </div>
 
-            <form onSubmit={handleSaveBlog}>
-              <div className={styles.modalBody}>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Article Title</label>
-                  <input
-                    type="text"
-                    required
-                    value={blogFormData.title}
-                    onChange={(e) => setBlogFormData({ ...blogFormData, title: e.target.value })}
-                    className={styles.formInput}
-                  />
-                </div>
-
-                <div className={styles.formRow}>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Category</label>
-                    <select
-                      value={blogFormData.category}
-                      onChange={(e) =>
-                        setBlogFormData({ ...blogFormData, category: e.target.value as BlogPost['category'] })
-                      }
-                      className={styles.formSelect}
-                    >
-                      <option value="PRODUCTION">PRODUCTION</option>
-                      <option value="DJING">DJING</option>
-                      <option value="GENERAL">GENERAL</option>
-                      <option value="ACADEMY NEWS">ACADEMY NEWS</option>
-                      <option value="GEAR & TECH">GEAR &amp; TECH</option>
-                    </select>
-                  </div>
-
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Read Time (Minutes)</label>
-                    <input
-                      type="number"
-                      value={blogFormData.readTimeMinutes}
-                      onChange={(e) => setBlogFormData({ ...blogFormData, readTimeMinutes: Number(e.target.value) })}
-                      className={styles.formInput}
-                    />
-                  </div>
-                </div>
-
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Cover Image URL</label>
-                  <input
-                    type="text"
-                    required
-                    value={blogFormData.coverImage}
-                    onChange={(e) => setBlogFormData({ ...blogFormData, coverImage: e.target.value })}
-                    className={styles.formInput}
-                  />
-                </div>
-
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Short Excerpt</label>
-                  <textarea
-                    rows={2}
-                    required
-                    value={blogFormData.excerpt}
-                    onChange={(e) => setBlogFormData({ ...blogFormData, excerpt: e.target.value })}
-                    className={styles.formInput}
-                    style={{ minHeight: '50px' }}
-                  />
-                </div>
-
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>HTML Article Content</label>
-                  <textarea
-                    required
-                    value={blogFormData.content}
-                    onChange={(e) => setBlogFormData({ ...blogFormData, content: e.target.value })}
-                    className={styles.formTextarea}
-                  />
-                </div>
-
-                {/* EDIT AUTHOR CREDENTIALS */}
-                <div style={{ marginTop: '0.5rem', padding: '0.85rem', background: 'var(--bg-surface)', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
-                  <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#e11d48', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                      <circle cx="12" cy="7" r="4" />
-                    </svg>
-                    Author Profile &amp; Credentials
-                  </div>
-
-                  <div className={styles.formRow}>
-                    <div className={styles.formGroup}>
-                      <label className={styles.formLabel}>Author Name</label>
-                      <input
-                        type="text"
-                        required
-                        value={blogFormData.authorName}
-                        onChange={(e) => setBlogFormData({ ...blogFormData, authorName: e.target.value })}
-                        className={styles.formInput}
-                        placeholder="e.g. Aditya Sharma"
-                      />
-                    </div>
-
-                    <div className={styles.formGroup}>
-                      <label className={styles.formLabel}>Author Role / Title</label>
-                      <input
-                        type="text"
-                        required
-                        value={blogFormData.authorRole}
-                        onChange={(e) => setBlogFormData({ ...blogFormData, authorRole: e.target.value })}
-                        className={styles.formInput}
-                        placeholder="e.g. Certified Ableton Instructor"
-                      />
-                    </div>
-                  </div>
-
-                  <div className={styles.formGroup} style={{ marginTop: '0.75rem' }}>
-                    <label className={styles.formLabel}>Author Avatar Image URL</label>
-                    <input
-                      type="text"
-                      value={blogFormData.authorAvatarUrl}
-                      onChange={(e) => setBlogFormData({ ...blogFormData, authorAvatarUrl: e.target.value })}
-                      className={styles.formInput}
-                      placeholder="https://images.unsplash.com/photo-..."
-                    />
-                  </div>
-                </div>
-
-                {/* ── SEO & META SECTION ── */}
-                <div style={{ marginTop: '0.5rem', padding: '1rem', background: 'rgba(99, 102, 241, 0.05)', borderRadius: '8px', border: '1px solid rgba(99, 102, 241, 0.15)' }}>
-
-                  {/* SECTION HEADER */}
-                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#818cf8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-                    </svg>
-                    SEO &amp; Meta Settings
-                  </div>
-
-                  {/* META TITLE */}
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Meta Title <span style={{ color: '#818cf8' }}>(title tag)</span></span>
-                      <span style={{ color: blogFormData.metaTitle.length > 60 ? '#f87171' : blogFormData.metaTitle.length > 50 ? '#fbbf24' : 'var(--text-muted)', fontSize: '0.68rem', fontWeight: 400 }}>{blogFormData.metaTitle.length}/60</span>
-                    </label>
-                    <input
-                      type="text"
-                      placeholder={blogFormData.title || 'Defaults to article title if blank'}
-                      value={blogFormData.metaTitle}
-                      onChange={(e) => setBlogFormData({ ...blogFormData, metaTitle: e.target.value })}
-                      className={styles.formInput}
-                      maxLength={80}
-                    />
-                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>Recommended: 50–60 characters. Shown in Google search results &amp; browser tabs.</span>
-                  </div>
-
-                  {/* META DESCRIPTION */}
-                  <div className={styles.formGroup} style={{ marginTop: '0.75rem' }}>
-                    <label className={styles.formLabel} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Meta Description</span>
-                      <span style={{ color: blogFormData.metaDescription.length > 160 ? '#f87171' : blogFormData.metaDescription.length > 140 ? '#fbbf24' : 'var(--text-muted)', fontSize: '0.68rem', fontWeight: 400 }}>{blogFormData.metaDescription.length}/160</span>
-                    </label>
-                    <textarea
-                      rows={2}
-                      placeholder="A concise summary for Google snippets (150–160 chars)..."
-                      value={blogFormData.metaDescription}
-                      onChange={(e) => setBlogFormData({ ...blogFormData, metaDescription: e.target.value })}
-                      className={styles.formInput}
-                      style={{ minHeight: '60px', resize: 'vertical' }}
-                      maxLength={200}
-                    />
-                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>Shown under the page title in Google SERPs. Use your focus keyword naturally.</span>
-                  </div>
-
-                  {/* FOCUS KEYWORD + SCHEMA TYPE */}
-                  <div className={styles.formRow} style={{ marginTop: '0.75rem' }}>
-                    <div className={styles.formGroup}>
-                      <label className={styles.formLabel}>Focus Keyword</label>
-                      <input
-                        type="text"
-                        placeholder="e.g. DJ course Pune"
-                        value={blogFormData.focusKeyword}
-                        onChange={(e) => setBlogFormData({ ...blogFormData, focusKeyword: e.target.value })}
-                        className={styles.formInput}
-                      />
-                    </div>
-                    <div className={styles.formGroup}>
-                      <label className={styles.formLabel}>Schema Type <span style={{ color: '#818cf8' }}>(JSON-LD)</span></label>
-                      <select
-                        value={blogFormData.schemaType}
-                        onChange={(e) => setBlogFormData({ ...blogFormData, schemaType: e.target.value as 'Article' | 'BlogPosting' | 'NewsArticle' })}
-                        className={styles.formSelect}
-                      >
-                        <option value="BlogPosting">BlogPosting (recommended)</option>
-                        <option value="Article">Article</option>
-                        <option value="NewsArticle">NewsArticle</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* CANONICAL URL */}
-                  <div className={styles.formGroup} style={{ marginTop: '0.75rem' }}>
-                    <label className={styles.formLabel}>Canonical URL <span style={{ color: 'var(--text-muted)', fontSize: '0.66rem', textTransform: 'none', letterSpacing: 0 }}>(optional — leave blank to auto-generate)</span></label>
-                    <input
-                      type="url"
-                      placeholder="https://soundabode.com/blog/your-article-slug"
-                      value={blogFormData.canonicalUrl}
-                      onChange={(e) => setBlogFormData({ ...blogFormData, canonicalUrl: e.target.value })}
-                      className={styles.formInput}
-                    />
-                  </div>
-
-                  {/* OPEN GRAPH SECTION */}
-                  <div style={{ marginTop: '1rem', paddingTop: '0.85rem', borderTop: '1px solid rgba(99, 102, 241, 0.12)' }}>
-                    <div style={{ fontSize: '0.7rem', fontWeight: 600, color: '#a5b4fc', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.65rem' }}>Open Graph / Social Sharing</div>
-
-                    <div className={styles.formGroup}>
-                      <label className={styles.formLabel}>OG Title <span style={{ color: 'var(--text-muted)', fontSize: '0.66rem', textTransform: 'none' }}>(Facebook, LinkedIn, WhatsApp)</span></label>
-                      <input
-                        type="text"
-                        placeholder={blogFormData.metaTitle || blogFormData.title || 'Defaults to meta title or article title'}
-                        value={blogFormData.ogTitle}
-                        onChange={(e) => setBlogFormData({ ...blogFormData, ogTitle: e.target.value })}
-                        className={styles.formInput}
-                      />
-                    </div>
-
-                    <div className={styles.formGroup} style={{ marginTop: '0.6rem' }}>
-                      <label className={styles.formLabel}>OG Description</label>
-                      <textarea
-                        rows={2}
-                        placeholder="Short compelling social preview description..."
-                        value={blogFormData.ogDescription}
-                        onChange={(e) => setBlogFormData({ ...blogFormData, ogDescription: e.target.value })}
-                        className={styles.formInput}
-                        style={{ minHeight: '55px', resize: 'vertical' }}
-                      />
-                    </div>
-
-                    <div className={styles.formRow} style={{ marginTop: '0.6rem' }}>
-                      <div className={styles.formGroup}>
-                        <label className={styles.formLabel}>OG Image URL <span style={{ color: 'var(--text-muted)', fontSize: '0.66rem', textTransform: 'none' }}>1200×630px</span></label>
-                        <input
-                          type="text"
-                          placeholder={blogFormData.coverImage || 'Defaults to cover image'}
-                          value={blogFormData.ogImage}
-                          onChange={(e) => setBlogFormData({ ...blogFormData, ogImage: e.target.value })}
-                          className={styles.formInput}
-                        />
-                      </div>
-                      <div className={styles.formGroup}>
-                        <label className={styles.formLabel}>Twitter Card Type</label>
-                        <select
-                          value={blogFormData.twitterCard}
-                          onChange={(e) => setBlogFormData({ ...blogFormData, twitterCard: e.target.value as 'summary' | 'summary_large_image' })}
-                          className={styles.formSelect}
-                        >
-                          <option value="summary_large_image">Summary Large Image</option>
-                          <option value="summary">Summary (small image)</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* NO INDEX TOGGLE */}
-                  <div style={{ marginTop: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <input
-                      type="checkbox"
-                      id="noIndexToggle"
-                      checked={blogFormData.noIndex}
-                      onChange={(e) => setBlogFormData({ ...blogFormData, noIndex: e.target.checked })}
-                      style={{ width: '15px', height: '15px', accentColor: '#818cf8', cursor: 'pointer' }}
-                    />
-                    <label htmlFor="noIndexToggle" style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                      <strong>No-Index</strong> — Prevent search engines from indexing this article
-                      {blogFormData.noIndex && <span style={{ color: '#f87171', marginLeft: '0.4rem', fontSize: '0.7rem' }}>⚠ This page will be hidden from Google</span>}
-                    </label>
-                  </div>
-
-                </div>
-
-              </div>{/* end modalBody */}
-
-              <div className={styles.modalFooter}>
-                <button type="button" onClick={() => setIsBlogModalOpen(false)} className={styles.btnSecondary}>
-                  Cancel
-                </button>
-
-                <button type="submit" className={styles.btnPrimary}>
-                  Save Article &amp; Author
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* MODAL: FULL ADMISSION FORM VIEWER & SHARE OPTIONS */}
       {selectedAdmissionForModal && (
