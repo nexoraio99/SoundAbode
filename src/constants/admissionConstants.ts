@@ -3,16 +3,15 @@
 
 export const DJ_COURSES = [
   { id: 'dj-basic', name: 'Basic DJ Training Course (Level 01)', tenure: '2 Months', fee: '35,000 INR' },
-  { id: 'dj-pro', name: 'Professional DJ Training Course (Level 02 - Only Applicable After Level 01)', tenure: '2 Months', fee: '25,000 INR' },
-  { id: 'dj-complete', name: 'Complete DJ Training Course (Level 01 + Level 02)', tenure: '4 Months', fee: '60,000 INR' },
+  { id: 'dj-pro', name: 'Professional DJ Training Course (Level 01 + Level 02)', tenure: '4 Months', fee: '60,000 INR' },
+  { id: 'dj-tailored', name: 'Specially Tailored Course (Rekordbox)', tenure: '3 Months', fee: '50,000 INR' },
 ];
 
 export const EMP_COURSES = [
-  { id: 'emp-beginner', name: 'Beginner Electronic Music Production', tenure: '3 Months', fee: '60,000 INR' },
-  { id: 'emp-intermediate', name: 'Intermediate (Pre-Degree Course) Electronic Music Production', tenure: '3 Months', fee: '60,000 INR' },
-  { id: 'emp-expert', name: 'Expert (Diploma) Audio Engineering / Sound Design', tenure: '3 Months', fee: '60,000 INR' },
-  { id: 'emp-mixing', name: 'Mixing & Mastering Course', tenure: '3+1 Months', fee: '60,000 INR' },
-  { id: 'emp-diploma-all', name: 'Diploma in Audio Engineering (All Four Levels Together)', tenure: '13 Months', fee: '2,40,000 INR' },
+  { id: 'emp-beginner', name: 'Beginner Electronic Music Production (Level 1)', tenure: '3 Months', fee: '60,000 INR' },
+  { id: 'emp-intermediate', name: 'Intermediate Electronic Music Production (Level 1 + Level 2)', tenure: '6 Months', fee: '1,20,000 INR' },
+  { id: 'emp-expert', name: 'Pre Degree Course Expert Audio Engineering / Sound Design (Level 3)', tenure: '9 Months', fee: '1,80,000 INR' },
+  { id: 'emp-diploma', name: 'Diploma in Audio Engineering (All 3 Levels + Level 4 Mixing and Mastering)', tenure: '13 Months', fee: '2,40,000 INR' },
 ];
 
 export const DJ_DISCLAIMER = [
