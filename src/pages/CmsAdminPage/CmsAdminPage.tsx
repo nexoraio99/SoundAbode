@@ -4,7 +4,7 @@ import admissionStyles from '../AdmissionPage/AdmissionPage.module.css';
 import SEO from '../../components/common/SEO';
 import { BlogService } from '../../services/blogService';
 import { InquiryService, ContactInquiry } from '../../services/inquiryService';
-import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord, canonicalizeStudentId } from '../../services/attendanceService';
+import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord, canonicalizeStudentId, sortStudentsById } from '../../services/attendanceService';
 import { AdmissionService, AdmissionSubmission } from '../../services/admissionService';
 import { AuthService, CmsUser } from '../../services/authService';
 import { getApiBaseUrl } from '../../services/apiConfig';
@@ -216,10 +216,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     }
   }, [isTeacher, activeTab]);
 
-  // Data states
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [inquiries, setInquiries] = useState<ContactInquiry[]>([]);
-  const [students, setStudents] = useState<EnrolledStudent[]>(() => AttendanceService.getAllStudents());
+  const [students, setStudents] = useState<EnrolledStudent[]>(() => sortStudentsById(AttendanceService.getAllStudents()));
   const [admissions, setAdmissions] = useState<AdmissionSubmission[]>([]);
 
   // Search & Filter states
@@ -434,7 +433,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       refreshData();
       IssueService.fetchIssues().then((issues) => setDeveloperIssues(issues));
       const unsubscribeIssues = IssueService.subscribe((issues) => setDeveloperIssues(issues));
-      const unsubscribeStudents = AttendanceService.subscribeStudents((sts) => setStudents(sts));
+      const unsubscribeStudents = AttendanceService.subscribeStudents((sts) => setStudents(sortStudentsById(sts)));
       return () => {
         unsubscribeIssues();
         unsubscribeStudents();
@@ -447,7 +446,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const refreshData = () => {
     setPosts(BlogService.getAllPosts());
     setInquiries(InquiryService.getAllInquiries());
-    AttendanceService.fetchStudents().then(setStudents);
+    AttendanceService.fetchStudents().then((sts) => setStudents(sortStudentsById(sts)));
     setAdmissions(AdmissionService.getAllAdmissions());
     FeeService.fetchAndSync().then(setFees);
     // Trigger async remote sync — when it completes, saveAttendance fires notifyChange which bumps attendanceVersion via subscription
@@ -1687,17 +1686,22 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     return matchesType && matchesStatus && matchesSearch;
   });
 
-  const filteredStudents = students.filter((std) => {
-    const matchesSearch =
-      !studentSearch ||
-      std.name.toLowerCase().includes(studentSearch.toLowerCase()) ||
-      std.email.toLowerCase().includes(studentSearch.toLowerCase()) ||
-      std.phone.includes(studentSearch) ||
-      std.course.toLowerCase().includes(studentSearch.toLowerCase());
-    const matchesCourse =
-      studentCourseFilter === 'ALL' || std.course.toLowerCase().includes(studentCourseFilter.toLowerCase());
-    return matchesSearch && matchesCourse;
-  });
+  const filteredStudents = useMemo(() => {
+    return sortStudentsById(
+      students.filter((std) => {
+        const matchesSearch =
+          !studentSearch ||
+          std.name.toLowerCase().includes(studentSearch.toLowerCase()) ||
+          std.email.toLowerCase().includes(studentSearch.toLowerCase()) ||
+          std.phone.includes(studentSearch) ||
+          std.course.toLowerCase().includes(studentSearch.toLowerCase()) ||
+          std.id.toLowerCase().includes(studentSearch.toLowerCase());
+        const matchesCourse =
+          studentCourseFilter === 'ALL' || std.course.toLowerCase().includes(studentCourseFilter.toLowerCase());
+        return matchesSearch && matchesCourse;
+      })
+    );
+  }, [students, studentSearch, studentCourseFilter]);
 
   const newInquiryCount = inquiries.filter((i) => i.status === 'NEW').length;
   const enrolledCount = inquiries.filter((i) => i.status === 'ENROLLED').length;
@@ -3575,8 +3579,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                       {avatar.initials}
                                     </div>
                                     <div>
-                                      <div className={styles.studentName} style={{ fontWeight: 600 }}>{std.name}</div>
-                                      <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>ID: {std.id}</div>
+                                      <div className={styles.studentName} style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                                        <span>{std.name}</span>
+                                        <span style={{ fontFamily: 'monospace', fontSize: '0.7rem', background: 'rgba(217, 119, 6, 0.12)', border: '1px solid rgba(217, 119, 6, 0.35)', color: '#fbbf24', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                                          {std.id}
+                                        </span>
+                                      </div>
+                                      <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>{std.email}</div>
                                     </div>
                                   </div>
                                 </td>
@@ -3670,7 +3679,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 {avatar.initials}
                               </div>
                               <div>
-                                <div className={styles.mobileCardTitle}>{std.name}</div>
+                                <div className={styles.mobileCardTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                  <span>{std.name}</span>
+                                  <span style={{ fontFamily: 'monospace', fontSize: '0.675rem', background: 'rgba(217, 119, 6, 0.12)', border: '1px solid rgba(217, 119, 6, 0.35)', color: '#fbbf24', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>
+                                    {std.id}
+                                  </span>
+                                </div>
                                 <div className={styles.mobileCardSubText}>{std.email}</div>
                               </div>
                             </div>
@@ -5013,7 +5027,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                       </div>
                                     )}
                                     <div>
-                                      <div className={styles.studentName}>{student.name}</div>
+                                      <div className={styles.studentName} style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                                        <span>{student.name}</span>
+                                        <span style={{ fontFamily: 'monospace', fontSize: '0.7rem', background: 'rgba(217, 119, 6, 0.12)', border: '1px solid rgba(217, 119, 6, 0.35)', color: '#fbbf24', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                                          {student.id}
+                                        </span>
+                                      </div>
                                       <div style={{ fontSize: '0.725rem', color: '#64748b' }}>{student.email}</div>
                                     </div>
                                   </div>
@@ -5097,7 +5116,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 </div>
                               )}
                               <div>
-                                <div className={styles.mobileCardTitle}>{student.name}</div>
+                                <div className={styles.mobileCardTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                  <span>{student.name}</span>
+                                  <span style={{ fontFamily: 'monospace', fontSize: '0.675rem', background: 'rgba(217, 119, 6, 0.12)', border: '1px solid rgba(217, 119, 6, 0.35)', color: '#fbbf24', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>
+                                    {student.id}
+                                  </span>
+                                </div>
                                 <div className={styles.mobileCardSubText}>{student.email}</div>
                               </div>
                             </div>

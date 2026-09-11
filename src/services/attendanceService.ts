@@ -28,18 +28,26 @@ export interface AttendanceRecord {
 }
 
 export const LEGACY_STUDENT_ID_MAP: Record<string, string> = {
-  'std-001': '6a80bc1c6a8952fb6f77991e',
-  'std-002': '6a80bc1c6a8952fb6f77991f',
-  'std-003': '6a80bc1c6a8952fb6f779920',
-  'std-004': '6a80bc1c6a8952fb6f779921',
-  'std-005': '6a80bc1c6a8952fb6f779922',
-  'std-007': '6a80bc1c6a8952fb6f779924',
-  'std-008': '6a80bc1c6a8952fb6f779925',
-  'std-009': '6a80bc1c6a8952fb6f779926',
-  'std-010': '6a80bc1c6a8952fb6f779927',
-  'std-011': '6a80bc1c6a8952fb6f779928',
-  'std-012': '6a80bc1c6a8952fb6f779929',
-  'std-013': '6a80bc1c6a8952fb6f77992a',
+  // Legacy ObjectIds
+  '6a80bc1c6a8952fb6f77991e': 'std-001',
+  '6a80bc1c6a8952fb6f77991f': 'std-002',
+  '6a80bc1c6a8952fb6f779920': 'std-003',
+  '6a80bc1c6a8952fb6f779921': 'std-004',
+  '6a80bc1c6a8952fb6f779922': 'std-005',
+  '6a80bc1c6a8952fb6f779924': 'std-006',
+  '6a80bc1c6a8952fb6f779925': 'std-007',
+  '6a80bc1c6a8952fb6f779926': 'std-008',
+  '6a80bc1c6a8952fb6f779927': 'std-009',
+  '6a80bc1c6a8952fb6f779928': 'std-010',
+  '6a80bc1c6a8952fb6f779929': 'std-011',
+  '6a80bc1c6a8952fb6f77992a': 'std-012',
+  '6a82f66ac9c1d901c179c0ec': 'std-013',
+  '6a875146c9c1d901c17a3abc': 'std-014',
+  '6a81b980c9c1d901c1788bfb': 'std-015',
+  '6a85b66bc9c1d901c17a2b2d': 'std-016',
+  '6a8c4aabc9c1d901c17bffc6': 'std-017',
+  '6a95898ec1a9dab435071ed9': 'std-018',
+  '6a9a8b8cc1a9dab4350c0472': 'std-019',
 };
 
 export function canonicalizeStudentId(id: string): string {
@@ -47,9 +55,18 @@ export function canonicalizeStudentId(id: string): string {
   return LEGACY_STUDENT_ID_MAP[id] || id;
 }
 
+export function sortStudentsById(students: EnrolledStudent[]): EnrolledStudent[] {
+  return [...students].sort((a, b) => {
+    const numA = parseInt((a.id.match(/^std-(\d+)$/i) || [])[1] || '999999', 10);
+    const numB = parseInt((b.id.match(/^std-(\d+)$/i) || [])[1] || '999999', 10);
+    if (numA !== numB) return numA - numB;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+}
+
 const INITIAL_STUDENTS: EnrolledStudent[] = [
   {
-    id: '6a80bc1c6a8952fb6f77991e',
+    id: 'std-001',
     name: 'Shailendra Chakravarthy',
     email: 'shailendrachakravarthy8@gmail.com',
     phone: '9866514403/9307031006',
@@ -58,7 +75,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-01',
   },
   {
-    id: '6a80bc1c6a8952fb6f77991f',
+    id: 'std-002',
     name: 'Deeksha Vishwakarma',
     email: 'deekshavishwakarma705@gmail.com',
     phone: '8319948935/8819007910',
@@ -67,7 +84,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-01',
   },
   {
-    id: '6a80bc1c6a8952fb6f779920',
+    id: 'std-003',
     name: 'Sonal Shandilya',
     email: 'Sha.sonal@gmail.com',
     phone: '9798880002',
@@ -76,7 +93,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-02',
   },
   {
-    id: '6a80bc1c6a8952fb6f779921',
+    id: 'std-004',
     name: 'Ridhima Deshpande',
     email: 'ridhimadeshpande990@gmail.com',
     phone: '9527556666',
@@ -85,7 +102,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-03',
   },
   {
-    id: '6a80bc1c6a8952fb6f779922',
+    id: 'std-005',
     name: 'Pranavadeep Bagul',
     email: 'pranavdeeponly@gmail.com',
     phone: '9322060312',
@@ -94,7 +111,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-04',
   },
   {
-    id: '6a80bc1c6a8952fb6f779924',
+    id: 'std-006',
     name: 'Chaitanya Jain',
     email: 'djchaitanyajain100@gmail.com',
     phone: '9172902597',
@@ -103,7 +120,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-06',
   },
   {
-    id: '6a80bc1c6a8952fb6f779925',
+    id: 'std-007',
     name: 'Kush Kachoriya',
     email: 'Kk.wav.work@gmail.com',
     phone: '7046029474',
@@ -112,7 +129,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-07',
   },
   {
-    id: '6a80bc1c6a8952fb6f779926',
+    id: 'std-008',
     name: 'Yogesh Kashid',
     email: 'kashidyogesh096@gmail.com',
     phone: '7875547537',
@@ -121,7 +138,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-08',
   },
   {
-    id: '6a80bc1c6a8952fb6f779927',
+    id: 'std-009',
     name: 'Rohit Govvilkar',
     email: 'rohietgovvilkar@gmail.com',
     phone: '8767607223',
@@ -130,7 +147,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-09',
   },
   {
-    id: '6a80bc1c6a8952fb6f779928',
+    id: 'std-010',
     name: 'Devansh Prasad',
     email: 'regurgmusic@gmail.com',
     phone: '9381340066',
@@ -139,7 +156,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-10',
   },
   {
-    id: '6a80bc1c6a8952fb6f779929',
+    id: 'std-011',
     name: 'Tavjot Singh',
     email: 'tavjyotsingh76782222@gmail.com',
     phone: '7678115930',
@@ -148,7 +165,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-11',
   },
   {
-    id: '6a80bc1c6a8952fb6f77992a',
+    id: 'std-012',
     name: 'Sharvil Sonawane',
     email: '',
     phone: '9158979991/9049499991',
@@ -157,16 +174,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-12',
   },
   {
-    id: '6a81b980c9c1d901c1788bfb',
-    name: 'Gurbani Singh',
-    email: 'gurbanisingh040208@gmail.com',
-    phone: '7009385250',
-    course: 'Basic DJ Course',
-    batch: 'Regular Studio Batch (Mon/Wed/Fri)',
-    enrolledDate: '2026-08-09',
-  },
-  {
-    id: '6a82f66ac9c1d901c179c0ec',
+    id: 'std-013',
     name: 'Guruprasad Dabhekar',
     email: 'dabhekarguruprasad894@gmail.com',
     phone: '8857092595 / 9921228622',
@@ -175,7 +183,25 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-07-28',
   },
   {
-    id: '6a85b66bc9c1d901c17a2b2d',
+    id: 'std-014',
+    name: 'Bela Lomash',
+    email: 'blomash@gmail.com',
+    phone: '+1 (562) 981-4693',
+    course: 'Basic DJ Course',
+    batch: 'Regular Studio Batch (Mon/Wed/Fri)',
+    enrolledDate: '2026-08-01',
+  },
+  {
+    id: 'std-015',
+    name: 'Gurbani Singh',
+    email: 'gurbanisingh040208@gmail.com',
+    phone: '7009385250',
+    course: 'Basic DJ Course',
+    batch: 'Regular Studio Batch (Mon/Wed/Fri)',
+    enrolledDate: '2026-08-09',
+  },
+  {
+    id: 'std-016',
     name: 'Priyanka Bramhane',
     email: 'priyankaingle01@gmail.com',
     phone: '8446383170',
@@ -184,16 +210,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-22',
   },
   {
-    id: '6a875146c9c1d901c17a3abc',
-    name: 'Bela Lomash ',
-    email: 'blomash@gmail.com',
-    phone: '+1 (562) 981-4693',
-    course: 'Basic DJ Course',
-    batch: 'Regular Studio Batch (Mon/Wed/Fri)',
-    enrolledDate: '2026-08-01',
-  },
-  {
-    id: '6a8c4aabc9c1d901c17bffc6',
+    id: 'std-017',
     name: 'Devesh Walke',
     email: 'deveshwalke83@gmail.com',
     phone: '9607792149',
@@ -202,7 +219,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-24',
   },
   {
-    id: '6a95898ec1a9dab435071ed9',
+    id: 'std-018',
     name: 'Melrick Mascarenhas',
     email: 'melrickmascarenhas447@gmail.com',
     phone: '7795903902',
@@ -211,7 +228,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-31',
   },
   {
-    id: '6a9a8b8cc1a9dab4350c0472',
+    id: 'std-019',
     name: 'Rahul Saha',
     email: 'saharahul891@gmail.com',
     phone: '8999107403',
@@ -338,10 +355,8 @@ export class AttendanceService {
         const parsed: EnrolledStudent[] = JSON.parse(stored);
         const mockIds = ['std-101', 'std-201', 'std-202', 'std-203', 'std-204', 'std-205', 'std-206', 'std-207', 'std-208', 'std-209', 'std-210', 'std-211', 'std-212', 'std-213', 'std-214', 'std-215', 'std-216', 'std-217', 'std-218'];
         const realStudents = parsed.filter((s) => !mockIds.includes(s.id));
-        if (realStudents.length >= INITIAL_STUDENTS.length) {
-          return realStudents;
-        }
-        // If stored has older/fewer students, merge with INITIAL_STUDENTS
+        
+        // Merge & migrate all students to canonical std-001..std-019 IDs
         const mergedMap = new Map<string, EnrolledStudent>();
         INITIAL_STUDENTS.forEach((s) => mergedMap.set(s.id, s));
         realStudents.forEach((s) => {
@@ -349,7 +364,7 @@ export class AttendanceService {
           const existing = mergedMap.get(canonicalId);
           mergedMap.set(canonicalId, { ...(existing || {}), ...s, id: canonicalId });
         });
-        const merged = Array.from(mergedMap.values());
+        const merged = sortStudentsById(Array.from(mergedMap.values()));
         this.saveStudents(merged);
         return merged;
       }
@@ -366,9 +381,12 @@ export class AttendanceService {
       const stored = localStorage.getItem(storageKey);
       if (stored) {
         const parsed: AttendanceRecord[] = JSON.parse(stored);
-        const filtered = parsed.filter(
-          (r) => r && !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id)
-        );
+        const filtered = parsed
+          .filter((r) => r && !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id))
+          .map((r) => ({
+            ...r,
+            studentId: canonicalizeStudentId(r.studentId),
+          }));
         return filtered;
       }
     } catch {
@@ -597,7 +615,11 @@ export class AttendanceService {
           const remoteStudents = await res.json();
           if (Array.isArray(remoteStudents)) {
             const mockIds = ['std-101', 'std-201', 'std-202', 'std-203', 'std-204', 'std-205', 'std-206', 'std-207', 'std-208', 'std-209', 'std-210', 'std-211', 'std-212', 'std-213', 'std-214', 'std-215', 'std-216', 'std-217', 'std-218'];
-            const cleanRemote = remoteStudents.filter((s: EnrolledStudent) => s && !mockIds.includes(s.id));
+            const cleanRemote = sortStudentsById(
+              remoteStudents
+                .filter((s: EnrolledStudent) => s && !mockIds.includes(s.id))
+                .map((s: EnrolledStudent) => ({ ...s, id: canonicalizeStudentId(s.id) }))
+            );
             this.saveStudents(cleanRemote);
             return cleanRemote;
           }
@@ -623,11 +645,19 @@ export class AttendanceService {
 
   public static addStudent(payload: Omit<EnrolledStudent, 'id'>): EnrolledStudent {
     const students = this.getStoredStudents();
+    const existingNums = students.map((s) => {
+      const match = s.id.match(/^std-(\d+)$/i);
+      return match ? parseInt(match[1], 10) : 0;
+    });
+    const maxNum = existingNums.length > 0 ? Math.max(...existingNums) : 0;
+    const nextNum = maxNum >= 19 ? maxNum + 1 : 20;
+    const nextId = `std-${String(nextNum).padStart(3, '0')}`;
+
     const newStudent: EnrolledStudent = {
       ...payload,
-      id: `std-${Date.now()}`,
+      id: nextId,
     };
-    const updated = [newStudent, ...students];
+    const updated = sortStudentsById([...students, newStudent]);
     this.saveStudents(updated);
     this.syncStudentToRemote(newStudent);
     return newStudent;
