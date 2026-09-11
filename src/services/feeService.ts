@@ -36,6 +36,10 @@ export class FeeService {
   }
 
   static async fetchAll(): Promise<FeeReceipt[] | null> {
+    const user = AuthService.getCurrentUser();
+    if (user && user.role !== 'admin') {
+      return null;
+    }
     try {
       const response = await fetch(`${API_BASE_URL}/fees`, { headers: AuthService.getAuthHeaders() });
       if (!response.ok) return null;
@@ -46,6 +50,10 @@ export class FeeService {
 
   /** Sync old browser-only receipts once, then use MongoDB as the shared source. */
   static async fetchAndSync(): Promise<FeeReceipt[]> {
+    const user = AuthService.getCurrentUser();
+    if (user && user.role !== 'admin') {
+      return this.getCached();
+    }
     const remote = await this.fetchAll();
     if (remote === null) return this.getCached();
     const localOnly = this.getCached().filter((local) => !remote.some((receipt) => receipt.id === local.id));

@@ -302,6 +302,17 @@ if (typeof window !== 'undefined') {
   initAttendanceLiveStream();
 }
 
+// Helper: Normalize time slot string for resilient matching across formats
+function normalizeTimeSlot(slot?: string): string {
+  if (!slot) return '';
+  return slot
+    .replace(/[–—]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/0([0-9]):/g, '$1:')
+    .trim()
+    .toLowerCase();
+}
+
 export class AttendanceService {
   private static listeners: AttendanceListener[] = [];
   private static studentListeners: ((students: EnrolledStudent[]) => void)[] = [];
@@ -584,7 +595,11 @@ export class AttendanceService {
     }
 
     let records = this.getStoredAttendance(currentUser);
-    const existingIndex = records.findIndex((r) => r.id === record.id);
+    const existingIndex = records.findIndex((r) => r.id === record.id || (
+      canonicalizeStudentId(r.studentId) === canonicalizeStudentId(record.studentId) &&
+      r.date === record.date &&
+      normalizeTimeSlot(r.timeSlot) === normalizeTimeSlot(record.timeSlot)
+    ));
     if (existingIndex !== -1) {
       records[existingIndex] = record;
     } else {
@@ -723,7 +738,8 @@ export class AttendanceService {
   ): AttendanceRecord[] {
     const activeUser = (user || AuthService.getCurrentUser()) as CmsUser | null;
     const records = this.getStoredAttendance(activeUser);
-    const studentRecords = records.filter((r) => r.studentId === studentId);
+    const targetId = canonicalizeStudentId(studentId);
+    const studentRecords = records.filter((r) => r.studentId === studentId || canonicalizeStudentId(r.studentId) === targetId);
 
     // If no user context or role === 'admin', return ALL records
     if (!activeUser || activeUser.role === 'admin') {
