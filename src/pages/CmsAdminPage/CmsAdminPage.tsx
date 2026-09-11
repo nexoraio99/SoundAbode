@@ -1430,9 +1430,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const handleExportBackup = () => {
     const backupData = {
       exportedAt: new Date().toISOString(),
+      version: '2.0',
       blogPosts: BlogService.getAllPosts(),
       inquiries: InquiryService.getAllInquiries(),
+      admissions: admissions,
+      feeReceipts: fees,
       students: AttendanceService.getAllStudents(),
+      attendanceRecords: AttendanceService.getAllAttendanceRecords(),
     };
     const jsonStr = JSON.stringify(backupData, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -1443,6 +1447,126 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        if (!text) return;
+        const data = JSON.parse(text);
+
+        let restoredCount = 0;
+        if (Array.isArray(data.attendanceRecords)) {
+          for (const rec of data.attendanceRecords) {
+            if (rec && rec.id && rec.studentId && rec.date) {
+              await fetch(`${getApiBaseUrl()}/attendance`, {
+                method: 'POST',
+                headers: AuthService.getAuthHeaders(),
+                body: JSON.stringify(rec),
+              }).catch(() => {});
+              restoredCount++;
+            }
+          }
+        }
+
+        if (Array.isArray(data.students)) {
+          for (const st of data.students) {
+            if (st && st.id && st.name) {
+              await fetch(`${getApiBaseUrl()}/students`, {
+                method: 'POST',
+                headers: AuthService.getAuthHeaders(),
+                body: JSON.stringify(st),
+              }).catch(() => {});
+            }
+          }
+        }
+
+        await AttendanceService.fetchAndSyncFromRemote();
+        refreshData();
+        setSettingsSuccessMsg(`Successfully restored ${restoredCount} attendance record(s) and database snapshot!`);
+        setTimeout(() => setSettingsSuccessMsg(''), 5000);
+      } catch (err: any) {
+        alert('Failed to parse backup JSON file: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const [serverBackups, setServerBackups] = useState<{ filename: string; sizeBytes: number; createdAt: string }[]>([]);
+  const [isLoadingServerBackups, setIsLoadingServerBackups] = useState(false);
+
+  const fetchServerBackups = async () => {
+    setIsLoadingServerBackups(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/admin/backups`, {
+        headers: AuthService.getAuthHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) setServerBackups(data);
+      }
+    } catch {
+      // Fallback
+    } finally {
+      setIsLoadingServerBackups(false);
+    }
+  };
+
+  const handleGenerateServerBackup = async () => {
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/admin/backups/generate`, {
+        method: 'POST',
+        headers: AuthService.getAuthHeaders(),
+      });
+      if (res.ok) {
+        setSettingsSuccessMsg('Server database backup snapshot created successfully!');
+        fetchServerBackups();
+        setTimeout(() => setSettingsSuccessMsg(''), 4000);
+      } else {
+        alert('Failed creating server backup.');
+      }
+    } catch (err: any) {
+      alert('Failed: ' + err.message);
+    }
+  };
+
+  const handleRestoreServerBackup = async (filename: string) => {
+    if (!window.confirm(`Are you sure you want to restore the database from server backup:\n"${filename}"?\n\nThis will safely update all records in MongoDB.`)) return;
+
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/admin/backups/restore/${encodeURIComponent(filename)}`, {
+        method: 'POST',
+        headers: AuthService.getAuthHeaders(),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        await AttendanceService.fetchAndSyncFromRemote();
+        refreshData();
+        setSettingsSuccessMsg(`Restored ${result.restoredAttendance || 0} attendance records and ${result.restoredStudents || 0} students from ${filename}!`);
+        setTimeout(() => setSettingsSuccessMsg(''), 5000);
+      } else {
+        alert('Failed to restore server backup.');
+      }
+    } catch (err: any) {
+      alert('Restore error: ' + err.message);
+    }
+  };
+
+  const handleDownloadServerBackup = (filename: string) => {
+    const url = `${getApiBaseUrl()}/admin/backups/download/${encodeURIComponent(filename)}`;
+    window.open(url, '_blank');
+  };
+
+  useEffect(() => {
+    if (activeTab === 'settings') {
+      fetchServerBackups();
+    }
+  }, [activeTab]);
 
   const handleChangePasscode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1598,10 +1722,23 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     ? AttendanceService.getAttendanceForStudent(selectedStudentId, currentUser || undefined)
     : [];
 
+  const getOrFallbackStudent = (studentId: string, record?: AttendanceRecord): EnrolledStudent => {
+    const existing = students.find((s) => s.id === studentId);
+    if (existing) return existing;
+    return {
+      id: studentId,
+      name: (record as any)?.studentName || `Student (${studentId})`,
+      email: (record as any)?.studentEmail || '',
+      phone: (record as any)?.studentPhone || '',
+      course: (record as any)?.course || 'Music Production',
+      batch: (record as any)?.batch || 'Regular Batch',
+      enrolledDate: record?.date || '2026-09-01',
+    };
+  };
+
   const allAttendanceRecords = useMemo(() => {
     if (attendanceVersion < 0) return [];
-    const validStudentIds = new Set(students.map((s) => s.id));
-    const all = AttendanceService.getAllAttendanceRecords(currentUser || undefined).filter((r) => validStudentIds.has(r.studentId));
+    const all = AttendanceService.getAllAttendanceRecords(currentUser || undefined);
     if (isTeacher && currentUser) {
       const uEmail = (currentUser.email || '').toLowerCase();
       const uName = (currentUser.name || '').toLowerCase();
@@ -1616,7 +1753,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       });
     }
     return all;
-  }, [attendanceVersion, students, isTeacher, currentUser]);
+  }, [attendanceVersion, isTeacher, currentUser]);
 
   const getGroupSessionDetails = (dateStr: string, slotStr?: string) => {
     const matchingRecords = allAttendanceRecords.filter((r) => {
@@ -1626,9 +1763,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     });
 
     const studentIds = Array.from(new Set(matchingRecords.map((r) => r.studentId)));
-    const attendingStudents = studentIds
-      .map((id) => students.find((s) => s.id === id))
-      .filter((s): s is EnrolledStudent => Boolean(s));
+    const attendingStudents = studentIds.map((id) => {
+      const rec = matchingRecords.find((r) => r.studentId === id);
+      return getOrFallbackStudent(id, rec);
+    });
 
     return {
       records: matchingRecords,
@@ -1653,8 +1791,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
     groupRecords.forEach((r) => {
       const key = `${r.date}___${r.timeSlot}`;
+      const student = getOrFallbackStudent(r.studentId, r);
       if (!sessionMap.has(key)) {
-        const student = students.find((s) => s.id === r.studentId);
         sessionMap.set(key, {
           id: key,
           date: r.date,
@@ -1664,14 +1802,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           comment: r.comment,
           updatedAt: r.updatedAt,
           studentIds: [r.studentId],
-          students: student ? [student] : [],
+          students: [student],
         });
       } else {
         const existing = sessionMap.get(key)!;
         if (!existing.studentIds.includes(r.studentId)) {
           existing.studentIds.push(r.studentId);
-          const student = students.find((s) => s.id === r.studentId);
-          if (student) existing.students.push(student);
+          existing.students.push(student);
         }
         if (!existing.comment && r.comment) {
           existing.comment = r.comment;
@@ -1852,8 +1989,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         }
         groupMap.get(key)!.push(r);
       } else {
-        const student = students.find((s) => s.id === r.studentId);
-        if (!student) return;
+        const student = getOrFallbackStudent(r.studentId, r);
         entries.push({
           id: r.id,
           type: 'INDIVIDUAL',
@@ -1878,11 +2014,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       if (records.length === 0) return;
       const first = records[0];
       const studentIds = Array.from(new Set(records.map((r) => r.studentId)));
-      const attendingStudents = studentIds
-        .map((id) => students.find((s) => s.id === id))
-        .filter((s): s is EnrolledStudent => Boolean(s));
-
-      if (attendingStudents.length === 0) return;
+      const attendingStudents = studentIds.map((id) => {
+        const rec = records.find((r) => r.studentId === id);
+        return getOrFallbackStudent(id, rec);
+      });
 
       const distinctComments = Array.from(new Set(records.map((r) => r.comment).filter(Boolean))).join('; ');
       const latestUpdate = records.reduce((latest, r) => {
@@ -6469,7 +6604,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   </div>
                 </div>
 
-                {/* CARD 3: DATABASE BACKUP EXPORT */}
+                {/* CARD 3: DATABASE BACKUP EXPORT & RESTORE */}
                 <div className={styles.settingsCard}>
                   <h3 className={styles.settingsCardTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -6477,13 +6612,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
                       <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
                     </svg>
-                    Data Snapshot Backup
+                    Data Snapshot Backup &amp; Restore
                   </h3>
                   <p className={styles.settingsCardDesc}>
-                    Export a full JSON database snapshot containing articles, prospect CRM leads, and student attendance logs.
+                    Export/import full JSON database snapshots, or manage automated server-side rolling daily backups.
                   </p>
 
-                  <div>
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1.25rem' }}>
                     <button onClick={handleExportBackup} className={styles.btnSecondary} style={{ gap: '0.4rem' }}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -6492,6 +6627,85 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       </svg>
                       Export JSON Snapshot
                     </button>
+
+                    <label className={styles.btnSecondary} style={{ gap: '0.4rem', cursor: 'pointer', margin: 0 }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="17 8 12 3 7 8" />
+                        <line x1="12" y1="3" x2="12" y2="15" />
+                      </svg>
+                      Restore from JSON Backup
+                      <input
+                        type="file"
+                        accept=".json,application/json"
+                        onChange={handleImportBackup}
+                        style={{ display: 'none' }}
+                      />
+                    </label>
+
+                    <button onClick={handleGenerateServerBackup} className={styles.btnSecondary} style={{ gap: '0.4rem', borderColor: 'rgba(59, 130, 246, 0.4)', color: '#60a5fa' }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                      </svg>
+                      + Save Server Snapshot Now
+                    </button>
+                  </div>
+
+                  {/* Automated Server Snapshots Table */}
+                  <div style={{ marginTop: '1rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '0.85rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                      <h4 style={{ margin: 0, fontSize: '0.82rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        Automated Server Daily Snapshots ({serverBackups.length})
+                      </h4>
+                      <button onClick={fetchServerBackups} style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: '0.75rem', cursor: 'pointer', padding: 0 }}>
+                        {isLoadingServerBackups ? 'Refreshing...' : 'Refresh List'}
+                      </button>
+                    </div>
+
+                    {serverBackups.length === 0 ? (
+                      <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0.5rem 0 0' }}>No server snapshots generated yet.</p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '180px', overflowY: 'auto' }}>
+                        {serverBackups.map((b) => (
+                          <div
+                            key={b.filename}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '0.45rem 0.75rem',
+                              background: 'rgba(255, 255, 255, 0.03)',
+                              borderRadius: '6px',
+                              border: '1px solid rgba(255, 255, 255, 0.05)',
+                              fontSize: '0.78rem',
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontWeight: 500, color: '#f1f5f9' }}>{b.filename}</div>
+                              <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                                {new Date(b.createdAt).toLocaleString()} · {(b.sizeBytes / 1024).toFixed(1)} KB
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.4rem' }}>
+                              <button
+                                onClick={() => handleRestoreServerBackup(b.filename)}
+                                className={styles.btnSecondary}
+                                style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem', color: '#4ade80', borderColor: 'rgba(74, 222, 128, 0.3)' }}
+                              >
+                                Restore
+                              </button>
+                              <button
+                                onClick={() => handleDownloadServerBackup(b.filename)}
+                                className={styles.btnSecondary}
+                                style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem' }}
+                              >
+                                Download
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 

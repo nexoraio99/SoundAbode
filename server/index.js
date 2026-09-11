@@ -5,6 +5,21 @@ import dotenv from 'dotenv';
 import dns from 'dns';
 import { randomBytes } from 'crypto';
 import nodemailer from 'nodemailer';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const BACKUPS_DIR = path.join(__dirname, 'backups');
+
+if (!fs.existsSync(BACKUPS_DIR)) {
+  try {
+    fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+  } catch (err) {
+    console.warn('[BACKUP] Could not create backups directory:', err.message);
+  }
+}
 
 // Graceful optional dependency loading — server starts even if not yet installed.
 // Run `npm install` in /server to activate full security.
@@ -1150,6 +1165,9 @@ async function autoSeedIfEmpty() {
       ]);
       console.log('[SUCCESS] Populated 6 official blog articles with full content in MongoDB Atlas.');
     }
+
+    // Automatically create initial server-side backup snapshot on startup
+    await createDatabaseSnapshot('startup');
   } catch (err) {
     console.warn('[WARN] Data auto-seed notice:', err.message);
   }
@@ -1803,7 +1821,9 @@ app.post('/api/attendance', requireAuth, async (req, res) => {
       if (!recordData.markedByRole) recordData.markedByRole = user.role || 'admin';
     }
 
-    if (!recordData.id) recordData.id = `att-${Date.now()}`;
+    if (!recordData.id) {
+      recordData.id = `att-${Date.now()}-${Math.random().toString(36).substring(2, 8)}-${recordData.studentId}`;
+    }
     recordData.updatedAt = new Date().toISOString();
     if (typeof recordData.comment !== 'string') recordData.comment = '';
     if (recordData.comment.length > 1000) recordData.comment = recordData.comment.slice(0, 1000);
@@ -2235,13 +2255,175 @@ app.patch('/api/issues/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/api/issues/:id', requireAuth, requireAdmin, async (req, res) => {
+// ─── AUTOMATED SERVER SNAPSHOTS & BACKUP MANAGEMENT ───────────────────────────
+async function createDatabaseSnapshot(label = 'auto') {
+  if (mongoose.connection.readyState !== 1) return null;
   try {
-    const { id } = req.params;
-    if (isConnected) {
-      await IssueModel.deleteOne({ $or: [{ id }, { _id: mongoose.Types.ObjectId.isValid(id) ? id : null }] });
+    const [attendances, students, admissions, inquiries, fees, posts, issues] = await Promise.all([
+      AttendanceRecordModel.find({}),
+      StudentModel.find({}),
+      AdmissionModel.find({}),
+      InquiryModel.find({}),
+      FeeReceiptModel.find({}),
+      BlogPostModel.find({}),
+      IssueModel.find({}),
+    ]);
+
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timestamp = now.getTime();
+    const filename = `soundabode_backup_${dateStr}_${label}_${timestamp}.json`;
+    const filePath = path.join(BACKUPS_DIR, filename);
+
+    const snapshot = {
+      exportedAt: now.toISOString(),
+      label,
+      counts: {
+        attendanceRecords: attendances.length,
+        students: students.length,
+        admissions: admissions.length,
+        inquiries: inquiries.length,
+        feeReceipts: fees.length,
+        blogPosts: posts.length,
+        developerIssues: issues.length,
+      },
+      data: {
+        attendanceRecords: attendances,
+        students,
+        admissions,
+        inquiries,
+        feeReceipts: fees,
+        blogPosts: posts,
+        developerIssues: issues,
+      },
+    };
+
+    fs.writeFileSync(filePath, JSON.stringify(snapshot, null, 2), 'utf8');
+    console.log(`[BACKUP] Created snapshot (${attendances.length} attendance records): ${filename}`);
+
+    // Prune old snapshots if more than 60 stored
+    try {
+      const files = fs.readdirSync(BACKUPS_DIR).filter(f => f.endsWith('.json'));
+      if (files.length > 60) {
+        files.sort();
+        while (files.length > 60) {
+          const toDelete = files.shift();
+          fs.unlinkSync(path.join(BACKUPS_DIR, toDelete));
+        }
+      }
+    } catch {}
+
+    return { filename, counts: snapshot.counts, exportedAt: snapshot.exportedAt };
+  } catch (err) {
+    console.error('[BACKUP ERROR] Failed creating snapshot:', err.message);
+    return null;
+  }
+}
+
+// Scheduled rolling daily backup
+setInterval(() => {
+  createDatabaseSnapshot('daily');
+}, 24 * 60 * 60 * 1000);
+
+app.get('/api/admin/backups', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (!fs.existsSync(BACKUPS_DIR)) {
+      return res.json([]);
     }
-    res.json({ success: true, id });
+    const files = fs.readdirSync(BACKUPS_DIR)
+      .filter(f => f.endsWith('.json'))
+      .map(f => {
+        const filePath = path.join(BACKUPS_DIR, f);
+        const stats = fs.statSync(filePath);
+        return {
+          filename: f,
+          sizeBytes: stats.size,
+          createdAt: stats.mtime.toISOString(),
+        };
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+    res.json(files);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/backups/generate', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const result = await createDatabaseSnapshot('manual');
+    if (!result) {
+      return res.status(500).json({ error: 'Failed to create database snapshot.' });
+    }
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/backups/download/:filename', requireAuth, requireAdmin, (req, res) => {
+  try {
+    const { filename } = req.params;
+    const safeName = path.basename(filename);
+    const filePath = path.join(BACKUPS_DIR, safeName);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Backup file not found.' });
+    }
+    res.download(filePath, safeName);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/backups/restore/:filename', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { filename } = req.params;
+    const safeName = path.basename(filename);
+    const filePath = path.join(BACKUPS_DIR, safeName);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Backup file not found.' });
+    }
+
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const snapshot = JSON.parse(raw);
+    const data = snapshot.data || snapshot;
+
+    let restoredAttendance = 0;
+    if (Array.isArray(data.attendanceRecords) && isConnected) {
+      for (const rec of data.attendanceRecords) {
+        if (rec && rec.id && rec.studentId && rec.date) {
+          await AttendanceRecordModel.findOneAndUpdate(
+            { id: rec.id },
+            rec,
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+          );
+          restoredAttendance++;
+        }
+      }
+      broadcastLiveEvent('ATTENDANCE_SAVED', {});
+    }
+
+    let restoredStudents = 0;
+    if (Array.isArray(data.students) && isConnected) {
+      for (const st of data.students) {
+        if (st && st.id && st.name) {
+          await StudentModel.findOneAndUpdate(
+            { id: st.id },
+            st,
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+          );
+          restoredStudents++;
+        }
+      }
+    }
+
+    console.log(`[BACKUP RESTORE] Restored ${restoredAttendance} attendance records and ${restoredStudents} students from ${safeName}`);
+    res.json({
+      success: true,
+      restoredAttendance,
+      restoredStudents,
+      filename: safeName,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

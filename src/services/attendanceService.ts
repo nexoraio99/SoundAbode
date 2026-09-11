@@ -267,9 +267,8 @@ export class AttendanceService {
       const stored = localStorage.getItem(storageKey);
       if (stored) {
         const parsed: AttendanceRecord[] = JSON.parse(stored);
-        const validStudentIds = new Set(this.getStoredStudents().map((s) => s.id));
         const filtered = parsed.filter(
-          (r) => r && !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id) && validStudentIds.has(r.studentId)
+          (r) => r && !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id)
         );
         return filtered;
       }
@@ -328,11 +327,11 @@ export class AttendanceService {
       const student = this.getStudentById(record.studentId);
       const payload = {
         ...record,
-        studentName: student?.name || '',
-        studentEmail: student?.email || '',
-        studentPhone: student?.phone || '',
-        course: student?.course || '',
-        batch: student?.batch || '',
+        studentName: student?.name || (record as any).studentName || '',
+        studentEmail: student?.email || (record as any).studentEmail || '',
+        studentPhone: student?.phone || (record as any).studentPhone || '',
+        course: student?.course || (record as any).course || '',
+        batch: student?.batch || (record as any).batch || '',
       };
       try {
         const res = await fetch(`${API_BASE_URL}/attendance`, {
@@ -349,9 +348,41 @@ export class AttendanceService {
     }
   }
 
+  public static collectAllLocalStorageAttendance(): AttendanceRecord[] {
+    const collected: AttendanceRecord[] = [];
+    const seenIds = new Set<string>();
+
+    if (typeof window === 'undefined') return collected;
+
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('soundabode_attendance_records') || key === 'soundabode_attendance_records')) {
+          try {
+            const raw = localStorage.getItem(key);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) {
+                parsed.forEach((r: AttendanceRecord) => {
+                  if (r && r.id && !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id) && !seenIds.has(r.id)) {
+                    seenIds.add(r.id);
+                    collected.push(r);
+                  }
+                });
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+
+    return collected;
+  }
+
   /**
    * Fetches latest attendance from remote MongoDB and syncs to user-scoped storage.
-   * Cleans up any orphaned records for deleted/unknown students.
+   * Preserves all valid records without destructive automatic client-side deletions.
+   * Also scans all legacy & scoped local storage partitions to auto-recover any unsynced records.
    */
   public static async fetchAndSyncFromRemote(user?: CmsUser | null): Promise<AttendanceRecord[]> {
     if (typeof window !== 'undefined') {
@@ -362,9 +393,7 @@ export class AttendanceService {
         if (res.ok) {
           const remoteRecords = await res.json();
           if (Array.isArray(remoteRecords)) {
-            const validStudentIds = new Set(this.getStoredStudents().map((s) => s.id));
             const cleanRecords: AttendanceRecord[] = [];
-            const orphanedRecordsToDelete: AttendanceRecord[] = [];
 
             const activeUser = user || AuthService.getCurrentUser();
             const isTeacher = activeUser?.role === 'teacher';
@@ -372,7 +401,7 @@ export class AttendanceService {
             const uName = (activeUser?.name || '').toLowerCase();
 
             remoteRecords.forEach((r: AttendanceRecord) => {
-              if (!r) return;
+              if (!r || !r.id) return;
               if (['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id)) return;
 
               // Teacher role check
@@ -387,25 +416,31 @@ export class AttendanceService {
                 if (!matchesTeacher) return;
               }
 
-              if (validStudentIds.has(r.studentId)) {
-                cleanRecords.push(r);
-              } else {
-                orphanedRecordsToDelete.push(r);
+              cleanRecords.push(r);
+            });
+
+            // Recover and push any locally stored records across all browser keys that aren't yet in MongoDB
+            const remoteIds = new Set(cleanRecords.map((r) => r.id));
+            const allLocalRecords = this.collectAllLocalStorageAttendance();
+            
+            allLocalRecords.forEach((loc) => {
+              if (loc && loc.id && !remoteIds.has(loc.id)) {
+                if (isTeacher) {
+                  const mBy = (loc.markedBy || '').toLowerCase();
+                  const mName = (loc.markedByName || '').toLowerCase();
+                  const matchesTeacher =
+                    mBy === uEmail ||
+                    mName === uName ||
+                    (uEmail && mBy.includes(uEmail)) ||
+                    (uName && (mName.includes(uName) || mBy.includes(uName)));
+                  if (!matchesTeacher) return;
+                }
+                cleanRecords.push(loc);
+                this.syncAttendanceToRemote(loc);
               }
             });
 
             this.saveAttendance(cleanRecords, activeUser);
-
-            // Asynchronously delete orphaned records on remote MongoDB
-            if (orphanedRecordsToDelete.length > 0) {
-              orphanedRecordsToDelete.forEach((r) => {
-                fetch(`${API_BASE_URL}/attendance/${r.id}`, {
-                  method: 'DELETE',
-                  headers: AuthService.getAuthHeaders(),
-                }).catch(() => {});
-              });
-            }
-
             return cleanRecords;
           }
         }
@@ -639,7 +674,7 @@ export class AttendanceService {
       return records[existingIndex];
     } else {
       const newRecord: AttendanceRecord = {
-        id: `att-${Date.now()}`,
+        id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 8)}-${payload.studentId}`,
         studentId: payload.studentId,
         date: payload.date,
         timeSlot: payload.timeSlot,
