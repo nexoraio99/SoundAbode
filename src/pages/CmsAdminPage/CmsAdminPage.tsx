@@ -3579,12 +3579,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                       {avatar.initials}
                                     </div>
                                     <div>
-                                      <div className={styles.studentName} style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                                        <span>{std.name}</span>
-                                        <span style={{ fontFamily: 'monospace', fontSize: '0.7rem', background: 'rgba(217, 119, 6, 0.12)', border: '1px solid rgba(217, 119, 6, 0.35)', color: '#fbbf24', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                                          {std.id}
-                                        </span>
-                                      </div>
+                                      <div className={styles.studentName} style={{ fontWeight: 600 }}>{std.name}</div>
                                       <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>{std.email}</div>
                                     </div>
                                   </div>
@@ -3679,12 +3674,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 {avatar.initials}
                               </div>
                               <div>
-                                <div className={styles.mobileCardTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                  <span>{std.name}</span>
-                                  <span style={{ fontFamily: 'monospace', fontSize: '0.675rem', background: 'rgba(217, 119, 6, 0.12)', border: '1px solid rgba(217, 119, 6, 0.35)', color: '#fbbf24', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>
-                                    {std.id}
-                                  </span>
-                                </div>
+                                <div className={styles.mobileCardTitle}>{std.name}</div>
                                 <div className={styles.mobileCardSubText}>{std.email}</div>
                               </div>
                             </div>
@@ -5027,12 +5017,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                       </div>
                                     )}
                                     <div>
-                                      <div className={styles.studentName} style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                                        <span>{student.name}</span>
-                                        <span style={{ fontFamily: 'monospace', fontSize: '0.7rem', background: 'rgba(217, 119, 6, 0.12)', border: '1px solid rgba(217, 119, 6, 0.35)', color: '#fbbf24', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                                          {student.id}
-                                        </span>
-                                      </div>
+                                      <div className={styles.studentName}>{student.name}</div>
                                       <div style={{ fontSize: '0.725rem', color: '#64748b' }}>{student.email}</div>
                                     </div>
                                   </div>
@@ -5116,12 +5101,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 </div>
                               )}
                               <div>
-                                <div className={styles.mobileCardTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                  <span>{student.name}</span>
-                                  <span style={{ fontFamily: 'monospace', fontSize: '0.675rem', background: 'rgba(217, 119, 6, 0.12)', border: '1px solid rgba(217, 119, 6, 0.35)', color: '#fbbf24', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>
-                                    {student.id}
-                                  </span>
-                                </div>
+                                <div className={styles.mobileCardTitle}>{student.name}</div>
                                 <div className={styles.mobileCardSubText}>{student.email}</div>
                               </div>
                             </div>
