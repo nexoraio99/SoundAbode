@@ -433,8 +433,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     if (isAuthenticated) {
       refreshData();
       IssueService.fetchIssues().then((issues) => setDeveloperIssues(issues));
-      const unsubscribe = IssueService.subscribe((issues) => setDeveloperIssues(issues));
-      return () => unsubscribe();
+      const unsubscribeIssues = IssueService.subscribe((issues) => setDeveloperIssues(issues));
+      const unsubscribeStudents = AttendanceService.subscribeStudents((sts) => setStudents(sts));
+      return () => {
+        unsubscribeIssues();
+        unsubscribeStudents();
+      };
     }
   }, [isAuthenticated]);
 
@@ -443,7 +447,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const refreshData = () => {
     setPosts(BlogService.getAllPosts());
     setInquiries(InquiryService.getAllInquiries());
-    setStudents(AttendanceService.getAllStudents());
+    AttendanceService.fetchStudents().then(setStudents);
     setAdmissions(AdmissionService.getAllAdmissions());
     FeeService.fetchAndSync().then(setFees);
     // Trigger async remote sync — when it completes, saveAttendance fires notifyChange which bumps attendanceVersion via subscription

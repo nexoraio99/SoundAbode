@@ -213,11 +213,19 @@ if (typeof window !== 'undefined') {
 
 export class AttendanceService {
   private static listeners: AttendanceListener[] = [];
+  private static studentListeners: ((students: EnrolledStudent[]) => void)[] = [];
 
   public static subscribe(listener: AttendanceListener): () => void {
     this.listeners.push(listener);
     return () => {
       this.listeners = this.listeners.filter((l) => l !== listener);
+    };
+  }
+
+  public static subscribeStudents(listener: (students: EnrolledStudent[]) => void): () => void {
+    this.studentListeners.push(listener);
+    return () => {
+      this.studentListeners = this.studentListeners.filter((l) => l !== listener);
     };
   }
 
@@ -232,9 +240,18 @@ export class AttendanceService {
     }
   }
 
+  private static notifyStudentsChange(students: EnrolledStudent[]): void {
+    this.studentListeners.forEach((l) => {
+      try {
+        l(students);
+      } catch {}
+    });
+  }
+
   private static saveStudents(students: EnrolledStudent[]): void {
     try {
       localStorage.setItem(STUDENTS_STORAGE_KEY, JSON.stringify(students));
+      this.notifyStudentsChange(students);
     } catch {
       // Fallback
     }
@@ -488,20 +505,31 @@ export class AttendanceService {
     this.saveAttendance([], currentUser);
   }
 
-  public static getAllStudents(): EnrolledStudent[] {
+  public static async fetchStudents(): Promise<EnrolledStudent[]> {
     if (typeof window !== 'undefined') {
-      fetch(`${API_BASE_URL}/students`, {
-        headers: AuthService.getAuthHeaders(),
-      })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((remoteStudents) => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/students`, {
+          headers: AuthService.getAuthHeaders(),
+        });
+        if (res.ok) {
+          const remoteStudents = await res.json();
           if (Array.isArray(remoteStudents)) {
             const mockIds = ['std-101', 'std-201', 'std-202', 'std-203', 'std-204', 'std-205', 'std-206', 'std-207', 'std-208', 'std-209', 'std-210', 'std-211', 'std-212', 'std-213', 'std-214', 'std-215', 'std-216', 'std-217', 'std-218'];
             const cleanRemote = remoteStudents.filter((s: EnrolledStudent) => s && !mockIds.includes(s.id));
             this.saveStudents(cleanRemote);
+            return cleanRemote;
           }
-        })
-        .catch(() => {});
+        }
+      } catch (err) {
+        console.warn('Students remote fetch failed:', err);
+      }
+    }
+    return this.getStoredStudents();
+  }
+
+  public static getAllStudents(): EnrolledStudent[] {
+    if (typeof window !== 'undefined') {
+      this.fetchStudents().catch(() => {});
     }
     return this.getStoredStudents();
   }
