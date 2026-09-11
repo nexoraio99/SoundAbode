@@ -969,12 +969,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   // ATTENDANCE FLOWCHART HANDLERS
   const handleOpenStudentCalendar = (studentId: string) => {
     setSelectedStudentId(studentId);
+    setAttendanceSubTab('roster');
+    setActiveTab('attendance');
     const now = new Date();
     setCalendarDate(new Date(now.getFullYear(), now.getMonth(), 1));
     setSelectedDateStr(getTodayDateStr());
   };
 
-  const handleOpenAttendanceModal = (slot?: string, date?: string) => {
+  const handleOpenAttendanceModal = (slot?: string, date?: string, studentId?: string) => {
     const targetDate = date || selectedDateStr || getTodayDateStr();
     const targetSlot = slot || selectedTimeSlot || '11:00 AM - 01:00 PM';
 
@@ -991,11 +993,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       return `${hour.toString().padStart(2, '0')}:${min}`;
     };
 
-    if (!selectedStudentId && students.length > 0) {
-      setSelectedStudentId(students[0].id);
+    // Use explicit studentId param (avoids stale state from React batching)
+    const resolvedStudentId = studentId || selectedStudentId || (students.length > 0 ? students[0].id : '');
+    if (resolvedStudentId && resolvedStudentId !== selectedStudentId) {
+      setSelectedStudentId(resolvedStudentId);
     }
 
-    const currentStudentId = selectedStudentId || (students.length > 0 ? students[0].id : '');
+    const currentStudentId = resolvedStudentId;
     if (currentStudentId) {
       const records = AttendanceService.getAttendanceForStudent(currentStudentId, currentUser || undefined);
 
@@ -5047,8 +5051,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   <div style={{ display: 'inline-flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
                                     <button
                                       onClick={() => {
-                                        setSelectedStudentId(student.id);
-                                        handleOpenAttendanceModal(undefined, getTodayDateStr());
+                                        handleOpenAttendanceModal(undefined, getTodayDateStr(), student.id);
                                       }}
                                       className={styles.btnPrimary}
                                       style={{ height: '28px', fontSize: '0.75rem', padding: '0 0.6rem' }}
@@ -5135,8 +5138,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           <div className={styles.mobileCardActions}>
                             <button
                               onClick={() => {
-                                setSelectedStudentId(student.id);
-                                handleOpenAttendanceModal(undefined, getTodayDateStr());
+                                handleOpenAttendanceModal(undefined, getTodayDateStr(), student.id);
                               }}
                               className={styles.btnPrimary}
                               style={{ height: '34px', fontSize: '0.775rem' }}
@@ -5190,7 +5192,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         </svg>
                         Group Session
                       </button>
-                      <button onClick={() => handleOpenAttendanceModal(undefined, selectedDateStr)} className={styles.btnSecondary} style={{ gap: '0.4rem' }}>
+                      <button onClick={() => handleOpenAttendanceModal(undefined, selectedDateStr, selectedStudentId || activeStudent?.id)} className={styles.btnSecondary} style={{ gap: '0.4rem' }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                           <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
                         </svg>
@@ -5344,7 +5346,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         </div>
                       </div>
                       <button
-                        onClick={() => handleOpenAttendanceModal(undefined, selectedDateStr)}
+                        onClick={() => handleOpenAttendanceModal(undefined, selectedDateStr, selectedStudentId || activeStudent?.id)}
                         className={styles.btnPrimary}
                         style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', gap: '0.35rem', fontWeight: 600 }}
                       >
@@ -5419,7 +5421,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   </div>
 
                                   <button
-                                    onClick={() => handleOpenAttendanceModal(r.timeSlot)}
+                                    onClick={() => handleOpenAttendanceModal(r.timeSlot, r.date, r.studentId || selectedStudentId || activeStudent?.id)}
                                     className={styles.btnSecondary}
                                     style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', gap: '0.3rem', height: '26px' }}
                                     title="Edit this attendance record"
@@ -5485,7 +5487,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         return (
                           <div
                             key={slot}
-                            onClick={() => handleOpenAttendanceModal(slot)}
+                            onClick={() => handleOpenAttendanceModal(slot, selectedDateStr, selectedStudentId || activeStudent?.id)}
                             className={styles.timeSlotBox}
                           >
                             <div style={{ width: '100%' }}>
@@ -7383,7 +7385,24 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   <label className={styles.formLabel}>Select Enrolled Student</label>
                   <select
                     value={selectedStudentId || ''}
-                    onChange={(e) => setSelectedStudentId(e.target.value)}
+                    onChange={(e) => {
+                      const newId = e.target.value;
+                      setSelectedStudentId(newId);
+                      const records = AttendanceService.getAttendanceForStudent(newId, currentUser || undefined);
+                      const targetDate = attendanceFormDate || selectedDateStr || getTodayDateStr();
+                      const existing = selectedTimeSlot
+                        ? records.find((r) => r.date === targetDate && r.timeSlot === selectedTimeSlot)
+                        : records.find((r) => r.date === targetDate);
+                      if (existing) {
+                        setEditingAttendanceId(existing.id);
+                        setAttendanceFormStatus(existing.status as AttendanceStatus);
+                        setAttendanceFormComment(existing.comment || '');
+                      } else {
+                        setEditingAttendanceId(null);
+                        setAttendanceFormStatus('PRESENT');
+                        setAttendanceFormComment('');
+                      }
+                    }}
                     className={styles.selectInput}
                     style={{ width: '100%' }}
                   >
@@ -7403,7 +7422,25 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     <input
                       type="date"
                       value={attendanceFormDate}
-                      onChange={(e) => setAttendanceFormDate(e.target.value)}
+                      onChange={(e) => {
+                        const newDate = e.target.value;
+                        setAttendanceFormDate(newDate);
+                        if (selectedStudentId) {
+                          const records = AttendanceService.getAttendanceForStudent(selectedStudentId, currentUser || undefined);
+                          const existing = selectedTimeSlot
+                            ? records.find((r) => r.date === newDate && r.timeSlot === selectedTimeSlot)
+                            : records.find((r) => r.date === newDate);
+                          if (existing) {
+                            setEditingAttendanceId(existing.id);
+                            setAttendanceFormStatus(existing.status as AttendanceStatus);
+                            setAttendanceFormComment(existing.comment || '');
+                          } else {
+                            setEditingAttendanceId(null);
+                            setAttendanceFormStatus('PRESENT');
+                            setAttendanceFormComment('');
+                          }
+                        }
+                      }}
                       className={styles.searchInput}
                       style={{ width: '100%', maxWidth: 'none' }}
                     />

@@ -842,10 +842,53 @@ async function syncAndMigrateStudentSequence() {
       }
     }
 
-    console.log('[MIGRATION] Student sequence standardization completed successfully! All 19 students sequenced std-001..std-019.');
+    // 5. Ensure any additional enrolled students (beyond seed 1..19) follow the clean sequence std-020, std-021...
+    const nonSeedStudents = await StudentModel.find({
+      id: { $nin: INITIAL_STUDENT_SEED.map((s) => s.id) },
+    }).sort({ createdAt: 1, _id: 1 });
+
+    let currentSeq = 19;
+    for (const s of nonSeedStudents) {
+      const match = String(s.id || '').match(/^std-(\d+)$/i);
+      const isCleanSeq = match && parseInt(match[1], 10) > 19 && parseInt(match[1], 10) < 10000;
+      if (isCleanSeq) {
+        currentSeq = Math.max(currentSeq, parseInt(match[1], 10));
+      } else {
+        currentSeq += 1;
+        const newId = `std-${String(currentSeq).padStart(3, '0')}`;
+        const oldId = s.id;
+        console.log(`[MIGRATION] Reassigning non-standard student ID ${oldId} -> ${newId} (${s.name})`);
+        await StudentModel.updateOne({ _id: s._id }, { $set: { id: newId } });
+        if (oldId) {
+          await AttendanceRecordModel.updateMany({ studentId: oldId }, { $set: { studentId: newId } });
+        }
+      }
+    }
+
+    console.log('[MIGRATION] Student sequence standardization completed successfully! All students sequenced std-001 onwards.');
   } catch (err) {
     console.error('[MIGRATION] Error during student sequence standardization:', err);
   }
+}
+
+/**
+ * Returns the next available sequential student ID (e.g. std-020, std-021, etc.)
+ */
+async function getNextStudentSequenceId() {
+  let maxNum = 19;
+  if (mongoose.connection.readyState === 1) {
+    const allStudents = await StudentModel.find({}, 'id').lean();
+    for (const s of allStudents) {
+      const match = String(s.id || '').match(/^std-(\d+)$/i);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num < 10000 && num > maxNum) {
+          maxNum = num;
+        }
+      }
+    }
+  }
+  return `std-${String(maxNum + 1).padStart(3, '0')}`;
 }
 
 async function autoSeedIfEmpty() {
@@ -1858,19 +1901,37 @@ app.patch('/api/admissions/:id', requireAuth, async (req, res) => {
       const updated = await AdmissionModel.findOneAndUpdate({ id }, updates, { new: true });
       if (updated && updates.status === 'ENROLLED') {
         const studentName = `${updated.firstName} ${updated.lastName}`.trim();
-        await StudentModel.findOneAndUpdate(
-          { email: updated.email || studentName },
-          {
-            id: `std-${Date.now()}`,
-            name: studentName,
-            email: updated.email || '',
-            phone: updated.cellPhone || '',
-            course: updated.courseOpted || 'DJ Training Course',
-            batch: `${updated.formType === 'DJ' ? 'Regular DJ Studio Batch' : 'Regular EMP Studio Batch'}`,
-            enrolledDate: new Date().toISOString().split('T')[0],
-          },
-          { upsert: true, new: true }
+        const queryOr = [];
+        if (updated.email && updated.email.trim()) {
+          queryOr.push({ email: updated.email.trim().toLowerCase() });
+        }
+        if (studentName) {
+          queryOr.push({ name: new RegExp('^' + studentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
+        }
+
+        let existingStudent = queryOr.length > 0 ? await StudentModel.findOne({ $or: queryOr }) : null;
+        let assignedId = existingStudent?.id;
+
+        if (!assignedId || !/^std-\d+$/i.test(assignedId)) {
+          assignedId = await getNextStudentSequenceId();
+        }
+
+        const studentData = {
+          id: assignedId,
+          name: studentName,
+          email: (updated.email || '').trim(),
+          phone: (updated.cellPhone || '').trim(),
+          course: updated.courseOpted || (updated.formType === 'DJ' ? 'DJ Training Course' : 'EMP Production'),
+          batch: `${updated.formType === 'DJ' ? 'Regular DJ Studio Batch' : 'Regular EMP Studio Batch'}`,
+          enrolledDate: new Date().toISOString().split('T')[0],
+        };
+
+        const enrolledStudent = await StudentModel.findOneAndUpdate(
+          { id: assignedId },
+          studentData,
+          { upsert: true, new: true, setDefaultsOnInsert: true }
         );
+        broadcastLiveEvent('STUDENT_SAVED', enrolledStudent);
       }
       broadcastLiveEvent('ADMISSION_UPDATED', updated);
       return res.json(updated);
@@ -2180,25 +2241,42 @@ app.get('/api/students', requireAuth, async (req, res) => {
 
 app.post('/api/students', requireAuth, async (req, res) => {
   try {
-    const studentData = req.body;
+    const studentData = req.body || {};
     if (mongoose.connection.readyState === 1) {
-      if (!studentData.id || !studentData.id.startsWith('std-')) {
-        const allStudents = await StudentModel.find().lean();
-        const existingNums = allStudents.map((s) => {
-          const match = String(s.id || '').match(/^std-(\d+)$/i);
-          return match ? parseInt(match[1], 10) : 0;
-        });
-        const max = existingNums.length > 0 ? Math.max(...existingNums) : 0;
-        const nextNum = max >= 19 ? max + 1 : 20;
-        studentData.id = `std-${String(nextNum).padStart(3, '0')}`;
+      const numMatch = String(studentData.id || '').match(/^std-(\d+)$/i);
+      const numVal = numMatch ? parseInt(numMatch[1], 10) : NaN;
+      const isValidSequentialId = !isNaN(numVal) && numVal > 0 && numVal < 10000;
+
+      if (!isValidSequentialId) {
+        // Check if student already exists by email or name to prevent duplicate creation
+        const queryOr = [];
+        if (studentData.email && typeof studentData.email === 'string' && studentData.email.trim()) {
+          queryOr.push({ email: studentData.email.trim().toLowerCase() });
+        }
+        if (studentData.name && typeof studentData.name === 'string' && studentData.name.trim()) {
+          queryOr.push({ name: new RegExp('^' + studentData.name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
+        }
+
+        let existing = queryOr.length > 0 ? await StudentModel.findOne({ $or: queryOr }) : null;
+        if (existing && existing.id && /^std-\d+$/i.test(existing.id)) {
+          studentData.id = existing.id;
+        } else {
+          studentData.id = await getNextStudentSequenceId();
+        }
       }
-      const student = await StudentModel.findOneAndUpdate({ id: studentData.id }, studentData, {
-        upsert: true,
-        new: true,
-      });
+
+      const student = await StudentModel.findOneAndUpdate(
+        { id: studentData.id },
+        studentData,
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      broadcastLiveEvent('STUDENT_SAVED', student);
       return res.status(201).json(student);
     }
-    if (!studentData.id) studentData.id = `std-${Date.now()}`;
+    if (!studentData.id || !/^std-\d+$/i.test(studentData.id)) {
+      studentData.id = 'std-020';
+    }
+    broadcastLiveEvent('STUDENT_SAVED', studentData);
     res.status(201).json(studentData);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2246,8 +2324,10 @@ app.delete('/api/students/:id', requireAuth, async (req, res) => {
 
       const result = await StudentModel.deleteMany({ $or: queryConditions });
       console.log(`[DELETE] Deleted ${result.deletedCount} student(s) matching id/email/name: ${id} / ${email || ''} / ${name || ''}`);
-      return res.json({ success: true, deletedCount: result.deletedCount, id });
+      broadcastLiveEvent('STUDENT_DELETED', { id: cleanId });
+      return res.json({ success: true, deletedCount: result.deletedCount, id: cleanId });
     }
+    broadcastLiveEvent('STUDENT_DELETED', { id });
     res.json({ success: true, id });
   } catch (err) {
     res.status(500).json({ error: err.message });

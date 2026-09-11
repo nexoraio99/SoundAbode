@@ -290,6 +290,28 @@ function initAttendanceLiveStream() {
       AttendanceService.handleIncomingLivePurge();
     });
 
+    liveAttendanceEventSource.addEventListener('STUDENT_SAVED', (e: MessageEvent) => {
+      try {
+        const student = JSON.parse(e.data);
+        if (student && student.id) {
+          AttendanceService.handleIncomingLiveStudent(student);
+        }
+      } catch (err) {
+        console.warn('SSE STUDENT_SAVED parse error:', err);
+      }
+    });
+
+    liveAttendanceEventSource.addEventListener('STUDENT_DELETED', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data && data.id) {
+          AttendanceService.handleIncomingLiveDeleteStudent(data.id);
+        }
+      } catch (err) {
+        console.warn('SSE STUDENT_DELETED parse error:', err);
+      }
+    });
+
     liveAttendanceEventSource.onerror = () => {
       // EventSource auto-reconnects
     };
@@ -376,13 +398,23 @@ export class AttendanceService {
           mergedMap.set(canonicalId, { ...(existing || {}), ...s, id: canonicalId });
         });
         const merged = sortStudentsById(Array.from(mergedMap.values()));
-        this.saveStudents(merged);
+
+        // Only write back if a migration actually changed something (avoid infinite notify loops)
+        const needsMigration = parsed.some((s) => mockIds.includes(s.id)) ||
+          parsed.some((s) => LEGACY_STUDENT_ID_MAP[s.id]) ||
+          parsed.length !== merged.length;
+        if (needsMigration) {
+          this.saveStudents(merged);
+        }
         return merged;
       }
     } catch {
       // Fallback
     }
-    this.saveStudents(INITIAL_STUDENTS);
+    // First-time init: save without notifying to avoid triggering re-renders during mount
+    try {
+      localStorage.setItem(STUDENTS_STORAGE_KEY, JSON.stringify(INITIAL_STUDENTS));
+    } catch {}
     return INITIAL_STUDENTS;
   }
 
@@ -446,7 +478,18 @@ export class AttendanceService {
         method: 'POST',
         headers: AuthService.getAuthHeaders(),
         body: JSON.stringify(student),
-      }).catch((err) => console.warn('Student remote sync notice:', err));
+      })
+        .then(async (res) => {
+          if (res.ok) {
+            const saved = await res.json();
+            if (saved && saved.id && saved.id !== student.id) {
+              const students = this.getStoredStudents();
+              const updated = students.map((s) => (s.id === student.id ? { ...s, id: saved.id } : s));
+              this.saveStudents(sortStudentsById(updated));
+            }
+          }
+        })
+        .catch((err) => console.warn('Student remote sync notice:', err));
     }
   }
 
@@ -546,7 +589,10 @@ export class AttendanceService {
               cleanRecords.push(r);
             });
 
-            this.saveAttendance(cleanRecords, activeUser);
+            const currentStored = this.getStoredAttendance(activeUser);
+            if (JSON.stringify(currentStored) !== JSON.stringify(cleanRecords)) {
+              this.saveAttendance(cleanRecords, activeUser);
+            }
             return cleanRecords;
           }
         }
@@ -620,6 +666,35 @@ export class AttendanceService {
     this.saveAttendance([], currentUser);
   }
 
+  public static handleIncomingLiveStudent(student: EnrolledStudent): void {
+    if (!student || !student.id) return;
+    const students = this.getStoredStudents();
+    const targetId = canonicalizeStudentId(student.id);
+    const existingIndex = students.findIndex((s) => s.id === targetId || (student.email && s.email && s.email.toLowerCase() === student.email.toLowerCase()));
+    let updated: EnrolledStudent[];
+    if (existingIndex !== -1) {
+      updated = [...students];
+      updated[existingIndex] = { ...updated[existingIndex], ...student, id: targetId };
+    } else {
+      updated = [...students, { ...student, id: targetId }];
+    }
+    const sorted = sortStudentsById(updated);
+    const currentStored = this.getStoredStudents();
+    if (JSON.stringify(currentStored) !== JSON.stringify(sorted)) {
+      this.saveStudents(sorted);
+    }
+  }
+
+  public static handleIncomingLiveDeleteStudent(id: string): void {
+    if (!id) return;
+    const students = this.getStoredStudents();
+    const targetId = canonicalizeStudentId(id);
+    const updated = students.filter((s) => s.id !== id && s.id !== targetId);
+    if (updated.length !== students.length) {
+      this.saveStudents(updated);
+    }
+  }
+
   public static async fetchStudents(): Promise<EnrolledStudent[]> {
     if (typeof window !== 'undefined') {
       try {
@@ -635,7 +710,10 @@ export class AttendanceService {
                 .filter((s: EnrolledStudent) => s && !mockIds.includes(s.id))
                 .map((s: EnrolledStudent) => ({ ...s, id: canonicalizeStudentId(s.id) }))
             );
-            this.saveStudents(cleanRemote);
+            const currentStored = this.getStoredStudents();
+            if (JSON.stringify(currentStored) !== JSON.stringify(cleanRemote)) {
+              this.saveStudents(cleanRemote);
+            }
             return cleanRemote;
           }
         }
@@ -662,10 +740,12 @@ export class AttendanceService {
     const students = this.getStoredStudents();
     const existingNums = students.map((s) => {
       const match = s.id.match(/^std-(\d+)$/i);
-      return match ? parseInt(match[1], 10) : 0;
+      if (!match) return 0;
+      const n = parseInt(match[1], 10);
+      return n < 10000 ? n : 0;
     });
     const maxNum = existingNums.length > 0 ? Math.max(...existingNums) : 0;
-    const nextNum = maxNum >= 19 ? maxNum + 1 : 20;
+    const nextNum = Math.max(19, maxNum) + 1;
     const nextId = `std-${String(nextNum).padStart(3, '0')}`;
 
     const newStudent: EnrolledStudent = {
