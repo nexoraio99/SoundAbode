@@ -27,9 +27,29 @@ export interface AttendanceRecord {
   updatedAt: string;
 }
 
+export const LEGACY_STUDENT_ID_MAP: Record<string, string> = {
+  'std-001': '6a80bc1c6a8952fb6f77991e',
+  'std-002': '6a80bc1c6a8952fb6f77991f',
+  'std-003': '6a80bc1c6a8952fb6f779920',
+  'std-004': '6a80bc1c6a8952fb6f779921',
+  'std-005': '6a80bc1c6a8952fb6f779922',
+  'std-007': '6a80bc1c6a8952fb6f779924',
+  'std-008': '6a80bc1c6a8952fb6f779925',
+  'std-009': '6a80bc1c6a8952fb6f779926',
+  'std-010': '6a80bc1c6a8952fb6f779927',
+  'std-011': '6a80bc1c6a8952fb6f779928',
+  'std-012': '6a80bc1c6a8952fb6f779929',
+  'std-013': '6a80bc1c6a8952fb6f77992a',
+};
+
+export function canonicalizeStudentId(id: string): string {
+  if (!id) return id;
+  return LEGACY_STUDENT_ID_MAP[id] || id;
+}
+
 const INITIAL_STUDENTS: EnrolledStudent[] = [
   {
-    id: 'std-001',
+    id: '6a80bc1c6a8952fb6f77991e',
     name: 'Shailendra Chakravarthy',
     email: 'shailendrachakravarthy8@gmail.com',
     phone: '9866514403/9307031006',
@@ -38,7 +58,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-01',
   },
   {
-    id: 'std-002',
+    id: '6a80bc1c6a8952fb6f77991f',
     name: 'Deeksha Vishwakarma',
     email: 'deekshavishwakarma705@gmail.com',
     phone: '8319948935/8819007910',
@@ -47,7 +67,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-01',
   },
   {
-    id: 'std-003',
+    id: '6a80bc1c6a8952fb6f779920',
     name: 'Sonal Shandilya',
     email: 'Sha.sonal@gmail.com',
     phone: '9798880002',
@@ -56,7 +76,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-02',
   },
   {
-    id: 'std-004',
+    id: '6a80bc1c6a8952fb6f779921',
     name: 'Ridhima Deshpande',
     email: 'ridhimadeshpande990@gmail.com',
     phone: '9527556666',
@@ -65,7 +85,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-03',
   },
   {
-    id: 'std-005',
+    id: '6a80bc1c6a8952fb6f779922',
     name: 'Pranavadeep Bagul',
     email: 'pranavdeeponly@gmail.com',
     phone: '9322060312',
@@ -74,16 +94,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-04',
   },
   {
-    id: 'std-006',
-    name: 'Anuj Aware',
-    email: 'anujawasare0457@gmail.com',
-    phone: '8975066947',
-    course: 'Basic DJ training',
-    batch: 'Regular Batch',
-    enrolledDate: '2026-08-05',
-  },
-  {
-    id: 'std-007',
+    id: '6a80bc1c6a8952fb6f779924',
     name: 'Chaitanya Jain',
     email: 'djchaitanyajain100@gmail.com',
     phone: '9172902597',
@@ -92,7 +103,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-06',
   },
   {
-    id: 'std-008',
+    id: '6a80bc1c6a8952fb6f779925',
     name: 'Kush Kachoriya',
     email: 'Kk.wav.work@gmail.com',
     phone: '7046029474',
@@ -101,7 +112,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-07',
   },
   {
-    id: 'std-009',
+    id: '6a80bc1c6a8952fb6f779926',
     name: 'Yogesh Kashid',
     email: 'kashidyogesh096@gmail.com',
     phone: '7875547537',
@@ -110,7 +121,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-08',
   },
   {
-    id: 'std-010',
+    id: '6a80bc1c6a8952fb6f779927',
     name: 'Rohit Govvilkar',
     email: 'rohietgovvilkar@gmail.com',
     phone: '8767607223',
@@ -119,7 +130,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-09',
   },
   {
-    id: 'std-011',
+    id: '6a80bc1c6a8952fb6f779928',
     name: 'Devansh Prasad',
     email: 'regurgmusic@gmail.com',
     phone: '9381340066',
@@ -128,7 +139,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-10',
   },
   {
-    id: 'std-012',
+    id: '6a80bc1c6a8952fb6f779929',
     name: 'Tavjot Singh',
     email: 'tavjyotsingh76782222@gmail.com',
     phone: '7678115930',
@@ -137,13 +148,76 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-11',
   },
   {
-    id: 'std-013',
+    id: '6a80bc1c6a8952fb6f77992a',
     name: 'Sharvil Sonawane',
     email: '',
     phone: '9158979991/9049499991',
     course: 'Beginner electronic music production',
     batch: 'Regular Batch',
     enrolledDate: '2026-08-12',
+  },
+  {
+    id: '6a81b980c9c1d901c1788bfb',
+    name: 'Gurbani Singh',
+    email: 'gurbanisingh040208@gmail.com',
+    phone: '7009385250',
+    course: 'Basic DJ Course',
+    batch: 'Regular Studio Batch (Mon/Wed/Fri)',
+    enrolledDate: '2026-08-09',
+  },
+  {
+    id: '6a82f66ac9c1d901c179c0ec',
+    name: 'Guruprasad Dabhekar',
+    email: 'dabhekarguruprasad894@gmail.com',
+    phone: '8857092595 / 9921228622',
+    course: 'Basic DJ Course',
+    batch: 'Regular Studio Batch (Mon/Wed/Fri)',
+    enrolledDate: '2026-07-28',
+  },
+  {
+    id: '6a85b66bc9c1d901c17a2b2d',
+    name: 'Priyanka Bramhane',
+    email: 'priyankaingle01@gmail.com',
+    phone: '8446383170',
+    course: 'Complete DJ Training Course (Level 01 + Level 02)',
+    batch: 'Regular DJ Studio Batch',
+    enrolledDate: '2026-08-22',
+  },
+  {
+    id: '6a875146c9c1d901c17a3abc',
+    name: 'Bela Lomash ',
+    email: 'blomash@gmail.com',
+    phone: '+1 (562) 981-4693',
+    course: 'Basic DJ Course',
+    batch: 'Regular Studio Batch (Mon/Wed/Fri)',
+    enrolledDate: '2026-08-01',
+  },
+  {
+    id: '6a8c4aabc9c1d901c17bffc6',
+    name: 'Devesh Walke',
+    email: 'deveshwalke83@gmail.com',
+    phone: '9607792149',
+    course: 'Beginner Electronic Music Production',
+    batch: 'Regular EMP Studio Batch',
+    enrolledDate: '2026-08-24',
+  },
+  {
+    id: '6a95898ec1a9dab435071ed9',
+    name: 'Melrick Mascarenhas',
+    email: 'melrickmascarenhas447@gmail.com',
+    phone: '7795903902',
+    course: 'Beginner Electronic Music Production',
+    batch: 'Regular EMP Studio Batch',
+    enrolledDate: '2026-08-31',
+  },
+  {
+    id: '6a9a8b8cc1a9dab4350c0472',
+    name: 'Rahul Saha',
+    email: 'saharahul891@gmail.com',
+    phone: '8999107403',
+    course: 'Complete DJ Training Course (Level 01 + Level 02)',
+    batch: 'Regular DJ Studio Batch',
+    enrolledDate: '2026-09-04',
   },
 ];
 
@@ -264,12 +338,20 @@ export class AttendanceService {
         const parsed: EnrolledStudent[] = JSON.parse(stored);
         const mockIds = ['std-101', 'std-201', 'std-202', 'std-203', 'std-204', 'std-205', 'std-206', 'std-207', 'std-208', 'std-209', 'std-210', 'std-211', 'std-212', 'std-213', 'std-214', 'std-215', 'std-216', 'std-217', 'std-218'];
         const realStudents = parsed.filter((s) => !mockIds.includes(s.id));
-        if (realStudents.length > 0) {
-          if (realStudents.length !== parsed.length) {
-            this.saveStudents(realStudents);
-          }
+        if (realStudents.length >= INITIAL_STUDENTS.length) {
           return realStudents;
         }
+        // If stored has older/fewer students, merge with INITIAL_STUDENTS
+        const mergedMap = new Map<string, EnrolledStudent>();
+        INITIAL_STUDENTS.forEach((s) => mergedMap.set(s.id, s));
+        realStudents.forEach((s) => {
+          const canonicalId = canonicalizeStudentId(s.id);
+          const existing = mergedMap.get(canonicalId);
+          mergedMap.set(canonicalId, { ...(existing || {}), ...s, id: canonicalId });
+        });
+        const merged = Array.from(mergedMap.values());
+        this.saveStudents(merged);
+        return merged;
       }
     } catch {
       // Fallback
@@ -535,7 +617,8 @@ export class AttendanceService {
   }
 
   public static getStudentById(id: string): EnrolledStudent | undefined {
-    return this.getStoredStudents().find((s) => s.id === id);
+    const canonicalId = canonicalizeStudentId(id);
+    return this.getStoredStudents().find((s) => s.id === canonicalId || s.id === id);
   }
 
   public static addStudent(payload: Omit<EnrolledStudent, 'id'>): EnrolledStudent {

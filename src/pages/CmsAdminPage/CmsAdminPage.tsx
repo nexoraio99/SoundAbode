@@ -4,7 +4,7 @@ import admissionStyles from '../AdmissionPage/AdmissionPage.module.css';
 import SEO from '../../components/common/SEO';
 import { BlogService } from '../../services/blogService';
 import { InquiryService, ContactInquiry } from '../../services/inquiryService';
-import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord } from '../../services/attendanceService';
+import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord, canonicalizeStudentId } from '../../services/attendanceService';
 import { AdmissionService, AdmissionSubmission } from '../../services/admissionService';
 import { AuthService, CmsUser } from '../../services/authService';
 import { getApiBaseUrl } from '../../services/apiConfig';
@@ -219,7 +219,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   // Data states
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [inquiries, setInquiries] = useState<ContactInquiry[]>([]);
-  const [students, setStudents] = useState<EnrolledStudent[]>([]);
+  const [students, setStudents] = useState<EnrolledStudent[]>(() => AttendanceService.getAllStudents());
   const [admissions, setAdmissions] = useState<AdmissionSubmission[]>([]);
 
   // Search & Filter states
@@ -1122,16 +1122,22 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   };
 
   const handleToggleSelectGroupStudent = (studentId: string) => {
-    setSelectedGroupStudentIds((prev) =>
-      prev.includes(studentId) ? prev.filter((id) => id !== studentId) : [...prev, studentId]
-    );
+    const canonicalId = canonicalizeStudentId(studentId);
+    setSelectedGroupStudentIds((prev) => {
+      const exists = prev.some((id) => canonicalizeStudentId(id) === canonicalId);
+      if (exists) {
+        return prev.filter((id) => canonicalizeStudentId(id) !== canonicalId);
+      } else {
+        return [...prev, canonicalId];
+      }
+    });
   };
 
   const handleToggleSelectAllGroupStudents = () => {
     if (selectedGroupStudentIds.length === students.length) {
       setSelectedGroupStudentIds([]);
     } else {
-      setSelectedGroupStudentIds(students.map((s) => s.id));
+      setSelectedGroupStudentIds(students.map((s) => canonicalizeStudentId(s.id)));
     }
   };
 
@@ -1762,10 +1768,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     : [];
 
   const getOrFallbackStudent = (studentId: string, record?: AttendanceRecord): EnrolledStudent => {
-    const existing = students.find((s) => s.id === studentId);
+    const canonicalId = canonicalizeStudentId(studentId);
+    const existing = students.find((s) => s.id === canonicalId || s.id === studentId);
     if (existing) return existing;
     return {
-      id: studentId,
+      id: canonicalId || studentId,
       name: (record as any)?.studentName || `Student (${studentId})`,
       email: (record as any)?.studentEmail || '',
       phone: (record as any)?.studentPhone || '',
@@ -1924,13 +1931,93 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     const parsedTime = parseTimeSlotToInputs(session.timeSlot);
     setGroupCustomTimeStart(parsedTime.start);
     setGroupCustomTimeEnd(parsedTime.end);
-    setSelectedGroupStudentIds(session.studentIds);
+    const canonicalIds = (session.studentIds || []).map((id) => canonicalizeStudentId(id));
+    setSelectedGroupStudentIds(canonicalIds);
     setGroupSessionStatus('GROUP_SESSION');
     setGroupSessionComment(session.comment || '');
     setIsGroupAttendanceModalOpen(true);
   };
 
   // ─── CLASSES SECTION COMPUTATIONS & HANDLERS (ADMIN ONLY) ───────────────────
+  const isDateInPreset = (dateStr: string, preset: typeof classesDatePreset, customDate: string) => {
+    if (preset === 'ALL') return true;
+    if (preset === 'CUSTOM') return !customDate || dateStr === customDate;
+
+    const now = new Date();
+    const todayStr = formatLocalDateStr(now.getFullYear(), now.getMonth(), now.getDate());
+
+    if (preset === 'TODAY') {
+      return dateStr === todayStr;
+    }
+
+    if (preset === 'YESTERDAY') {
+      const yDate = new Date(now);
+      yDate.setDate(yDate.getDate() - 1);
+      const yesterdayStr = formatLocalDateStr(yDate.getFullYear(), yDate.getMonth(), yDate.getDate());
+      return dateStr === yesterdayStr;
+    }
+
+    if (preset === 'THIS_WEEK') {
+      const startOfWeek = new Date(now);
+      const day = startOfWeek.getDay();
+      const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+      startOfWeek.setDate(diff);
+      const startOfWeekStr = formatLocalDateStr(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate());
+      return dateStr >= startOfWeekStr && dateStr <= todayStr;
+    }
+
+    if (preset === 'THIS_MONTH') {
+      const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      return dateStr.startsWith(currentYearMonth);
+    }
+
+    return true;
+  };
+
+  const hasActiveClassesFilter = useMemo(() => {
+    return (
+      classesTeacherFilter !== 'ALL' ||
+      classesStatusFilter !== 'ALL' ||
+      classesDatePreset !== 'ALL' ||
+      classesCourseFilter !== 'ALL' ||
+      Boolean(classesSearch.trim())
+    );
+  }, [classesTeacherFilter, classesStatusFilter, classesDatePreset, classesCourseFilter, classesSearch]);
+
+  // Records filtered by Date, Status, Course, and Search (cross-teacher context)
+  const contextFilteredRecords = useMemo(() => {
+    return allAttendanceRecords.filter((r) => {
+      if (classesStatusFilter !== 'ALL' && r.status !== classesStatusFilter) {
+        return false;
+      }
+      if (!isDateInPreset(r.date, classesDatePreset, classesCustomDate)) {
+        return false;
+      }
+      if (classesCourseFilter !== 'ALL') {
+        const st = getOrFallbackStudent(r.studentId, r);
+        if (st.course !== classesCourseFilter) return false;
+      }
+      if (classesSearch.trim()) {
+        const q = classesSearch.toLowerCase().trim();
+        const st = getOrFallbackStudent(r.studentId, r);
+        const matchesStudent =
+          st.name.toLowerCase().includes(q) ||
+          (st.email || '').toLowerCase().includes(q) ||
+          (st.phone || '').toLowerCase().includes(q);
+        const matchesTeacher =
+          (r.markedByName || '').toLowerCase().includes(q) ||
+          (r.markedBy || '').toLowerCase().includes(q);
+        const matchesSlot = (r.timeSlot || '').toLowerCase().includes(q);
+        const matchesDate = (r.date || '').toLowerCase().includes(q);
+        const matchesComment = (r.comment || '').toLowerCase().includes(q);
+        if (!matchesStudent && !matchesTeacher && !matchesSlot && !matchesDate && !matchesComment) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [allAttendanceRecords, classesStatusFilter, classesDatePreset, classesCustomDate, classesCourseFilter, classesSearch, students]);
+
   const teacherAshuRecords = useMemo(() => {
     return allAttendanceRecords.filter((r) => {
       const by = (r.markedBy || '').toLowerCase();
@@ -1966,14 +2053,41 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     });
   }, [allAttendanceRecords]);
 
-  // Studio-wide group sessions calculation (distinct date + timeSlot combinations)
-  const totalGroupRecords = useMemo(() => {
-    return allAttendanceRecords.filter((r) => r.status === 'GROUP_SESSION');
-  }, [allAttendanceRecords]);
+  const filteredAshuRecords = useMemo(() => {
+    return contextFilteredRecords.filter((r) => {
+      const by = (r.markedBy || '').toLowerCase();
+      const name = (r.markedByName || '').toLowerCase();
+      return by.includes('ashu') || name.includes('ashu');
+    });
+  }, [contextFilteredRecords]);
 
-  const studioGroupSessionsCount = useMemo(() => {
-    return new Set(totalGroupRecords.map((r) => `${r.date}_${r.timeSlot}`)).size;
-  }, [totalGroupRecords]);
+  const filteredVaibhavRecords = useMemo(() => {
+    return contextFilteredRecords.filter((r) => {
+      const by = (r.markedBy || '').toLowerCase();
+      const name = (r.markedByName || '').toLowerCase();
+      return by.includes('vaibhav') || name.includes('vaibhav');
+    });
+  }, [contextFilteredRecords]);
+
+  const filteredVrishanRecords = useMemo(() => {
+    return contextFilteredRecords.filter((r) => {
+      const by = (r.markedBy || '').toLowerCase();
+      const name = (r.markedByName || '').toLowerCase();
+      return by.includes('vrishan') || name.includes('vrishan');
+    });
+  }, [contextFilteredRecords]);
+
+  const filteredAbhinavRecords = useMemo(() => {
+    return contextFilteredRecords.filter((r) => {
+      const by = (r.markedBy || '').toLowerCase();
+      const name = (r.markedByName || '').toLowerCase();
+      const isAshu = by.includes('ashu') || name.includes('ashu');
+      const isVaibhav = by.includes('vaibhav') || name.includes('vaibhav');
+      const isVrishan = by.includes('vrishan') || name.includes('vrishan');
+      return !isAshu && !isVaibhav && !isVrishan;
+    });
+  }, [contextFilteredRecords]);
+
 
   const distinctCourses = useMemo(() => {
     const courses = new Set<string>();
@@ -1984,41 +2098,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     });
     return Array.from(courses);
   }, [students, allAttendanceRecords]);
-
-  const isDateInPreset = (dateStr: string, preset: typeof classesDatePreset, customDate: string) => {
-    if (preset === 'ALL') return true;
-    if (preset === 'CUSTOM') return !customDate || dateStr === customDate;
-
-    const now = new Date();
-    const todayStr = formatLocalDateStr(now.getFullYear(), now.getMonth(), now.getDate());
-
-    if (preset === 'TODAY') {
-      return dateStr === todayStr;
-    }
-
-    if (preset === 'YESTERDAY') {
-      const yDate = new Date(now);
-      yDate.setDate(yDate.getDate() - 1);
-      const yesterdayStr = formatLocalDateStr(yDate.getFullYear(), yDate.getMonth(), yDate.getDate());
-      return dateStr === yesterdayStr;
-    }
-
-    if (preset === 'THIS_WEEK') {
-      const startOfWeek = new Date(now);
-      const day = startOfWeek.getDay();
-      const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
-      startOfWeek.setDate(diff);
-      const startOfWeekStr = formatLocalDateStr(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate());
-      return dateStr >= startOfWeekStr && dateStr <= todayStr;
-    }
-
-    if (preset === 'THIS_MONTH') {
-      const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      return dateStr.startsWith(currentYearMonth);
-    }
-
-    return true;
-  };
 
   const allClassesLogEntries = useMemo<ClassLogEntry[]>(() => {
     const entries: ClassLogEntry[] = [];
@@ -2176,16 +2255,18 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   ]);
 
   const ashuAnalytics = useMemo(() => {
-    const total = teacherAshuRecords.length;
-    const present = teacherAshuRecords.filter((r) => r.status === 'PRESENT').length;
-    const absent = teacherAshuRecords.filter((r) => r.status === 'ABSENT').length;
-    const practice = teacherAshuRecords.filter((r) => r.status === 'PRACTICE_SESSION').length;
-    const groupRecords = teacherAshuRecords.filter((r) => r.status === 'GROUP_SESSION');
+    const isContextFiltered = classesDatePreset !== 'ALL' || classesStatusFilter !== 'ALL' || classesCourseFilter !== 'ALL' || Boolean(classesSearch.trim());
+    const records = isContextFiltered ? filteredAshuRecords : teacherAshuRecords;
+    const total = records.length;
+    const present = records.filter((r) => r.status === 'PRESENT').length;
+    const absent = records.filter((r) => r.status === 'ABSENT').length;
+    const practice = records.filter((r) => r.status === 'PRACTICE_SESSION').length;
+    const groupRecords = records.filter((r) => r.status === 'GROUP_SESSION');
     const group = groupRecords.length;
     const groupSessionsCount = new Set(groupRecords.map((r) => `${r.date}_${r.timeSlot}`)).size;
-    const uniqueStudentIds = Array.from(new Set(teacherAshuRecords.map((r) => r.studentId)));
+    const uniqueStudentIds = Array.from(new Set(records.map((r) => r.studentId)));
     const uniqueStudents = uniqueStudentIds.map((id) => students.find((s) => s.id === id)).filter((s): s is EnrolledStudent => Boolean(s));
-    const dates = Array.from(new Set(teacherAshuRecords.map((r) => r.date))).sort().reverse();
+    const dates = Array.from(new Set(records.map((r) => r.date))).sort().reverse();
     const lastActiveDate = dates[0] || 'No sessions yet';
     const presentRate = total > 0 ? Math.round(((present + practice + group) / total) * 100) : 0;
 
@@ -2202,19 +2283,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       presentRate,
       datesCount: dates.length,
     };
-  }, [teacherAshuRecords, students]);
+  }, [teacherAshuRecords, filteredAshuRecords, students, classesDatePreset, classesStatusFilter, classesCourseFilter, classesSearch]);
 
   const vaibhavAnalytics = useMemo(() => {
-    const total = teacherVaibhavRecords.length;
-    const present = teacherVaibhavRecords.filter((r) => r.status === 'PRESENT').length;
-    const absent = teacherVaibhavRecords.filter((r) => r.status === 'ABSENT').length;
-    const practice = teacherVaibhavRecords.filter((r) => r.status === 'PRACTICE_SESSION').length;
-    const groupRecords = teacherVaibhavRecords.filter((r) => r.status === 'GROUP_SESSION');
+    const isContextFiltered = classesDatePreset !== 'ALL' || classesStatusFilter !== 'ALL' || classesCourseFilter !== 'ALL' || Boolean(classesSearch.trim());
+    const records = isContextFiltered ? filteredVaibhavRecords : teacherVaibhavRecords;
+    const total = records.length;
+    const present = records.filter((r) => r.status === 'PRESENT').length;
+    const absent = records.filter((r) => r.status === 'ABSENT').length;
+    const practice = records.filter((r) => r.status === 'PRACTICE_SESSION').length;
+    const groupRecords = records.filter((r) => r.status === 'GROUP_SESSION');
     const group = groupRecords.length;
     const groupSessionsCount = new Set(groupRecords.map((r) => `${r.date}_${r.timeSlot}`)).size;
-    const uniqueStudentIds = Array.from(new Set(teacherVaibhavRecords.map((r) => r.studentId)));
+    const uniqueStudentIds = Array.from(new Set(records.map((r) => r.studentId)));
     const uniqueStudents = uniqueStudentIds.map((id) => students.find((s) => s.id === id)).filter((s): s is EnrolledStudent => Boolean(s));
-    const dates = Array.from(new Set(teacherVaibhavRecords.map((r) => r.date))).sort().reverse();
+    const dates = Array.from(new Set(records.map((r) => r.date))).sort().reverse();
     const lastActiveDate = dates[0] || 'No sessions yet';
     const presentRate = total > 0 ? Math.round(((present + practice + group) / total) * 100) : 0;
 
@@ -2231,19 +2314,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       presentRate,
       datesCount: dates.length,
     };
-  }, [teacherVaibhavRecords, students]);
+  }, [teacherVaibhavRecords, filteredVaibhavRecords, students, classesDatePreset, classesStatusFilter, classesCourseFilter, classesSearch]);
 
   const vrishanAnalytics = useMemo(() => {
-    const total = teacherVrishanRecords.length;
-    const present = teacherVrishanRecords.filter((r) => r.status === 'PRESENT').length;
-    const absent = teacherVrishanRecords.filter((r) => r.status === 'ABSENT').length;
-    const practice = teacherVrishanRecords.filter((r) => r.status === 'PRACTICE_SESSION').length;
-    const groupRecords = teacherVrishanRecords.filter((r) => r.status === 'GROUP_SESSION');
+    const isContextFiltered = classesDatePreset !== 'ALL' || classesStatusFilter !== 'ALL' || classesCourseFilter !== 'ALL' || Boolean(classesSearch.trim());
+    const records = isContextFiltered ? filteredVrishanRecords : teacherVrishanRecords;
+    const total = records.length;
+    const present = records.filter((r) => r.status === 'PRESENT').length;
+    const absent = records.filter((r) => r.status === 'ABSENT').length;
+    const practice = records.filter((r) => r.status === 'PRACTICE_SESSION').length;
+    const groupRecords = records.filter((r) => r.status === 'GROUP_SESSION');
     const group = groupRecords.length;
     const groupSessionsCount = new Set(groupRecords.map((r) => `${r.date}_${r.timeSlot}`)).size;
-    const uniqueStudentIds = Array.from(new Set(teacherVrishanRecords.map((r) => r.studentId)));
+    const uniqueStudentIds = Array.from(new Set(records.map((r) => r.studentId)));
     const uniqueStudents = uniqueStudentIds.map((id) => students.find((s) => s.id === id)).filter((s): s is EnrolledStudent => Boolean(s));
-    const dates = Array.from(new Set(teacherVrishanRecords.map((r) => r.date))).sort().reverse();
+    const dates = Array.from(new Set(records.map((r) => r.date))).sort().reverse();
     const lastActiveDate = dates[0] || 'No sessions yet';
     const presentRate = total > 0 ? Math.round(((present + practice + group) / total) * 100) : 0;
 
@@ -2260,19 +2345,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       presentRate,
       datesCount: dates.length,
     };
-  }, [teacherVrishanRecords, students]);
+  }, [teacherVrishanRecords, filteredVrishanRecords, students, classesDatePreset, classesStatusFilter, classesCourseFilter, classesSearch]);
 
   const abhinavAnalytics = useMemo(() => {
-    const total = teacherAbhinavRecords.length;
-    const present = teacherAbhinavRecords.filter((r) => r.status === 'PRESENT').length;
-    const absent = teacherAbhinavRecords.filter((r) => r.status === 'ABSENT').length;
-    const practice = teacherAbhinavRecords.filter((r) => r.status === 'PRACTICE_SESSION').length;
-    const groupRecords = teacherAbhinavRecords.filter((r) => r.status === 'GROUP_SESSION');
+    const isContextFiltered = classesDatePreset !== 'ALL' || classesStatusFilter !== 'ALL' || classesCourseFilter !== 'ALL' || Boolean(classesSearch.trim());
+    const records = isContextFiltered ? filteredAbhinavRecords : teacherAbhinavRecords;
+    const total = records.length;
+    const present = records.filter((r) => r.status === 'PRESENT').length;
+    const absent = records.filter((r) => r.status === 'ABSENT').length;
+    const practice = records.filter((r) => r.status === 'PRACTICE_SESSION').length;
+    const groupRecords = records.filter((r) => r.status === 'GROUP_SESSION');
     const group = groupRecords.length;
     const groupSessionsCount = new Set(groupRecords.map((r) => `${r.date}_${r.timeSlot}`)).size;
-    const uniqueStudentIds = Array.from(new Set(teacherAbhinavRecords.map((r) => r.studentId)));
+    const uniqueStudentIds = Array.from(new Set(records.map((r) => r.studentId)));
     const uniqueStudents = uniqueStudentIds.map((id) => students.find((s) => s.id === id)).filter((s): s is EnrolledStudent => Boolean(s));
-    const dates = Array.from(new Set(teacherAbhinavRecords.map((r) => r.date))).sort().reverse();
+    const dates = Array.from(new Set(records.map((r) => r.date))).sort().reverse();
     const lastActiveDate = dates[0] || 'No sessions yet';
     const presentRate = total > 0 ? Math.round(((present + practice + group) / total) * 100) : 0;
 
@@ -2289,7 +2376,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       presentRate,
       datesCount: dates.length,
     };
-  }, [teacherAbhinavRecords, students]);
+  }, [teacherAbhinavRecords, filteredAbhinavRecords, students, classesDatePreset, classesStatusFilter, classesCourseFilter, classesSearch]);
 
   const handleExportClassesCSV = () => {
     const headers = [
@@ -3673,15 +3760,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     Teacher Classes &amp; Attendance Logs
                   </h1>
                   <div className={styles.pageMetaBadge}>
-                    <span>{allAttendanceRecords.length} total sessions logged</span>
+                    <span>
+                      {hasActiveClassesFilter ? (
+                        <>Showing <strong>{filteredClassesRecords.length}</strong> of {allAttendanceRecords.length} sessions (Filtered)</>
+                      ) : (
+                        <>{allAttendanceRecords.length} total sessions logged</>
+                      )}
+                    </span>
                     <span>•</span>
-                    <span>Ashu ({teacherAshuRecords.length})</span>
+                    <span>Ashu ({filteredAshuRecords.length})</span>
                     <span>•</span>
-                    <span>Vaibhav ({teacherVaibhavRecords.length})</span>
+                    <span>Vaibhav ({filteredVaibhavRecords.length})</span>
                     <span>•</span>
-                    <span>Vrishan ({teacherVrishanRecords.length})</span>
+                    <span>Vrishan ({filteredVrishanRecords.length})</span>
                     <span>•</span>
-                    <span>Abhinav ({teacherAbhinavRecords.length})</span>
+                    <span>Abhinav ({filteredAbhinavRecords.length})</span>
                   </div>
                 </div>
 
@@ -3751,22 +3844,22 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         {currentUser?.email}
                       </span>
                     </div>
-                    <div className={styles.summaryStatCount}>{allAttendanceRecords.length}</div>
+                    <div className={styles.summaryStatCount}>{contextFilteredRecords.length}</div>
                     <div className={styles.summaryStatMeta}>
                       <span className={styles.summaryStatMetaItem}>
-                        Present: <span className={styles.summaryStatMetaNum}>{allAttendanceRecords.filter(r => r.status === 'PRESENT').length}</span>
+                        Present: <span className={styles.summaryStatMetaNum}>{contextFilteredRecords.filter(r => r.status === 'PRESENT').length}</span>
                       </span>
                       <span>•</span>
                       <span className={styles.summaryStatMetaItem}>
-                        Absent: <span className={styles.summaryStatMetaNum}>{allAttendanceRecords.filter(r => r.status === 'ABSENT').length}</span>
+                        Absent: <span className={styles.summaryStatMetaNum}>{contextFilteredRecords.filter(r => r.status === 'ABSENT').length}</span>
                       </span>
                       <span>•</span>
                       <span className={styles.summaryStatMetaItem}>
-                        Group Sessions: <span className={styles.summaryStatMetaNum}>{studioGroupSessionsCount} ({totalGroupRecords.length} st)</span>
+                        Group Sessions: <span className={styles.summaryStatMetaNum}>{new Set(contextFilteredRecords.filter(r => r.status === 'GROUP_SESSION').map(r => `${r.date}_${r.timeSlot}`)).size} ({contextFilteredRecords.filter(r => r.status === 'GROUP_SESSION').length} st)</span>
                       </span>
                       <span>•</span>
                       <span className={styles.summaryStatMetaItem}>
-                        Students: <span className={styles.summaryStatMetaNum}>{new Set(allAttendanceRecords.map(r => r.studentId)).size}</span>
+                        Students: <span className={styles.summaryStatMetaNum}>{new Set(contextFilteredRecords.map(r => r.studentId)).size}</span>
                       </span>
                     </div>
                   </div>
@@ -3774,7 +3867,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   /* Admin multi-teacher overview */
                   <>
                     {/* Ashu Block */}
-                    <div className={styles.summaryStatBlock}>
+                    <div
+                      className={styles.summaryStatBlock}
+                      style={{
+                        border: classesTeacherFilter === 'ashu' ? '1px solid #38bdf8' : '1px solid var(--border-subtle)',
+                        background: classesTeacherFilter === 'ashu' ? 'rgba(56, 189, 248, 0.08)' : 'var(--bg-surface)',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
                       <div className={styles.summaryStatHeader}>
                         <span className={styles.summaryStatTitle}>Teacher Ashu</span>
                         <button
@@ -3783,7 +3883,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             const next = classesTeacherFilter === 'ashu' ? 'ALL' : 'ashu';
                             setClassesTeacherFilter(next);
                           }}
-                          className={styles.filterPill}
+                          className={`${styles.filterPill} ${classesTeacherFilter === 'ashu' ? styles.filterPillActive : ''}`}
                           style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
                         >
                           {classesTeacherFilter === 'ashu' ? 'Active' : 'Filter'}
@@ -3810,7 +3910,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </div>
 
                     {/* Vaibhav Block */}
-                    <div className={styles.summaryStatBlock}>
+                    <div
+                      className={styles.summaryStatBlock}
+                      style={{
+                        border: classesTeacherFilter === 'vaibhav' ? '1px solid #38bdf8' : '1px solid var(--border-subtle)',
+                        background: classesTeacherFilter === 'vaibhav' ? 'rgba(56, 189, 248, 0.08)' : 'var(--bg-surface)',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
                       <div className={styles.summaryStatHeader}>
                         <span className={styles.summaryStatTitle}>Teacher Vaibhav</span>
                         <button
@@ -3819,7 +3926,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             const next = classesTeacherFilter === 'vaibhav' ? 'ALL' : 'vaibhav';
                             setClassesTeacherFilter(next);
                           }}
-                          className={styles.filterPill}
+                          className={`${styles.filterPill} ${classesTeacherFilter === 'vaibhav' ? styles.filterPillActive : ''}`}
                           style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
                         >
                           {classesTeacherFilter === 'vaibhav' ? 'Active' : 'Filter'}
@@ -3846,7 +3953,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </div>
 
                     {/* Vrishan Block */}
-                    <div className={styles.summaryStatBlock}>
+                    <div
+                      className={styles.summaryStatBlock}
+                      style={{
+                        border: classesTeacherFilter === 'vrishan' ? '1px solid #38bdf8' : '1px solid var(--border-subtle)',
+                        background: classesTeacherFilter === 'vrishan' ? 'rgba(56, 189, 248, 0.08)' : 'var(--bg-surface)',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
                       <div className={styles.summaryStatHeader}>
                         <span className={styles.summaryStatTitle}>Teacher Vrishan</span>
                         <button
@@ -3855,7 +3969,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             const next = classesTeacherFilter === 'vrishan' ? 'ALL' : 'vrishan';
                             setClassesTeacherFilter(next);
                           }}
-                          className={styles.filterPill}
+                          className={`${styles.filterPill} ${classesTeacherFilter === 'vrishan' ? styles.filterPillActive : ''}`}
                           style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
                         >
                           {classesTeacherFilter === 'vrishan' ? 'Active' : 'Filter'}
@@ -3882,7 +3996,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </div>
 
                     {/* Abhinav Block */}
-                    <div className={styles.summaryStatBlock}>
+                    <div
+                      className={styles.summaryStatBlock}
+                      style={{
+                        border: classesTeacherFilter === 'abhinav' ? '1px solid #38bdf8' : '1px solid var(--border-subtle)',
+                        background: classesTeacherFilter === 'abhinav' ? 'rgba(56, 189, 248, 0.08)' : 'var(--bg-surface)',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
                       <div className={styles.summaryStatHeader}>
                         <span className={styles.summaryStatTitle}>Abhinav</span>
                         <button
@@ -3891,7 +4012,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             const next = classesTeacherFilter === 'abhinav' ? 'ALL' : 'abhinav';
                             setClassesTeacherFilter(next);
                           }}
-                          className={styles.filterPill}
+                          className={`${styles.filterPill} ${classesTeacherFilter === 'abhinav' ? styles.filterPillActive : ''}`}
                           style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
                         >
                           {classesTeacherFilter === 'abhinav' ? 'Active' : 'Filter'}
@@ -3918,15 +4039,28 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </div>
 
                     {/* Studio Total Block */}
-                    <div className={styles.summaryStatBlock}>
+                    <div
+                      className={styles.summaryStatBlock}
+                      style={{
+                        border: hasActiveClassesFilter ? '1px solid #38bdf8' : '1px solid var(--border-subtle)',
+                        background: hasActiveClassesFilter ? 'rgba(56, 189, 248, 0.05)' : 'var(--bg-surface)',
+                      }}
+                    >
                       <div className={styles.summaryStatHeader}>
-                        <span className={styles.summaryStatTitle}>Studio Total</span>
+                        <span className={styles.summaryStatTitle}>
+                          {classesTeacherFilter !== 'ALL'
+                            ? `${classesTeacherFilter.toUpperCase()} Active`
+                            : hasActiveClassesFilter
+                            ? 'Filtered Total'
+                            : 'Studio Total'}
+                        </span>
                         <button
                           type="button"
                           onClick={() => {
                             setClassesTeacherFilter('ALL');
                             setClassesStatusFilter('ALL');
                             setClassesDatePreset('ALL');
+                            setClassesCustomDate('');
                             setClassesCourseFilter('ALL');
                             setClassesSearch('');
                           }}
@@ -3936,18 +4070,44 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           Reset
                         </button>
                       </div>
-                      <div className={styles.summaryStatCount}>{allAttendanceRecords.length}</div>
+                      <div className={styles.summaryStatCount}>
+                        {classesTeacherFilter !== 'ALL'
+                          ? (classesTeacherFilter === 'ashu' ? filteredAshuRecords.length : classesTeacherFilter === 'vaibhav' ? filteredVaibhavRecords.length : classesTeacherFilter === 'vrishan' ? filteredVrishanRecords.length : filteredAbhinavRecords.length)
+                          : contextFilteredRecords.length}
+                      </div>
                       <div className={styles.summaryStatMeta}>
                         <span className={styles.summaryStatMetaItem}>
-                          Present: <span className={styles.summaryStatMetaNum}>{allAttendanceRecords.filter(r => r.status === 'PRESENT').length}</span>
+                          Present:{' '}
+                          <span className={styles.summaryStatMetaNum}>
+                            {(classesTeacherFilter !== 'ALL'
+                              ? (classesTeacherFilter === 'ashu' ? filteredAshuRecords : classesTeacherFilter === 'vaibhav' ? filteredVaibhavRecords : classesTeacherFilter === 'vrishan' ? filteredVrishanRecords : filteredAbhinavRecords)
+                              : contextFilteredRecords
+                            ).filter(r => r.status === 'PRESENT').length}
+                          </span>
                         </span>
                         <span>•</span>
                         <span className={styles.summaryStatMetaItem}>
-                          Absent: <span className={styles.summaryStatMetaNum}>{allAttendanceRecords.filter(r => r.status === 'ABSENT').length}</span>
+                          Absent:{' '}
+                          <span className={styles.summaryStatMetaNum}>
+                            {(classesTeacherFilter !== 'ALL'
+                              ? (classesTeacherFilter === 'ashu' ? filteredAshuRecords : classesTeacherFilter === 'vaibhav' ? filteredVaibhavRecords : classesTeacherFilter === 'vrishan' ? filteredVrishanRecords : filteredAbhinavRecords)
+                              : contextFilteredRecords
+                            ).filter(r => r.status === 'ABSENT').length}
+                          </span>
                         </span>
                         <span>•</span>
                         <span className={styles.summaryStatMetaItem}>
-                          Group: <span className={styles.summaryStatMetaNum}>{studioGroupSessionsCount} ({totalGroupRecords.length} students)</span>
+                          Group:{' '}
+                          <span className={styles.summaryStatMetaNum}>
+                            {new Set((classesTeacherFilter !== 'ALL'
+                              ? (classesTeacherFilter === 'ashu' ? filteredAshuRecords : classesTeacherFilter === 'vaibhav' ? filteredVaibhavRecords : classesTeacherFilter === 'vrishan' ? filteredVrishanRecords : filteredAbhinavRecords)
+                              : contextFilteredRecords
+                            ).filter(r => r.status === 'GROUP_SESSION').map(r => `${r.date}_${r.timeSlot}`)).size}{' '}
+                            ({(classesTeacherFilter !== 'ALL'
+                              ? (classesTeacherFilter === 'ashu' ? filteredAshuRecords : classesTeacherFilter === 'vaibhav' ? filteredVaibhavRecords : classesTeacherFilter === 'vrishan' ? filteredVrishanRecords : filteredAbhinavRecords)
+                              : contextFilteredRecords
+                            ).filter(r => r.status === 'GROUP_SESSION').length} st)
+                          </span>
                         </span>
                       </div>
                     </div>
@@ -3987,35 +4147,35 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       onClick={() => setClassesTeacherFilter('ALL')}
                       className={`${styles.filterPill} ${classesTeacherFilter === 'ALL' ? styles.filterPillActive : ''}`}
                     >
-                      All ({allAttendanceRecords.length})
+                      All ({contextFilteredRecords.length})
                     </button>
                     <button
                       type="button"
-                      onClick={() => setClassesTeacherFilter('ashu')}
+                      onClick={() => setClassesTeacherFilter(classesTeacherFilter === 'ashu' ? 'ALL' : 'ashu')}
                       className={`${styles.filterPill} ${classesTeacherFilter === 'ashu' ? styles.filterPillActive : ''}`}
                     >
-                      Ashu ({teacherAshuRecords.length})
+                      Ashu ({filteredAshuRecords.length})
                     </button>
                     <button
                       type="button"
-                      onClick={() => setClassesTeacherFilter('vaibhav')}
+                      onClick={() => setClassesTeacherFilter(classesTeacherFilter === 'vaibhav' ? 'ALL' : 'vaibhav')}
                       className={`${styles.filterPill} ${classesTeacherFilter === 'vaibhav' ? styles.filterPillActive : ''}`}
                     >
-                      Vaibhav ({teacherVaibhavRecords.length})
+                      Vaibhav ({filteredVaibhavRecords.length})
                     </button>
                     <button
                       type="button"
-                      onClick={() => setClassesTeacherFilter('vrishan')}
+                      onClick={() => setClassesTeacherFilter(classesTeacherFilter === 'vrishan' ? 'ALL' : 'vrishan')}
                       className={`${styles.filterPill} ${classesTeacherFilter === 'vrishan' ? styles.filterPillActive : ''}`}
                     >
-                      Vrishan ({teacherVrishanRecords.length})
+                      Vrishan ({filteredVrishanRecords.length})
                     </button>
                     <button
                       type="button"
-                      onClick={() => setClassesTeacherFilter('abhinav')}
+                      onClick={() => setClassesTeacherFilter(classesTeacherFilter === 'abhinav' ? 'ALL' : 'abhinav')}
                       className={`${styles.filterPill} ${classesTeacherFilter === 'abhinav' ? styles.filterPillActive : ''}`}
                     >
-                      Abhinav ({teacherAbhinavRecords.length})
+                      Abhinav ({filteredAbhinavRecords.length})
                     </button>
                   </div>
                 )}
@@ -4074,7 +4234,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   )}
 
                   {/* CLEAR FILTERS */}
-                  {(classesTeacherFilter !== 'ALL' || classesStatusFilter !== 'ALL' || classesDatePreset !== 'ALL' || classesCourseFilter !== 'ALL' || classesSearch) && (
+                  {hasActiveClassesFilter && (
                     <button
                       type="button"
                       onClick={() => {
@@ -4092,6 +4252,35 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </button>
                   )}
                 </div>
+              </div>
+
+              {/* DYNAMIC RESULTS COUNTER STRIP */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0.65rem 0 0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                  Showing <strong style={{ color: 'var(--text-primary)' }}>{filteredClassesRecords.length}</strong> class {filteredClassesRecords.length === 1 ? 'session' : 'sessions'}
+                  {hasActiveClassesFilter && (
+                    <span style={{ marginLeft: '0.4rem', color: '#38bdf8', fontWeight: 500 }}>
+                      (filtered from {allClassesLogEntries.length} total sessions)
+                    </span>
+                  )}
+                </div>
+                {hasActiveClassesFilter && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClassesTeacherFilter('ALL');
+                      setClassesStatusFilter('ALL');
+                      setClassesDatePreset('ALL');
+                      setClassesCustomDate('');
+                      setClassesCourseFilter('ALL');
+                      setClassesSearch('');
+                    }}
+                    className={styles.filterPill}
+                    style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem' }}
+                  >
+                    Reset filters
+                  </button>
+                )}
               </div>
 
               {/* DATA TABLE */}
@@ -7589,7 +7778,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     }}
                   >
                     {filteredGroupStudents.map((std) => {
-                      const isChecked = selectedGroupStudentIds.includes(std.id);
+                      const isChecked = selectedGroupStudentIds.some((id) => canonicalizeStudentId(id) === canonicalizeStudentId(std.id));
                       const avatar = getAvatarDetails(std.name, std.avatarUrl);
 
                       return (
