@@ -381,8 +381,7 @@ export class AttendanceService {
 
   /**
    * Fetches latest attendance from remote MongoDB and syncs to user-scoped storage.
-   * Preserves all valid records without destructive automatic client-side deletions.
-   * Also scans all legacy & scoped local storage partitions to auto-recover any unsynced records.
+   * MongoDB Atlas is the single source of truth.
    */
   public static async fetchAndSyncFromRemote(user?: CmsUser | null): Promise<AttendanceRecord[]> {
     if (typeof window !== 'undefined') {
@@ -417,27 +416,6 @@ export class AttendanceService {
               }
 
               cleanRecords.push(r);
-            });
-
-            // Recover and push any locally stored records across all browser keys that aren't yet in MongoDB
-            const remoteIds = new Set(cleanRecords.map((r) => r.id));
-            const allLocalRecords = this.collectAllLocalStorageAttendance();
-            
-            allLocalRecords.forEach((loc) => {
-              if (loc && loc.id && !remoteIds.has(loc.id)) {
-                if (isTeacher) {
-                  const mBy = (loc.markedBy || '').toLowerCase();
-                  const mName = (loc.markedByName || '').toLowerCase();
-                  const matchesTeacher =
-                    mBy === uEmail ||
-                    mName === uName ||
-                    (uEmail && mBy.includes(uEmail)) ||
-                    (uName && (mName.includes(uName) || mBy.includes(uName)));
-                  if (!matchesTeacher) return;
-                }
-                cleanRecords.push(loc);
-                this.syncAttendanceToRemote(loc);
-              }
             });
 
             this.saveAttendance(cleanRecords, activeUser);

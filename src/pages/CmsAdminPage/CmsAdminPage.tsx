@@ -1080,23 +1080,39 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     }
   };
 
+  const [editingGroupSessionKey, setEditingGroupSessionKey] = useState<{ date: string; timeSlot: string } | null>(null);
+
+  const parseTimeSlotToInputs = (timeSlot: string) => {
+    try {
+      const parts = timeSlot.split('-').map((s) => s.trim());
+      if (parts.length === 2) {
+        const parseSingle = (tStr: string) => {
+          const match = tStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+          if (!match) return '';
+          let hour = parseInt(match[1], 10);
+          const min = match[2];
+          const ampm = match[3].toUpperCase();
+          if (ampm === 'PM' && hour < 12) hour += 12;
+          if (ampm === 'AM' && hour === 12) hour = 0;
+          return `${hour.toString().padStart(2, '0')}:${min}`;
+        };
+        const start = parseSingle(parts[0]);
+        const end = parseSingle(parts[1]);
+        if (start && end) return { start, end };
+      }
+    } catch {}
+    return { start: '11:00', end: '13:00' };
+  };
+
   const handleOpenGroupAttendanceModal = (dateStr?: string) => {
+    setEditingGroupSessionKey(null);
     const targetDate = dateStr || selectedDateStr || getTodayDateStr();
     setGroupSessionDate(targetDate);
-
-    const existingGroupRecords = AttendanceService.getAllAttendanceRecords().filter(
-      (r) => r.date === targetDate && r.status === 'GROUP_SESSION'
-    );
-
-    if (existingGroupRecords.length > 0) {
-      const existingIds = Array.from(new Set(existingGroupRecords.map((r) => r.studentId)));
-      setSelectedGroupStudentIds(existingIds);
-    } else {
-      setSelectedGroupStudentIds(students.map((s) => s.id));
-    }
-
+    setGroupCustomTimeStart('11:00');
+    setGroupCustomTimeEnd('13:00');
+    setSelectedGroupStudentIds([]);
     setGroupSessionStatus('GROUP_SESSION');
-    setGroupSessionComment(existingGroupRecords[0]?.comment || '');
+    setGroupSessionComment('');
     setGroupStudentSearchQuery('');
     setIsGroupAttendanceModalOpen(true);
   };
@@ -1115,7 +1131,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     }
   };
 
-  const handleSaveGroupAttendance = (e: React.FormEvent) => {
+  const handleSaveGroupAttendance = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedGroupStudentIds.length === 0) {
       alert('Please select at least one student for the group session.');
@@ -1140,6 +1156,24 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     const markedByName = user?.name || (isTeacher ? 'Teacher' : 'Abhinav');
     const markedByRole = user?.role === 'teacher' ? 'teacher' : 'admin';
 
+    // If editing an existing session, remove unselected students or clean up old slot records
+    if (editingGroupSessionKey) {
+      const oldRecords = allAttendanceRecords.filter(
+        (r) => r.date === editingGroupSessionKey.date &&
+               r.timeSlot === editingGroupSessionKey.timeSlot &&
+               r.status === 'GROUP_SESSION'
+      );
+      
+      const newSelectedSet = new Set(selectedGroupStudentIds);
+      const isSlotOrDateChanged = editingGroupSessionKey.date !== groupSessionDate || editingGroupSessionKey.timeSlot !== timeSlotStr;
+
+      for (const oldRec of oldRecords) {
+        if (isSlotOrDateChanged || !newSelectedSet.has(oldRec.studentId)) {
+          await AttendanceService.deleteAttendanceRecord(oldRec.id);
+        }
+      }
+    }
+
     AttendanceService.markBatchGroupAttendance({
       studentIds: selectedGroupStudentIds,
       date: groupSessionDate,
@@ -1151,10 +1185,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       markedByRole: markedByRole,
     });
 
+    setEditingGroupSessionKey(null);
     setAttendanceVersion((v) => v + 1);
     setIsGroupAttendanceModalOpen(false);
     setGroupSessionSuccessBanner(
-      `Group Session attendance marked for ${selectedGroupStudentIds.length} student(s) on ${groupSessionDate}!`
+      `Group Session attendance updated for ${selectedGroupStudentIds.length} student(s) on ${groupSessionDate} (${timeSlotStr})!`
     );
     setTimeout(() => setGroupSessionSuccessBanner(null), 5000);
   };
@@ -1880,7 +1915,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   };
 
   const handleEditGroupSession = (session: { date: string; timeSlot: string; studentIds: string[]; comment?: string }) => {
+    setEditingGroupSessionKey({ date: session.date, timeSlot: session.timeSlot });
     setGroupSessionDate(session.date);
+    const parsedTime = parseTimeSlotToInputs(session.timeSlot);
+    setGroupCustomTimeStart(parsedTime.start);
+    setGroupCustomTimeEnd(parsedTime.end);
     setSelectedGroupStudentIds(session.studentIds);
     setGroupSessionStatus('GROUP_SESSION');
     setGroupSessionComment(session.comment || '');
