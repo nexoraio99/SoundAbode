@@ -477,6 +477,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
   const handleLogout = () => {
     AuthService.logout();
+    AttendanceService.clearUserCache();
     setIsAuthenticated(false);
     setCurrentUser(null);
   };
@@ -1134,9 +1135,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       ? `${formatTime(groupCustomTimeStart)} - ${formatTime(groupCustomTimeEnd)}`
       : '11:00 AM - 01:00 PM';
 
-    const markedByEmail = currentUser?.email || 'abhinav@soundabode.com';
-    const markedByName = currentUser?.name || 'Abhinav';
-    const markedByRole = currentUser?.role === 'teacher' ? 'teacher' : 'admin';
+    const user = currentUser || AuthService.getCurrentUser();
+    const markedByEmail = user?.email || (isTeacher ? 'teacher@soundabode.com' : 'abhinav@soundabode.com');
+    const markedByName = user?.name || (isTeacher ? 'Teacher' : 'Abhinav');
+    const markedByRole = user?.role === 'teacher' ? 'teacher' : 'admin';
 
     AttendanceService.markBatchGroupAttendance({
       studentIds: selectedGroupStudentIds,
@@ -1179,8 +1181,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       ? `${formatTime(customTimeStart)} - ${formatTime(customTimeEnd)}`
       : '11:00 AM - 01:00 PM';
 
-    const markerEmail = currentUser?.email || (isTeacher ? 'teacher@soundabode.com' : 'abhinav@soundabode.com');
-    const markerName = currentUser?.name || (isTeacher ? 'Teacher' : 'Abhinav');
+    const user = currentUser || AuthService.getCurrentUser();
+    const markerEmail = user?.email || (isTeacher ? 'teacher@soundabode.com' : 'abhinav@soundabode.com');
+    const markerName = user?.name || (isTeacher ? 'Teacher' : 'Abhinav');
     const markerRole = isTeacher ? 'teacher' : 'admin';
 
     AttendanceService.markAttendance({
@@ -1598,8 +1601,22 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const allAttendanceRecords = useMemo(() => {
     if (attendanceVersion < 0) return [];
     const validStudentIds = new Set(students.map((s) => s.id));
-    return AttendanceService.getAllAttendanceRecords().filter((r) => validStudentIds.has(r.studentId));
-  }, [attendanceVersion, students]);
+    const all = AttendanceService.getAllAttendanceRecords(currentUser || undefined).filter((r) => validStudentIds.has(r.studentId));
+    if (isTeacher && currentUser) {
+      const uEmail = (currentUser.email || '').toLowerCase();
+      const uName = (currentUser.name || '').toLowerCase();
+      return all.filter((r) => {
+        const mBy = (r.markedBy || '').toLowerCase();
+        const mName = (r.markedByName || '').toLowerCase();
+        if (mBy && mBy === uEmail) return true;
+        if (mName && mName === uName) return true;
+        if (uEmail && mBy.includes(uEmail)) return true;
+        if (uName && (mName.includes(uName) || mBy.includes(uName))) return true;
+        return false;
+      });
+    }
+    return all;
+  }, [attendanceVersion, students, isTeacher, currentUser]);
 
   const getGroupSessionDetails = (dateStr: string, slotStr?: string) => {
     const matchingRecords = allAttendanceRecords.filter((r) => {
@@ -1900,23 +1917,25 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
   const filteredClassesRecords = useMemo(() => {
     return allClassesLogEntries.filter((entry) => {
-      // 1. Teacher Filter
-      if (classesTeacherFilter === 'ashu') {
-        const by = (entry.markedBy || '').toLowerCase();
-        const name = (entry.markedByName || '').toLowerCase();
-        if (!by.includes('ashu') && !name.includes('ashu')) return false;
-      } else if (classesTeacherFilter === 'vaibhav') {
-        const by = (entry.markedBy || '').toLowerCase();
-        const name = (entry.markedByName || '').toLowerCase();
-        if (!by.includes('vaibhav') && !name.includes('vaibhav')) return false;
-      } else if (classesTeacherFilter === 'vrishan') {
-        const by = (entry.markedBy || '').toLowerCase();
-        const name = (entry.markedByName || '').toLowerCase();
-        if (!by.includes('vrishan') && !name.includes('vrishan')) return false;
-      } else if (classesTeacherFilter === 'abhinav' || classesTeacherFilter === 'admin') {
-        const by = (entry.markedBy || '').toLowerCase();
-        const name = (entry.markedByName || '').toLowerCase();
-        if (by.includes('ashu') || name.includes('ashu') || by.includes('vaibhav') || name.includes('vaibhav') || by.includes('vrishan') || name.includes('vrishan')) return false;
+      // 1. Teacher Filter (Only relevant when admin is viewing; teachers are strictly scoped to their own classes)
+      if (!isTeacher) {
+        if (classesTeacherFilter === 'ashu') {
+          const by = (entry.markedBy || '').toLowerCase();
+          const name = (entry.markedByName || '').toLowerCase();
+          if (!by.includes('ashu') && !name.includes('ashu')) return false;
+        } else if (classesTeacherFilter === 'vaibhav') {
+          const by = (entry.markedBy || '').toLowerCase();
+          const name = (entry.markedByName || '').toLowerCase();
+          if (!by.includes('vaibhav') && !name.includes('vaibhav')) return false;
+        } else if (classesTeacherFilter === 'vrishan') {
+          const by = (entry.markedBy || '').toLowerCase();
+          const name = (entry.markedByName || '').toLowerCase();
+          if (!by.includes('vrishan') && !name.includes('vrishan')) return false;
+        } else if (classesTeacherFilter === 'abhinav' || classesTeacherFilter === 'admin') {
+          const by = (entry.markedBy || '').toLowerCase();
+          const name = (entry.markedByName || '').toLowerCase();
+          if (by.includes('ashu') || name.includes('ashu') || by.includes('vaibhav') || name.includes('vaibhav') || by.includes('vrishan') || name.includes('vrishan')) return false;
+        }
       }
 
       // 2. Status Filter
@@ -1975,6 +1994,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     classesCustomDate,
     classesCourseFilter,
     classesSearch,
+    isTeacher,
   ]);
 
   const ashuAnalytics = useMemo(() => {
@@ -3544,184 +3564,217 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
               {/* RESTRAINED SUMMARY STATS STRIP */}
               <div className={styles.summaryStatsStrip}>
-                {/* Ashu Block */}
-                <div className={styles.summaryStatBlock}>
-                  <div className={styles.summaryStatHeader}>
-                    <span className={styles.summaryStatTitle}>Teacher Ashu</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = classesTeacherFilter === 'ashu' ? 'ALL' : 'ashu';
-                        setClassesTeacherFilter(next);
-                      }}
-                      className={styles.filterPill}
-                      style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
-                    >
-                      {classesTeacherFilter === 'ashu' ? 'Active' : 'Filter'}
-                    </button>
+                {isTeacher ? (
+                  /* Single Focused Teacher Block for Teacher Role */
+                  <div className={styles.summaryStatBlock} style={{ flex: '1 1 100%', maxWidth: '100%' }}>
+                    <div className={styles.summaryStatHeader}>
+                      <span className={styles.summaryStatTitle}>My Marked Classes ({currentUser?.name || 'Teacher'})</span>
+                      <span className={styles.filterPill} style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem', background: 'var(--bg-hover)' }}>
+                        {currentUser?.email}
+                      </span>
+                    </div>
+                    <div className={styles.summaryStatCount}>{allAttendanceRecords.length}</div>
+                    <div className={styles.summaryStatMeta}>
+                      <span className={styles.summaryStatMetaItem}>
+                        Present: <span className={styles.summaryStatMetaNum}>{allAttendanceRecords.filter(r => r.status === 'PRESENT').length}</span>
+                      </span>
+                      <span>•</span>
+                      <span className={styles.summaryStatMetaItem}>
+                        Absent: <span className={styles.summaryStatMetaNum}>{allAttendanceRecords.filter(r => r.status === 'ABSENT').length}</span>
+                      </span>
+                      <span>•</span>
+                      <span className={styles.summaryStatMetaItem}>
+                        Group Sessions: <span className={styles.summaryStatMetaNum}>{studioGroupSessionsCount} ({totalGroupRecords.length} st)</span>
+                      </span>
+                      <span>•</span>
+                      <span className={styles.summaryStatMetaItem}>
+                        Students: <span className={styles.summaryStatMetaNum}>{new Set(allAttendanceRecords.map(r => r.studentId)).size}</span>
+                      </span>
+                    </div>
                   </div>
-                  <div className={styles.summaryStatCount}>{ashuAnalytics.total}</div>
-                  <div className={styles.summaryStatMeta}>
-                    <span className={styles.summaryStatMetaItem}>
-                      Present: <span className={styles.summaryStatMetaNum}>{ashuAnalytics.present}</span>
-                    </span>
-                    <span>•</span>
-                    <span className={styles.summaryStatMetaItem}>
-                      Group: <span className={styles.summaryStatMetaNum}>{ashuAnalytics.groupSessionsCount}{ashuAnalytics.group > 0 ? ` (${ashuAnalytics.group} st)` : ''}</span>
-                    </span>
-                    <span>•</span>
-                    <span className={styles.summaryStatMetaItem}>
-                      Students: <span className={styles.summaryStatMetaNum}>{ashuAnalytics.uniqueStudentCount}</span>
-                    </span>
-                    <span>•</span>
-                    <span className={styles.summaryStatMetaItem}>
-                      Rate: <span className={styles.summaryStatMetaNum}>{ashuAnalytics.presentRate}%</span>
-                    </span>
-                  </div>
-                </div>
+                ) : (
+                  /* Admin multi-teacher overview */
+                  <>
+                    {/* Ashu Block */}
+                    <div className={styles.summaryStatBlock}>
+                      <div className={styles.summaryStatHeader}>
+                        <span className={styles.summaryStatTitle}>Teacher Ashu</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = classesTeacherFilter === 'ashu' ? 'ALL' : 'ashu';
+                            setClassesTeacherFilter(next);
+                          }}
+                          className={styles.filterPill}
+                          style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
+                        >
+                          {classesTeacherFilter === 'ashu' ? 'Active' : 'Filter'}
+                        </button>
+                      </div>
+                      <div className={styles.summaryStatCount}>{ashuAnalytics.total}</div>
+                      <div className={styles.summaryStatMeta}>
+                        <span className={styles.summaryStatMetaItem}>
+                          Present: <span className={styles.summaryStatMetaNum}>{ashuAnalytics.present}</span>
+                        </span>
+                        <span>•</span>
+                        <span className={styles.summaryStatMetaItem}>
+                          Group: <span className={styles.summaryStatMetaNum}>{ashuAnalytics.groupSessionsCount}{ashuAnalytics.group > 0 ? ` (${ashuAnalytics.group} st)` : ''}</span>
+                        </span>
+                        <span>•</span>
+                        <span className={styles.summaryStatMetaItem}>
+                          Students: <span className={styles.summaryStatMetaNum}>{ashuAnalytics.uniqueStudentCount}</span>
+                        </span>
+                        <span>•</span>
+                        <span className={styles.summaryStatMetaItem}>
+                          Rate: <span className={styles.summaryStatMetaNum}>{ashuAnalytics.presentRate}%</span>
+                        </span>
+                      </div>
+                    </div>
 
-                {/* Vaibhav Block */}
-                <div className={styles.summaryStatBlock}>
-                  <div className={styles.summaryStatHeader}>
-                    <span className={styles.summaryStatTitle}>Teacher Vaibhav</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = classesTeacherFilter === 'vaibhav' ? 'ALL' : 'vaibhav';
-                        setClassesTeacherFilter(next);
-                      }}
-                      className={styles.filterPill}
-                      style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
-                    >
-                      {classesTeacherFilter === 'vaibhav' ? 'Active' : 'Filter'}
-                    </button>
-                  </div>
-                  <div className={styles.summaryStatCount}>{vaibhavAnalytics.total}</div>
-                  <div className={styles.summaryStatMeta}>
-                    <span className={styles.summaryStatMetaItem}>
-                      Present: <span className={styles.summaryStatMetaNum}>{vaibhavAnalytics.present}</span>
-                    </span>
-                    <span>•</span>
-                    <span className={styles.summaryStatMetaItem}>
-                      Group: <span className={styles.summaryStatMetaNum}>{vaibhavAnalytics.groupSessionsCount}{vaibhavAnalytics.group > 0 ? ` (${vaibhavAnalytics.group} st)` : ''}</span>
-                    </span>
-                    <span>•</span>
-                    <span className={styles.summaryStatMetaItem}>
-                      Students: <span className={styles.summaryStatMetaNum}>{vaibhavAnalytics.uniqueStudentCount}</span>
-                    </span>
-                    <span>•</span>
-                    <span className={styles.summaryStatMetaItem}>
-                      Rate: <span className={styles.summaryStatMetaNum}>{vaibhavAnalytics.presentRate}%</span>
-                    </span>
-                  </div>
-                </div>
+                    {/* Vaibhav Block */}
+                    <div className={styles.summaryStatBlock}>
+                      <div className={styles.summaryStatHeader}>
+                        <span className={styles.summaryStatTitle}>Teacher Vaibhav</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = classesTeacherFilter === 'vaibhav' ? 'ALL' : 'vaibhav';
+                            setClassesTeacherFilter(next);
+                          }}
+                          className={styles.filterPill}
+                          style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
+                        >
+                          {classesTeacherFilter === 'vaibhav' ? 'Active' : 'Filter'}
+                        </button>
+                      </div>
+                      <div className={styles.summaryStatCount}>{vaibhavAnalytics.total}</div>
+                      <div className={styles.summaryStatMeta}>
+                        <span className={styles.summaryStatMetaItem}>
+                          Present: <span className={styles.summaryStatMetaNum}>{vaibhavAnalytics.present}</span>
+                        </span>
+                        <span>•</span>
+                        <span className={styles.summaryStatMetaItem}>
+                          Group: <span className={styles.summaryStatMetaNum}>{vaibhavAnalytics.groupSessionsCount}{vaibhavAnalytics.group > 0 ? ` (${vaibhavAnalytics.group} st)` : ''}</span>
+                        </span>
+                        <span>•</span>
+                        <span className={styles.summaryStatMetaItem}>
+                          Students: <span className={styles.summaryStatMetaNum}>{vaibhavAnalytics.uniqueStudentCount}</span>
+                        </span>
+                        <span>•</span>
+                        <span className={styles.summaryStatMetaItem}>
+                          Rate: <span className={styles.summaryStatMetaNum}>{vaibhavAnalytics.presentRate}%</span>
+                        </span>
+                      </div>
+                    </div>
 
-                {/* Vrishan Block */}
-                <div className={styles.summaryStatBlock}>
-                  <div className={styles.summaryStatHeader}>
-                    <span className={styles.summaryStatTitle}>Teacher Vrishan</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = classesTeacherFilter === 'vrishan' ? 'ALL' : 'vrishan';
-                        setClassesTeacherFilter(next);
-                      }}
-                      className={styles.filterPill}
-                      style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
-                    >
-                      {classesTeacherFilter === 'vrishan' ? 'Active' : 'Filter'}
-                    </button>
-                  </div>
-                  <div className={styles.summaryStatCount}>{vrishanAnalytics.total}</div>
-                  <div className={styles.summaryStatMeta}>
-                    <span className={styles.summaryStatMetaItem}>
-                      Present: <span className={styles.summaryStatMetaNum}>{vrishanAnalytics.present}</span>
-                    </span>
-                    <span>•</span>
-                    <span className={styles.summaryStatMetaItem}>
-                      Group: <span className={styles.summaryStatMetaNum}>{vrishanAnalytics.groupSessionsCount}{vrishanAnalytics.group > 0 ? ` (${vrishanAnalytics.group} st)` : ''}</span>
-                    </span>
-                    <span>•</span>
-                    <span className={styles.summaryStatMetaItem}>
-                      Students: <span className={styles.summaryStatMetaNum}>{vrishanAnalytics.uniqueStudentCount}</span>
-                    </span>
-                    <span>•</span>
-                    <span className={styles.summaryStatMetaItem}>
-                      Rate: <span className={styles.summaryStatMetaNum}>{vrishanAnalytics.presentRate}%</span>
-                    </span>
-                  </div>
-                </div>
+                    {/* Vrishan Block */}
+                    <div className={styles.summaryStatBlock}>
+                      <div className={styles.summaryStatHeader}>
+                        <span className={styles.summaryStatTitle}>Teacher Vrishan</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = classesTeacherFilter === 'vrishan' ? 'ALL' : 'vrishan';
+                            setClassesTeacherFilter(next);
+                          }}
+                          className={styles.filterPill}
+                          style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
+                        >
+                          {classesTeacherFilter === 'vrishan' ? 'Active' : 'Filter'}
+                        </button>
+                      </div>
+                      <div className={styles.summaryStatCount}>{vrishanAnalytics.total}</div>
+                      <div className={styles.summaryStatMeta}>
+                        <span className={styles.summaryStatMetaItem}>
+                          Present: <span className={styles.summaryStatMetaNum}>{vrishanAnalytics.present}</span>
+                        </span>
+                        <span>•</span>
+                        <span className={styles.summaryStatMetaItem}>
+                          Group: <span className={styles.summaryStatMetaNum}>{vrishanAnalytics.groupSessionsCount}{vrishanAnalytics.group > 0 ? ` (${vrishanAnalytics.group} st)` : ''}</span>
+                        </span>
+                        <span>•</span>
+                        <span className={styles.summaryStatMetaItem}>
+                          Students: <span className={styles.summaryStatMetaNum}>{vrishanAnalytics.uniqueStudentCount}</span>
+                        </span>
+                        <span>•</span>
+                        <span className={styles.summaryStatMetaItem}>
+                          Rate: <span className={styles.summaryStatMetaNum}>{vrishanAnalytics.presentRate}%</span>
+                        </span>
+                      </div>
+                    </div>
 
-                {/* Abhinav Block */}
-                <div className={styles.summaryStatBlock}>
-                  <div className={styles.summaryStatHeader}>
-                    <span className={styles.summaryStatTitle}>Abhinav</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = classesTeacherFilter === 'abhinav' ? 'ALL' : 'abhinav';
-                        setClassesTeacherFilter(next);
-                      }}
-                      className={styles.filterPill}
-                      style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
-                    >
-                      {classesTeacherFilter === 'abhinav' ? 'Active' : 'Filter'}
-                    </button>
-                  </div>
-                  <div className={styles.summaryStatCount}>{abhinavAnalytics.total}</div>
-                  <div className={styles.summaryStatMeta}>
-                    <span className={styles.summaryStatMetaItem}>
-                      Present: <span className={styles.summaryStatMetaNum}>{abhinavAnalytics.present}</span>
-                    </span>
-                    <span>•</span>
-                    <span className={styles.summaryStatMetaItem}>
-                      Group: <span className={styles.summaryStatMetaNum}>{abhinavAnalytics.groupSessionsCount}{abhinavAnalytics.group > 0 ? ` (${abhinavAnalytics.group} st)` : ''}</span>
-                    </span>
-                    <span>•</span>
-                    <span className={styles.summaryStatMetaItem}>
-                      Students: <span className={styles.summaryStatMetaNum}>{abhinavAnalytics.uniqueStudentCount}</span>
-                    </span>
-                    <span>•</span>
-                    <span className={styles.summaryStatMetaItem}>
-                      Rate: <span className={styles.summaryStatMetaNum}>{abhinavAnalytics.presentRate}%</span>
-                    </span>
-                  </div>
-                </div>
+                    {/* Abhinav Block */}
+                    <div className={styles.summaryStatBlock}>
+                      <div className={styles.summaryStatHeader}>
+                        <span className={styles.summaryStatTitle}>Abhinav</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = classesTeacherFilter === 'abhinav' ? 'ALL' : 'abhinav';
+                            setClassesTeacherFilter(next);
+                          }}
+                          className={styles.filterPill}
+                          style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
+                        >
+                          {classesTeacherFilter === 'abhinav' ? 'Active' : 'Filter'}
+                        </button>
+                      </div>
+                      <div className={styles.summaryStatCount}>{abhinavAnalytics.total}</div>
+                      <div className={styles.summaryStatMeta}>
+                        <span className={styles.summaryStatMetaItem}>
+                          Present: <span className={styles.summaryStatMetaNum}>{abhinavAnalytics.present}</span>
+                        </span>
+                        <span>•</span>
+                        <span className={styles.summaryStatMetaItem}>
+                          Group: <span className={styles.summaryStatMetaNum}>{abhinavAnalytics.groupSessionsCount}{abhinavAnalytics.group > 0 ? ` (${abhinavAnalytics.group} st)` : ''}</span>
+                        </span>
+                        <span>•</span>
+                        <span className={styles.summaryStatMetaItem}>
+                          Students: <span className={styles.summaryStatMetaNum}>{abhinavAnalytics.uniqueStudentCount}</span>
+                        </span>
+                        <span>•</span>
+                        <span className={styles.summaryStatMetaItem}>
+                          Rate: <span className={styles.summaryStatMetaNum}>{abhinavAnalytics.presentRate}%</span>
+                        </span>
+                      </div>
+                    </div>
 
-                {/* Studio Total Block */}
-                <div className={styles.summaryStatBlock}>
-                  <div className={styles.summaryStatHeader}>
-                    <span className={styles.summaryStatTitle}>Studio Total</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setClassesTeacherFilter('ALL');
-                        setClassesStatusFilter('ALL');
-                        setClassesDatePreset('ALL');
-                        setClassesCourseFilter('ALL');
-                        setClassesSearch('');
-                      }}
-                      className={styles.filterPill}
-                      style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
-                    >
-                      Reset
-                    </button>
-                  </div>
-                  <div className={styles.summaryStatCount}>{allAttendanceRecords.length}</div>
-                  <div className={styles.summaryStatMeta}>
-                    <span className={styles.summaryStatMetaItem}>
-                      Present: <span className={styles.summaryStatMetaNum}>{allAttendanceRecords.filter(r => r.status === 'PRESENT').length}</span>
-                    </span>
-                    <span>•</span>
-                    <span className={styles.summaryStatMetaItem}>
-                      Absent: <span className={styles.summaryStatMetaNum}>{allAttendanceRecords.filter(r => r.status === 'ABSENT').length}</span>
-                    </span>
-                    <span>•</span>
-                    <span className={styles.summaryStatMetaItem}>
-                      Group: <span className={styles.summaryStatMetaNum}>{studioGroupSessionsCount} ({totalGroupRecords.length} students)</span>
-                    </span>
-                  </div>
-                </div>
+                    {/* Studio Total Block */}
+                    <div className={styles.summaryStatBlock}>
+                      <div className={styles.summaryStatHeader}>
+                        <span className={styles.summaryStatTitle}>Studio Total</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setClassesTeacherFilter('ALL');
+                            setClassesStatusFilter('ALL');
+                            setClassesDatePreset('ALL');
+                            setClassesCourseFilter('ALL');
+                            setClassesSearch('');
+                          }}
+                          className={styles.filterPill}
+                          style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
+                        >
+                          Reset
+                        </button>
+                      </div>
+                      <div className={styles.summaryStatCount}>{allAttendanceRecords.length}</div>
+                      <div className={styles.summaryStatMeta}>
+                        <span className={styles.summaryStatMetaItem}>
+                          Present: <span className={styles.summaryStatMetaNum}>{allAttendanceRecords.filter(r => r.status === 'PRESENT').length}</span>
+                        </span>
+                        <span>•</span>
+                        <span className={styles.summaryStatMetaItem}>
+                          Absent: <span className={styles.summaryStatMetaNum}>{allAttendanceRecords.filter(r => r.status === 'ABSENT').length}</span>
+                        </span>
+                        <span>•</span>
+                        <span className={styles.summaryStatMetaItem}>
+                          Group: <span className={styles.summaryStatMetaNum}>{studioGroupSessionsCount} ({totalGroupRecords.length} students)</span>
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* UNIFIED FILTER TOOLBAR */}
@@ -3748,44 +3801,46 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   )}
                 </div>
 
-                {/* TEACHER TOGGLES */}
-                <div className={styles.filterPillGroup}>
-                  <button
-                    type="button"
-                    onClick={() => setClassesTeacherFilter('ALL')}
-                    className={`${styles.filterPill} ${classesTeacherFilter === 'ALL' ? styles.filterPillActive : ''}`}
-                  >
-                    All ({allAttendanceRecords.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setClassesTeacherFilter('ashu')}
-                    className={`${styles.filterPill} ${classesTeacherFilter === 'ashu' ? styles.filterPillActive : ''}`}
-                  >
-                    Ashu ({teacherAshuRecords.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setClassesTeacherFilter('vaibhav')}
-                    className={`${styles.filterPill} ${classesTeacherFilter === 'vaibhav' ? styles.filterPillActive : ''}`}
-                  >
-                    Vaibhav ({teacherVaibhavRecords.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setClassesTeacherFilter('vrishan')}
-                    className={`${styles.filterPill} ${classesTeacherFilter === 'vrishan' ? styles.filterPillActive : ''}`}
-                  >
-                    Vrishan ({teacherVrishanRecords.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setClassesTeacherFilter('abhinav')}
-                    className={`${styles.filterPill} ${classesTeacherFilter === 'abhinav' ? styles.filterPillActive : ''}`}
-                  >
-                    Abhinav ({teacherAbhinavRecords.length})
-                  </button>
-                </div>
+                {/* TEACHER TOGGLES (Admin only) */}
+                {!isTeacher && (
+                  <div className={styles.filterPillGroup}>
+                    <button
+                      type="button"
+                      onClick={() => setClassesTeacherFilter('ALL')}
+                      className={`${styles.filterPill} ${classesTeacherFilter === 'ALL' ? styles.filterPillActive : ''}`}
+                    >
+                      All ({allAttendanceRecords.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClassesTeacherFilter('ashu')}
+                      className={`${styles.filterPill} ${classesTeacherFilter === 'ashu' ? styles.filterPillActive : ''}`}
+                    >
+                      Ashu ({teacherAshuRecords.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClassesTeacherFilter('vaibhav')}
+                      className={`${styles.filterPill} ${classesTeacherFilter === 'vaibhav' ? styles.filterPillActive : ''}`}
+                    >
+                      Vaibhav ({teacherVaibhavRecords.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClassesTeacherFilter('vrishan')}
+                      className={`${styles.filterPill} ${classesTeacherFilter === 'vrishan' ? styles.filterPillActive : ''}`}
+                    >
+                      Vrishan ({teacherVrishanRecords.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClassesTeacherFilter('abhinav')}
+                      className={`${styles.filterPill} ${classesTeacherFilter === 'abhinav' ? styles.filterPillActive : ''}`}
+                    >
+                      Abhinav ({teacherAbhinavRecords.length})
+                    </button>
+                  </div>
+                )}
 
                 {/* FILTER SELECTS GROUP */}
                 <div className={styles.filterSelectGroup}>

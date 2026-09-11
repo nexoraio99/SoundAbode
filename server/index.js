@@ -143,6 +143,15 @@ app.use(
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
+// Anti-caching headers on all API routes to ensure real-time fresh data
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  next();
+});
+
 // ─── Real-Time Server-Sent Events (SSE) Live Stream ───────────────────────────
 const sseClients = new Set();
 
@@ -1731,8 +1740,29 @@ app.delete('/api/fees/:id', requireAuth, requireAdmin, async (req, res) => {
 // ─── ATTENDANCE ────────────────────────────────────────────────────────────────
 app.get('/api/attendance', requireAuth, async (req, res) => {
   try {
+    const user = req.sessionUser;
+    let query = {};
+
+    // Strict role isolation: Teachers only receive attendance records marked by themselves
+    if (user && user.role === 'teacher') {
+      const userEmail = (user.email || '').trim().toLowerCase();
+      const userName = (user.name || '').trim().toLowerCase();
+      const userEmailRegex = new RegExp(`^${userEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+      const userNameRegex = new RegExp(`^${userName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+      const nameKeyRegex = new RegExp(userName, 'i');
+
+      query = {
+        $or: [
+          { markedBy: userEmailRegex },
+          { markedByName: userNameRegex },
+          { markedBy: nameKeyRegex },
+          { markedByName: nameKeyRegex },
+        ],
+      };
+    }
+
     if (mongoose.connection.readyState === 1) {
-      const records = await AttendanceRecordModel.find().sort({ updatedAt: -1 });
+      const records = await AttendanceRecordModel.find(query).sort({ updatedAt: -1 });
       return res.json(records);
     }
     res.json([]);
@@ -1741,11 +1771,42 @@ app.get('/api/attendance', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/attendance', async (req, res) => {
+app.post('/api/attendance', requireAuth, async (req, res) => {
   try {
-    const recordData = req.body;
+    const recordData = req.body || {};
+    const user = req.sessionUser;
+
+    // Strict Server-Side Validation
+    if (!recordData.studentId || typeof recordData.studentId !== 'string') {
+      return res.status(400).json({ error: 'Valid student ID is required.' });
+    }
+    if (!recordData.date || typeof recordData.date !== 'string') {
+      return res.status(400).json({ error: 'Valid date (YYYY-MM-DD) is required.' });
+    }
+    if (!recordData.timeSlot || typeof recordData.timeSlot !== 'string') {
+      return res.status(400).json({ error: 'Valid time slot is required.' });
+    }
+
+    const VALID_STATUSES = ['PRESENT', 'ABSENT', 'PRACTICE_SESSION', 'GROUP_SESSION', 'NA'];
+    if (!recordData.status || !VALID_STATUSES.includes(recordData.status)) {
+      recordData.status = 'PRESENT';
+    }
+
+    // Role-based teacher identity enforcement on server
+    if (user.role === 'teacher') {
+      recordData.markedBy = user.email;
+      recordData.markedByName = user.name;
+      recordData.markedByRole = 'teacher';
+    } else {
+      if (!recordData.markedBy) recordData.markedBy = user.email || 'abhinav@soundabode.com';
+      if (!recordData.markedByName) recordData.markedByName = user.name || 'Abhinav';
+      if (!recordData.markedByRole) recordData.markedByRole = user.role || 'admin';
+    }
+
     if (!recordData.id) recordData.id = `att-${Date.now()}`;
-    if (!recordData.updatedAt) recordData.updatedAt = new Date().toISOString();
+    recordData.updatedAt = new Date().toISOString();
+    if (typeof recordData.comment !== 'string') recordData.comment = '';
+    if (recordData.comment.length > 1000) recordData.comment = recordData.comment.slice(0, 1000);
 
     if (mongoose.connection.readyState === 1) {
       const query = {
@@ -1764,8 +1825,11 @@ app.post('/api/attendance', async (req, res) => {
         recordData,
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
+      broadcastLiveEvent('ATTENDANCE_SAVED', record);
       return res.status(201).json(record);
     }
+
+    broadcastLiveEvent('ATTENDANCE_SAVED', recordData);
     res.status(201).json(recordData);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1776,8 +1840,10 @@ app.delete('/api/attendance', requireAuth, requireAdmin, async (req, res) => {
   try {
     if (mongoose.connection.readyState === 1) {
       await AttendanceRecordModel.deleteMany({});
+      broadcastLiveEvent('ATTENDANCE_PURGED', {});
       return res.json({ success: true, message: 'All attendance records purged.' });
     }
+    broadcastLiveEvent('ATTENDANCE_PURGED', {});
     res.json({ success: true, message: 'Local attendance cleared.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1787,11 +1853,30 @@ app.delete('/api/attendance', requireAuth, requireAdmin, async (req, res) => {
 app.delete('/api/attendance/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
+    const user = req.sessionUser;
+
     if (mongoose.connection.readyState === 1) {
+      // If teacher, check ownership before deletion
+      if (user.role === 'teacher') {
+        const existing = await AttendanceRecordModel.findOne(buildDeleteQuery(id));
+        if (existing) {
+          const mBy = (existing.markedBy || '').toLowerCase();
+          const mName = (existing.markedByName || '').toLowerCase();
+          const uEmail = (user.email || '').toLowerCase();
+          const uName = (user.name || '').toLowerCase();
+          const isOwner = mBy === uEmail || mName === uName || mBy.includes(uName) || mName.includes(uName);
+          if (!isOwner) {
+            return res.status(403).json({ error: 'Forbidden. You can only delete your own attendance records.' });
+          }
+        }
+      }
+
       const result = await AttendanceRecordModel.deleteMany(buildDeleteQuery(id));
       console.log(`[DELETE] Deleted ${result.deletedCount} attendance record(s) matching ${id}`);
+      broadcastLiveEvent('ATTENDANCE_DELETED', { id });
       return res.json({ success: true, deletedCount: result.deletedCount, id });
     }
+    broadcastLiveEvent('ATTENDANCE_DELETED', { id });
     res.json({ success: true, id });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -1,4 +1,5 @@
-import { AuthService } from './authService';
+import { AuthService, CmsUser } from './authService';
+import { getApiBaseUrl } from './apiConfig';
 
 export interface EnrolledStudent {
   id: string;
@@ -145,16 +146,70 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [
     enrolledDate: '2026-08-12',
   },
 ];
+
 const INITIAL_ATTENDANCE: AttendanceRecord[] = [];
 
-import { getApiBaseUrl } from './apiConfig';
-
 const STUDENTS_STORAGE_KEY = 'soundabode_enrolled_students';
-const ATTENDANCE_STORAGE_KEY = 'soundabode_attendance_records';
 const ATTENDANCE_EVENT_NAME = 'soundabode_attendance_updated';
 const API_BASE_URL = getApiBaseUrl();
 
 type AttendanceListener = (records: AttendanceRecord[]) => void;
+
+function getAttendanceStorageKey(user?: CmsUser | null): string {
+  const u = user || AuthService.getCurrentUser();
+  if (!u) return 'soundabode_attendance_records_guest';
+  const cleanEmail = (u.email || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+  return `soundabode_attendance_records_${u.role}_${cleanEmail}`;
+}
+
+// ─── Real-Time Live SSE Stream Initialization for Attendance ─────────────────
+let liveAttendanceEventSource: EventSource | null = null;
+
+function initAttendanceLiveStream() {
+  if (typeof window === 'undefined' || !('EventSource' in window)) return;
+  if (liveAttendanceEventSource) return;
+
+  try {
+    const sseUrl = `${API_BASE_URL}/live-stream`;
+    liveAttendanceEventSource = new EventSource(sseUrl);
+
+    liveAttendanceEventSource.addEventListener('ATTENDANCE_SAVED', (e: MessageEvent) => {
+      try {
+        const item = JSON.parse(e.data);
+        if (item && item.id) {
+          AttendanceService.handleIncomingLiveAttendance(item);
+        }
+      } catch (err) {
+        console.warn('SSE ATTENDANCE_SAVED parse error:', err);
+      }
+    });
+
+    liveAttendanceEventSource.addEventListener('ATTENDANCE_DELETED', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data && data.id) {
+          AttendanceService.handleIncomingLiveDelete(data.id);
+        }
+      } catch (err) {
+        console.warn('SSE ATTENDANCE_DELETED parse error:', err);
+      }
+    });
+
+    liveAttendanceEventSource.addEventListener('ATTENDANCE_PURGED', () => {
+      AttendanceService.handleIncomingLivePurge();
+    });
+
+    liveAttendanceEventSource.onerror = () => {
+      // EventSource auto-reconnects
+    };
+  } catch (err) {
+    console.warn('Failed to initialize Attendance SSE stream:', err);
+  }
+}
+
+if (typeof window !== 'undefined') {
+  initAttendanceLiveStream();
+}
 
 export class AttendanceService {
   private static listeners: AttendanceListener[] = [];
@@ -206,18 +261,16 @@ export class AttendanceService {
     return INITIAL_STUDENTS;
   }
 
-  private static getStoredAttendance(): AttendanceRecord[] {
+  private static getStoredAttendance(user?: CmsUser | null): AttendanceRecord[] {
     try {
-      const stored = localStorage.getItem(ATTENDANCE_STORAGE_KEY);
+      const storageKey = getAttendanceStorageKey(user);
+      const stored = localStorage.getItem(storageKey);
       if (stored) {
         const parsed: AttendanceRecord[] = JSON.parse(stored);
         const validStudentIds = new Set(this.getStoredStudents().map((s) => s.id));
         const filtered = parsed.filter(
           (r) => r && !['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id) && validStudentIds.has(r.studentId)
         );
-        if (filtered.length !== parsed.length) {
-          localStorage.setItem(ATTENDANCE_STORAGE_KEY, JSON.stringify(filtered));
-        }
         return filtered;
       }
     } catch {
@@ -227,8 +280,9 @@ export class AttendanceService {
   }
 
   public static clearAllAttendance(): void {
+    const storageKey = getAttendanceStorageKey();
     try {
-      localStorage.setItem(ATTENDANCE_STORAGE_KEY, JSON.stringify([]));
+      localStorage.setItem(storageKey, JSON.stringify([]));
     } catch {}
     this.notifyChange([]);
     if (typeof window !== 'undefined') {
@@ -239,9 +293,20 @@ export class AttendanceService {
     }
   }
 
-  private static saveAttendance(records: AttendanceRecord[]): void {
+  public static clearUserCache(): void {
     try {
-      localStorage.setItem(ATTENDANCE_STORAGE_KEY, JSON.stringify(records));
+      const storageKey = getAttendanceStorageKey();
+      localStorage.removeItem(storageKey);
+      // Also remove legacy un-scoped key if present
+      localStorage.removeItem('soundabode_attendance_records');
+    } catch {}
+    this.notifyChange([]);
+  }
+
+  private static saveAttendance(records: AttendanceRecord[], user?: CmsUser | null): void {
+    try {
+      const storageKey = getAttendanceStorageKey(user);
+      localStorage.setItem(storageKey, JSON.stringify(records));
       this.notifyChange(records);
     } catch {
       // Fallback
@@ -285,10 +350,10 @@ export class AttendanceService {
   }
 
   /**
-   * Fetches latest attendance from remote MongoDB and syncs to localStorage.
+   * Fetches latest attendance from remote MongoDB and syncs to user-scoped storage.
    * Cleans up any orphaned records for deleted/unknown students.
    */
-  public static async fetchAndSyncFromRemote(): Promise<AttendanceRecord[]> {
+  public static async fetchAndSyncFromRemote(user?: CmsUser | null): Promise<AttendanceRecord[]> {
     if (typeof window !== 'undefined') {
       try {
         const res = await fetch(`${API_BASE_URL}/attendance`, {
@@ -301,9 +366,27 @@ export class AttendanceService {
             const cleanRecords: AttendanceRecord[] = [];
             const orphanedRecordsToDelete: AttendanceRecord[] = [];
 
+            const activeUser = user || AuthService.getCurrentUser();
+            const isTeacher = activeUser?.role === 'teacher';
+            const uEmail = (activeUser?.email || '').toLowerCase();
+            const uName = (activeUser?.name || '').toLowerCase();
+
             remoteRecords.forEach((r: AttendanceRecord) => {
               if (!r) return;
               if (['att-201', 'att-202', 'att-203', 'att-204'].includes(r.id)) return;
+
+              // Teacher role check
+              if (isTeacher) {
+                const mBy = (r.markedBy || '').toLowerCase();
+                const mName = (r.markedByName || '').toLowerCase();
+                const matchesTeacher =
+                  mBy === uEmail ||
+                  mName === uName ||
+                  (uEmail && mBy.includes(uEmail)) ||
+                  (uName && (mName.includes(uName) || mBy.includes(uName)));
+                if (!matchesTeacher) return;
+              }
+
               if (validStudentIds.has(r.studentId)) {
                 cleanRecords.push(r);
               } else {
@@ -311,7 +394,7 @@ export class AttendanceService {
               }
             });
 
-            this.saveAttendance(cleanRecords);
+            this.saveAttendance(cleanRecords, activeUser);
 
             // Asynchronously delete orphaned records on remote MongoDB
             if (orphanedRecordsToDelete.length > 0) {
@@ -330,11 +413,66 @@ export class AttendanceService {
         console.warn('Attendance remote fetch failed:', err);
       }
     }
-    return this.getStoredAttendance();
+    return this.getStoredAttendance(user);
   }
 
-  public static getAllAttendanceRecords(): AttendanceRecord[] {
-    return this.getStoredAttendance();
+  public static getAllAttendanceRecords(user?: CmsUser | null): AttendanceRecord[] {
+    const activeUser = user || AuthService.getCurrentUser();
+    const records = this.getStoredAttendance(activeUser);
+
+    if (activeUser?.role === 'teacher') {
+      const uEmail = (activeUser.email || '').toLowerCase();
+      const uName = (activeUser.name || '').toLowerCase();
+      return records.filter((r) => {
+        const mBy = (r.markedBy || '').toLowerCase();
+        const mName = (r.markedByName || '').toLowerCase();
+        if (mBy && mBy === uEmail) return true;
+        if (mName && mName === uName) return true;
+        if (uEmail && mBy.includes(uEmail)) return true;
+        if (uName && (mName.includes(uName) || mBy.includes(uName))) return true;
+        return false;
+      });
+    }
+
+    return records;
+  }
+
+  // ─── Real-Time Live SSE Handlers ──────────────────────────────────────────
+  public static handleIncomingLiveAttendance(record: AttendanceRecord): void {
+    const currentUser = AuthService.getCurrentUser();
+    if (currentUser?.role === 'teacher') {
+      const uEmail = (currentUser.email || '').toLowerCase();
+      const uName = (currentUser.name || '').toLowerCase();
+      const mBy = (record.markedBy || '').toLowerCase();
+      const mName = (record.markedByName || '').toLowerCase();
+      const matches =
+        mBy === uEmail ||
+        mName === uName ||
+        (uEmail && mBy.includes(uEmail)) ||
+        (uName && (mName.includes(uName) || mBy.includes(uName)));
+      if (!matches) return; // Do not inject other teacher's records into active teacher session
+    }
+
+    let records = this.getStoredAttendance(currentUser);
+    const existingIndex = records.findIndex((r) => r.id === record.id);
+    if (existingIndex !== -1) {
+      records[existingIndex] = record;
+    } else {
+      records = [record, ...records];
+    }
+    this.saveAttendance(records, currentUser);
+  }
+
+  public static handleIncomingLiveDelete(id: string): void {
+    const currentUser = AuthService.getCurrentUser();
+    let records = this.getStoredAttendance(currentUser);
+    records = records.filter((r) => r.id !== id);
+    this.saveAttendance(records, currentUser);
+  }
+
+  public static handleIncomingLivePurge(): void {
+    const currentUser = AuthService.getCurrentUser();
+    this.saveAttendance([], currentUser);
   }
 
   public static getAllStudents(): EnrolledStudent[] {
@@ -388,10 +526,11 @@ export class AttendanceService {
     this.saveStudents(students);
 
     // Also purge all attendance records for this student
-    let attendance = this.getStoredAttendance();
+    const currentUser = AuthService.getCurrentUser();
+    let attendance = this.getStoredAttendance(currentUser);
     const recordsToDelete = attendance.filter((r) => r.studentId === id);
     attendance = attendance.filter((r) => r.studentId !== id);
-    this.saveAttendance(attendance);
+    this.saveAttendance(attendance, currentUser);
     this.notifyChange(attendance);
 
     if (typeof window !== 'undefined') {
@@ -428,29 +567,26 @@ export class AttendanceService {
     studentId: string,
     user?: { email?: string; role?: string; name?: string }
   ): AttendanceRecord[] {
-    const records = this.getStoredAttendance();
+    const activeUser = (user || AuthService.getCurrentUser()) as CmsUser | null;
+    const records = this.getStoredAttendance(activeUser);
     const studentRecords = records.filter((r) => r.studentId === studentId);
 
     // If no user context or role === 'admin', return ALL records
-    if (!user || user.role === 'admin') {
+    if (!activeUser || activeUser.role === 'admin') {
       return studentRecords;
     }
 
     // Teacher role (e.g. Ashu, Vaibhav, Vrishan) - ONLY return records marked by THIS teacher
-    const uEmail = (user.email || '').toLowerCase();
-    const uName = (user.name || '').toLowerCase();
+    const uEmail = (activeUser.email || '').toLowerCase();
+    const uName = (activeUser.name || '').toLowerCase();
 
     return studentRecords.filter((r) => {
       const mBy = (r.markedBy || '').toLowerCase();
       const mName = (r.markedByName || '').toLowerCase();
       if (mBy && mBy === uEmail) return true;
       if (mName && mName === uName) return true;
-      if (uEmail.includes('ashu') && (mBy.includes('ashu') || mName.includes('ashu'))) return true;
-      if (uEmail.includes('vaibhav') && (mBy.includes('vaibhav') || mName.includes('vaibhav'))) return true;
-      if (uEmail.includes('vrishan') && (mBy.includes('vrishan') || mName.includes('vrishan'))) return true;
-      if (uName.includes('ashu') && (mBy.includes('ashu') || mName.includes('ashu'))) return true;
-      if (uName.includes('vaibhav') && (mBy.includes('vaibhav') || mName.includes('vaibhav'))) return true;
-      if (uName.includes('vrishan') && (mBy.includes('vrishan') || mName.includes('vrishan'))) return true;
+      if (uEmail && mBy.includes(uEmail)) return true;
+      if (uName && (mName.includes(uName) || mBy.includes(uName))) return true;
       return false;
     });
   }
@@ -465,7 +601,8 @@ export class AttendanceService {
     markedByName: string;
     markedByRole: 'admin' | 'teacher';
   }): AttendanceRecord {
-    let records = this.getStoredAttendance();
+    const currentUser = AuthService.getCurrentUser();
+    let records = this.getStoredAttendance(currentUser);
 
     const mBy = payload.markedBy.toLowerCase();
     const mName = payload.markedByName.toLowerCase();
@@ -480,12 +617,8 @@ export class AttendanceService {
 
       if (rBy && rBy === mBy) return true;
       if (rName && rName === mName) return true;
-      if (mBy.includes('ashu') && (rBy.includes('ashu') || rName.includes('ashu'))) return true;
-      if (mBy.includes('vaibhav') && (rBy.includes('vaibhav') || rName.includes('vaibhav'))) return true;
-      if (mBy.includes('vrishan') && (rBy.includes('vrishan') || rName.includes('vrishan'))) return true;
-      if (mName.includes('ashu') && (rBy.includes('ashu') || rName.includes('ashu'))) return true;
-      if (mName.includes('vaibhav') && (rBy.includes('vaibhav') || rName.includes('vaibhav'))) return true;
-      if (mName.includes('vrishan') && (rBy.includes('vrishan') || rName.includes('vrishan'))) return true;
+      if (mBy && rBy.includes(mBy)) return true;
+      if (mName && (rName.includes(mName) || rBy.includes(mName))) return true;
       return false;
     });
 
@@ -501,7 +634,7 @@ export class AttendanceService {
         markedByRole: payload.markedByRole,
         updatedAt: now,
       };
-      this.saveAttendance(records);
+      this.saveAttendance(records, currentUser);
       this.syncAttendanceToRemote(records[existingIndex]);
       return records[existingIndex];
     } else {
@@ -518,7 +651,7 @@ export class AttendanceService {
         updatedAt: now,
       };
       records = [newRecord, ...records];
-      this.saveAttendance(records);
+      this.saveAttendance(records, currentUser);
       this.syncAttendanceToRemote(newRecord);
       return newRecord;
     }
@@ -552,9 +685,10 @@ export class AttendanceService {
   }
 
   public static async deleteAttendanceRecord(id: string): Promise<boolean> {
-    let records = this.getStoredAttendance();
+    const currentUser = AuthService.getCurrentUser();
+    let records = this.getStoredAttendance(currentUser);
     records = records.filter((r) => r.id !== id);
-    this.saveAttendance(records);
+    this.saveAttendance(records, currentUser);
 
     if (typeof window !== 'undefined') {
       try {
