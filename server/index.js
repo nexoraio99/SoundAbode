@@ -9,6 +9,45 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+// ─── Meta Conversions API — graceful optional load ───────────────────────────
+// All CAPI logic is isolated in metaCapi.js. If this module fails to load,
+// the server starts normally and CAPI is silently disabled.
+let sendCapiEventForStatus = async () => {};
+let sendTestCapiEvent = async () => ({ success: false, error: 'CAPI module not loaded' });
+try {
+  const capiModule = await import('./metaCapi.js');
+  sendCapiEventForStatus = capiModule.sendCapiEventForStatus;
+  sendTestCapiEvent = capiModule.sendTestCapiEvent;
+  console.log('[CAPI] Meta Conversions API module loaded successfully.');
+} catch (capiLoadErr) {
+  console.warn('[CAPI] metaCapi.js could not be loaded — CAPI disabled. Error:', capiLoadErr.message);
+}
+
+// ─── Meta Lead Ads Webhook — graceful optional load ─────────────────────────
+let handleWebhookVerification = (req, res) => res.status(501).send('Webhook not loaded');
+let handleWebhookEvent = async (_req, res) => res.status(501).send('Webhook not loaded');
+let persistMetaLead = async () => null;
+let subscribePageToLeadWebhook = async () => null;
+try {
+  const leadWebhookModule = await import('./metaLeadWebhook.js');
+  handleWebhookVerification = leadWebhookModule.handleWebhookVerification;
+  handleWebhookEvent = leadWebhookModule.handleWebhookEvent;
+  persistMetaLead = leadWebhookModule.persistMetaLead;
+  subscribePageToLeadWebhook = leadWebhookModule.subscribePageToLeadWebhook;
+  console.log('[Meta Webhook] Meta Lead Ads Webhook module loaded successfully.');
+
+  // Automatically ensure the Facebook Page is subscribed to this app's leadgen webhook
+  if (process.env.META_PAGE_ACCESS_TOKEN) {
+    setTimeout(() => {
+      subscribePageToLeadWebhook('1609738365919238').catch((err) => {
+        console.warn('[Meta Webhook] Auto-subscribe notice:', err.message);
+      });
+    }, 1500);
+  }
+} catch (webhookLoadErr) {
+  console.warn('[Meta Webhook] metaLeadWebhook.js could not be loaded. Error:', webhookLoadErr.message);
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const BACKUPS_DIR = path.join(__dirname, 'backups');
@@ -155,7 +194,15 @@ app.use(
 );
 
 // Body size limit — allows photo uploads (compressed passport photos ~50-200KB, max limit 15MB)
-app.use(express.json({ limit: '15mb' }));
+// Preserves req.rawBody for cryptographic webhook signature verification (Meta Webhook HMAC SHA-256)
+app.use(
+  express.json({
+    limit: '15mb',
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
 // Anti-caching headers on all API routes to ensure real-time fresh data
@@ -466,6 +513,8 @@ const inquirySchema = new mongoose.Schema({
   submittedAt: { type: Date, default: Date.now },
   status: { type: String, enum: ['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'], default: 'NEW' },
   notes: { type: String, default: '' },
+  // Optional: Meta Lead Ad ID (15–17 digit ID from Meta Lead Ads webhook)
+  metaLeadId: { type: String, default: '' },
 });
 
 const blogPostSchema = new mongoose.Schema({
@@ -1651,7 +1700,15 @@ async function forwardToGoogleSheets(rawPayload) {
     });
 
     const responseText = await response.text();
-    console.log('[SUCCESS] [Google Sheets] Apps Script Output Status:', response.status, String(responseText));
+    if (response.ok) {
+      console.log('[SUCCESS] [Google Sheets] Apps Script Output Status:', response.status, String(responseText).slice(0, 150));
+    } else {
+      console.warn(
+        '[WARN] [Google Sheets] Apps Script returned status:',
+        response.status,
+        responseText.includes('<html') ? '(Google Drive temporary notice)' : responseText.slice(0, 150)
+      );
+    }
   } catch (err) {
     console.error('[ERROR] [Google Sheets Error]:', err.message);
   }
@@ -1764,9 +1821,54 @@ app.patch('/api/inquiries/:id', requireAuth, async (req, res) => {
     const updates = req.body;
     if (mongoose.connection.readyState === 1) {
       const updated = await InquiryModel.findOneAndUpdate({ id }, updates, { new: true });
+
+      // ─── Meta CAPI: Fire-and-forget event on status change ─────────────────
+      // Runs AFTER res.json() — cannot block, delay, or break the CMS response.
+      if (updated && updates.status) {
+        Promise.resolve().then(async () => {
+          try {
+            await sendCapiEventForStatus({
+              status: updated.status,
+              email: updated.email || '',
+              phone: updated.phone || '',
+              fbclid: updated.attribution?.fbclid || '',
+              metaLeadId: updated.metaLeadId || '',
+            });
+          } catch (capiErr) {
+            // Non-critical: log only, never re-throw
+            console.error('[CAPI] Non-critical dispatch error (inquiry PATCH):', capiErr?.message);
+          }
+        });
+      }
+      // ──────────────────────────────────────────────────────────────────────
+
       return res.json(updated);
     }
     res.json({ id, ...updates });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── META CAPI TEST ENDPOINT (Admin only) ──────────────────────────────────────
+// Sends a test event to Meta Events Manager → Test Events tab.
+// Requires META_TEST_EVENT_CODE in server/.env
+app.post('/api/meta-capi/test', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const result = await sendTestCapiEvent();
+    if (result.success) {
+      return res.json({
+        success: true,
+        message: 'Test event dispatched to Meta Events Manager. Check the Test Events tab.',
+        ...result,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: result.error || 'Failed to send test event.',
+        ...result,
+      });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1794,6 +1896,77 @@ app.delete('/api/inquiries/:id', requireAuth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ─── META LEAD ADS WEBHOOK ENDPOINTS ──────────────────────────────────────────
+// 1. GET: Webhook verification handshake called by Meta App Dashboard
+app.get('/api/webhooks/meta-leads', (req, res) => {
+  handleWebhookVerification(req, res);
+});
+
+// 2. POST: Incoming leadgen event from Meta
+app.post('/api/webhooks/meta-leads', async (req, res) => {
+  await handleWebhookEvent(req, res, {
+    InquiryModel,
+    forwardToGoogleSheets,
+    broadcastLiveEvent,
+    sendCapiEventForStatus,
+  });
+});
+
+// 3. GET: Webhook and credentials status (for CMS Admin Meta Ads tab)
+app.get('/api/webhooks/meta-leads/status', (req, res) => {
+  const hasVerifyToken = Boolean(process.env.META_WEBHOOK_VERIFY_TOKEN);
+  const hasAppSecret = Boolean(process.env.META_APP_SECRET);
+  const hasPageAccessToken = Boolean(process.env.META_PAGE_ACCESS_TOKEN);
+  const hasCapiToken = Boolean(process.env.META_ACCESS_TOKEN);
+
+  res.json({
+    status: 'online',
+    verifyTokenConfigured: hasVerifyToken,
+    appSecretConfigured: hasAppSecret,
+    pageAccessTokenConfigured: hasPageAccessToken,
+    capiTokenConfigured: hasCapiToken,
+    verifyToken: (process.env.META_WEBHOOK_VERIFY_TOKEN || 'soundabode_leads_2024').trim(),
+    webhookEndpoint: '/api/webhooks/meta-leads',
+  });
+});
+
+// 4. POST: Simulate a realistic Meta Lead for immediate CMS validation
+app.post('/api/webhooks/meta-leads/simulate-test', async (req, res) => {
+  try {
+    const { name, email, phone, courseInterest, campaignName, formName } = req.body || {};
+    const simulatedLeadgenId = `sim_${Date.now()}`;
+    const lead = await persistMetaLead({
+      leadgenId: simulatedLeadgenId,
+      name: name || 'Priya Sharma (Meta Test)',
+      email: email || `priya.sharma${Date.now().toString().slice(-4)}@example.com`,
+      phone: phone || '+91 98200 12345',
+      courseInterest: courseInterest || 'Music Production & Sound Engineering',
+      formName: formName || 'Instagram Instant Lead Form',
+      campaignName: campaignName || 'Meta Ads Masterclass 2024',
+      additionalNotes: 'Simulated Meta Lead Ad for CMS validation',
+      InquiryModel,
+      forwardToGoogleSheets,
+      broadcastLiveEvent,
+      sendCapiEventForStatus,
+    });
+    return res.status(201).json({ success: true, lead });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. POST: Programmatically subscribe the Facebook Page to leadgen webhook
+app.post('/api/webhooks/meta-leads/subscribe', async (req, res) => {
+  try {
+    const pageId = req.body?.pageId || '1609738365919238';
+    const result = await subscribePageToLeadWebhook(pageId);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // ─── ADMISSIONS ────────────────────────────────────────────────────────────────
 

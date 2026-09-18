@@ -2012,6 +2012,71 @@
   display: block;
 }
 
+/* ─── LEAD PIPELINE (KANBAN) BOARD ──────────────────────────────────────────── */
+.pipelineBoard {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  overflow-x: auto;
+}
+
+.pipelineColumn {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 0.85rem 0.75rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 220px;
+  transition: border-color 0.2s ease;
+}
+
+.pipelineColHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.pipelineCards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  flex: 1;
+}
+
+.pipelineCard {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 0.75rem 0.7rem;
+  cursor: default;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.pipelineCard:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  border-color: var(--border-medium);
+}
+
+@media (max-width: 900px) {
+  .pipelineBoard {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .pipelineBoard {
+    grid-template-columns: 1fr;
+  }
+}
+/* ──────────────────────────────────────────────────────────────────────────── */
+
 /* LEADS CONTROL PANEL & FILTERS */
 .leadsControlPanel {
   background: var(--bg-surface);

@@ -15,12 +15,14 @@ import { IssueService, DeveloperIssue, DEVELOPER_EMAIL, SENDER_EMAIL } from '../
 import { ReminderService } from '../../services/reminderService';
 import { FeeReceipt, FeeService } from '../../services/feeService';
 import { WordPressArticleEditorModal } from '../../components/cms/WordPressArticleEditorModal';
+import { triggerCapiTestEvent, getCapiEventNameForStatus } from '../../services/metaCapiService';
+import { MetaAdsTab } from './components/MetaAdsTab';
 
 interface CmsAdminPageProps {
   onNavigate?: (page: string) => void;
 }
 
-type TabType = 'overview' | 'students' | 'classes' | 'blog' | 'inquiries' | 'admissions' | 'attendance' | 'fees' | 'settings';
+type TabType = 'overview' | 'students' | 'classes' | 'blog' | 'inquiries' | 'meta-ads' | 'admissions' | 'attendance' | 'fees' | 'settings';
 
 const THEME_STORAGE_KEY = 'soundabode_cms_theme';
 
@@ -227,6 +229,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const [inquiryStatusFilter, setInquiryStatusFilter] = useState<string>('ALL');
   const [inquirySourceFilter, setInquirySourceFilter] = useState<string>('ALL');
   const [selectedInquiryIds, setSelectedInquiryIds] = useState<string[]>([]);
+  // Lead pipeline view toggle: 'pipeline' | 'list'
+  const [leadView, setLeadView] = useState<'pipeline' | 'list'>('pipeline');
+  // Meta CAPI test state
+  const [capiTestStatus, setCapiTestStatus] = useState<{ loading: boolean; result: string | null; isError: boolean }>({ loading: false, result: null, isError: false });
 
   // Students tab states
   const [studentSearch, setStudentSearch] = useState('');
@@ -1708,6 +1714,26 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   }, [students, studentSearch, studentCourseFilter]);
 
   const newInquiryCount = inquiries.filter((i) => i.status === 'NEW').length;
+  const metaLeadsCount = useMemo(() => {
+    return inquiries.filter((inq) => {
+      const isMeta =
+        inq.source === 'Meta Lead Ad' ||
+        inq.source === 'Meta Ads' ||
+        Boolean(inq.metaLeadId) ||
+        inq.attribution?.source === 'Meta Ads';
+      return isMeta;
+    }).length;
+  }, [inquiries]);
+  const newMetaLeadsCount = useMemo(() => {
+    return inquiries.filter((inq) => {
+      const isMeta =
+        inq.source === 'Meta Lead Ad' ||
+        inq.source === 'Meta Ads' ||
+        Boolean(inq.metaLeadId) ||
+        inq.attribution?.source === 'Meta Ads';
+      return isMeta && inq.status === 'NEW';
+    }).length;
+  }, [inquiries]);
   const enrolledCount = inquiries.filter((i) => i.status === 'ENROLLED').length;
   const conversionRate = inquiries.length > 0 ? Math.round((enrolledCount / inquiries.length) * 100) : 0;
   const newAdmissionsCount = useMemo(() => admissions.filter((a) => a.status === 'NEW').length, [admissions]);
@@ -2898,6 +2924,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   </button>
 
                   <button
+                    onClick={() => { setActiveTab('meta-ads'); setIsMobileMenuOpen(false); }}
+                    className={`${styles.sidebarBtn} ${activeTab === 'meta-ads' ? styles.sidebarBtnActive : ''}`}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z" />
+                    </svg>
+                    Meta Ads
+                    {newMetaLeadsCount > 0 ? (
+                      <span className={`${styles.badgeCount} ${styles.badgeCountNew}`}>{newMetaLeadsCount}</span>
+                    ) : metaLeadsCount > 0 ? (
+                      <span className={styles.badgeCount}>{metaLeadsCount}</span>
+                    ) : null}
+                  </button>
+
+                  <button
                     onClick={() => { setActiveTab('admissions'); setIsMobileMenuOpen(false); }}
                     className={`${styles.sidebarBtn} ${activeTab === 'admissions' ? styles.sidebarBtnActive : ''}`}
                   >
@@ -3050,6 +3091,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 </svg>
                 Leads
                 {newInquiryCount > 0 && <span className={`${styles.badgeCount} ${styles.badgeCountNew}`}>{newInquiryCount}</span>}
+              </button>
+              <button
+                id="cms-tab-meta-ads"
+                onClick={() => setActiveTab('meta-ads')}
+                className={`${styles.sidebarBtn} ${activeTab === 'meta-ads' ? styles.sidebarBtnActive : ''}`}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z" />
+                </svg>
+                Meta Ads
+                {newMetaLeadsCount > 0 ? (
+                  <span className={`${styles.badgeCount} ${styles.badgeCountNew}`}>{newMetaLeadsCount}</span>
+                ) : metaLeadsCount > 0 ? (
+                  <span className={styles.badgeCount}>{metaLeadsCount}</span>
+                ) : null}
               </button>
               <button
                 onClick={() => setActiveTab('admissions')}
@@ -5857,6 +5913,187 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 </div>
               </div>
 
+              {/* VIEW TOGGLE — Pipeline vs List */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '3px', gap: '3px' }}>
+                  <button
+                    id="lead-view-pipeline"
+                    onClick={() => setLeadView('pipeline')}
+                    style={{
+                      background: leadView === 'pipeline' ? 'var(--bg-panel)' : 'transparent',
+                      color: leadView === 'pipeline' ? 'var(--text-primary)' : 'var(--text-muted)',
+                      border: 'none', borderRadius: '6px', padding: '0.35rem 0.85rem',
+                      fontSize: '0.775rem', fontWeight: leadView === 'pipeline' ? 600 : 500, cursor: 'pointer',
+                      boxShadow: leadView === 'pipeline' ? '0 1px 3px rgba(0,0,0,0.2)' : 'none', transition: 'all 0.15s ease',
+                      display: 'flex', alignItems: 'center', gap: '0.4rem',
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="3" width="5" height="18" rx="1"/><rect x="10" y="3" width="5" height="18" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/>
+                    </svg>
+                    Pipeline
+                  </button>
+                  <button
+                    id="lead-view-list"
+                    onClick={() => setLeadView('list')}
+                    style={{
+                      background: leadView === 'list' ? 'var(--bg-panel)' : 'transparent',
+                      color: leadView === 'list' ? 'var(--text-primary)' : 'var(--text-muted)',
+                      border: 'none', borderRadius: '6px', padding: '0.35rem 0.85rem',
+                      fontSize: '0.775rem', fontWeight: leadView === 'list' ? 600 : 500, cursor: 'pointer',
+                      boxShadow: leadView === 'list' ? '0 1px 3px rgba(0,0,0,0.2)' : 'none', transition: 'all 0.15s ease',
+                      display: 'flex', alignItems: 'center', gap: '0.4rem',
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+                      <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+                    </svg>
+                    List
+                  </button>
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
+                  Status changes auto-sync to Meta Ads
+                </div>
+              </div>
+
+              {/* KANBAN PIPELINE VIEW */}
+              {leadView === 'pipeline' && (
+                <div className={styles.pipelineBoard}>
+                  {(['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'] as const).map((stage) => {
+                    const stageLeads = inquiries.filter((inq) => inq.status === stage);
+                    const capiEvent = getCapiEventNameForStatus(stage);
+                    const stageColors: Record<string, { accent: string; bg: string; border: string }> = {
+                      NEW:       { accent: '#3b82f6', bg: 'rgba(59, 130, 246, 0.07)',  border: 'rgba(59, 130, 246, 0.22)' },
+                      CONTACTED: { accent: '#f59e0b', bg: 'rgba(245, 158, 11, 0.07)', border: 'rgba(245, 158, 11, 0.22)' },
+                      ENROLLED:  { accent: '#22c55e', bg: 'rgba(34, 197, 94, 0.07)',  border: 'rgba(34, 197, 94, 0.22)'  },
+                      ARCHIVED:  { accent: '#6b7280', bg: 'rgba(107, 114, 128, 0.05)', border: 'rgba(107, 114, 128, 0.18)' },
+                    };
+                    const col = stageColors[stage];
+                    return (
+                      <div key={stage} className={styles.pipelineColumn} style={{ borderTop: `3px solid ${col.accent}` }}>
+                        {/* Column Header */}
+                        <div className={styles.pipelineColHeader}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span style={{ fontWeight: 700, fontSize: '0.8rem', color: col.accent, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{stage}</span>
+                            <span style={{
+                              background: col.bg, border: `1px solid ${col.border}`,
+                              color: col.accent, borderRadius: '20px', padding: '0.1rem 0.55rem',
+                              fontSize: '0.7rem', fontWeight: 700,
+                            }}>{stageLeads.length}</span>
+                          </div>
+                          {capiEvent ? (
+                            <span style={{ fontSize: '0.62rem', color: '#4ade80', background: 'rgba(74, 222, 128, 0.08)', border: '1px solid rgba(74, 222, 128, 0.2)', borderRadius: '4px', padding: '0.1rem 0.4rem', display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }}>
+                              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="3"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
+                              Meta: {capiEvent}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-subtle)', borderRadius: '4px', padding: '0.1rem 0.4rem', whiteSpace: 'nowrap' }}>No event</span>
+                          )}
+                        </div>
+
+                        {/* Lead Cards */}
+                        <div className={styles.pipelineCards}>
+                          {stageLeads.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: '2rem 0.5rem', color: 'var(--text-muted)', fontSize: '0.75rem' }}>No leads in this stage</div>
+                          ) : stageLeads.map((inq) => {
+                            const av = getAvatarDetails(inq.name);
+                            const sourceBadge = getSourceBadgeDetails(inq);
+                            const isMetaLead = (inq.attribution?.source || '').includes('Meta') || !!(inq.attribution?.fbclid);
+                            const timeAgo = (() => {
+                              const diff = Date.now() - new Date(inq.submittedAt).getTime();
+                              const mins = Math.floor(diff / 60000);
+                              if (mins < 60) return `${mins}m ago`;
+                              const hrs = Math.floor(mins / 60);
+                              if (hrs < 24) return `${hrs}h ago`;
+                              return `${Math.floor(hrs / 24)}d ago`;
+                            })();
+                            return (
+                              <div key={inq.id} className={styles.pipelineCard}>
+                                {/* Card top: avatar + name + time */}
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', marginBottom: '0.55rem' }}>
+                                  <div className={styles.avatarCircle} style={{ background: av.bg, border: `1px solid ${av.border}`, width: '32px', height: '32px', fontSize: '0.7rem', flexShrink: 0 }}>
+                                    {av.initials}
+                                  </div>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontWeight: 600, fontSize: '0.825rem', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{inq.name}</div>
+                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{timeAgo}</div>
+                                  </div>
+                                  {isMetaLead && (
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="#1877f2" style={{ flexShrink: 0 }} aria-label="Meta Ads lead">
+                                      <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069z"/>
+                                    </svg>
+                                  )}
+                                </div>
+
+                                {/* Course + Source */}
+                                <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginBottom: '0.4rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{inq.courseInterest}</div>
+                                <span className={`${styles.badge} ${sourceBadge.className}`} style={{ fontSize: '0.62rem', marginBottom: '0.55rem', display: 'inline-flex' }}>
+                                  <span className={styles.statusDot} />
+                                  {sourceBadge.label}
+                                </span>
+
+                                {/* Action row */}
+                                <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.35rem', flexWrap: 'wrap' }}>
+                                  <button
+                                    id={`pipeline-status-${inq.id}`}
+                                    onClick={() => cycleInquiryStatus(inq.id, inq.status)}
+                                    style={{
+                                      background: col.bg, border: `1px solid ${col.border}`, color: col.accent,
+                                      borderRadius: '5px', padding: '0.25rem 0.5rem', fontSize: '0.67rem', fontWeight: 600, cursor: 'pointer',
+                                      display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap',
+                                    }}
+                                    title="Click to advance stage"
+                                  >
+                                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                                    Next Stage
+                                  </button>
+                                  {inq.phone && (
+                                    <a
+                                      href={`https://wa.me/${inq.phone.replace(/\D/g, '')}?text=${encodeURIComponent('Hi ' + inq.name + ', this is Soundabode Studios. We saw your inquiry about ' + inq.courseInterest + '. Can we connect?')}`}
+                                      target="_blank" rel="noopener noreferrer"
+                                      style={{
+                                        background: 'rgba(37, 211, 102, 0.1)', border: '1px solid rgba(37, 211, 102, 0.3)', color: '#25d366',
+                                        borderRadius: '5px', padding: '0.25rem 0.5rem', fontSize: '0.67rem', fontWeight: 600,
+                                        display: 'flex', alignItems: 'center', gap: '0.25rem', textDecoration: 'none', whiteSpace: 'nowrap',
+                                      }}
+                                      title={`WhatsApp ${inq.phone}`}
+                                    >
+                                      <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.556 4.116 1.528 5.843L.057 23.943l6.304-1.654A11.954 11.954 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0z"/></svg>
+                                      WA
+                                    </a>
+                                  )}
+                                  <button
+                                    id={`pipeline-delete-${inq.id}`}
+                                    onClick={() => handleDeleteInquiry(inq.id)}
+                                    style={{
+                                      background: 'rgba(239, 68, 68, 0.07)', border: '1px solid rgba(239, 68, 68, 0.2)', color: '#f87171',
+                                      borderRadius: '5px', padding: '0.25rem 0.5rem', fontSize: '0.67rem', cursor: 'pointer',
+                                    }}
+                                    title="Delete lead"
+                                  >
+                                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+                                  </button>
+                                </div>
+
+                                {/* Meta Attribution strip (for Meta Ads leads) */}
+                                {isMetaLead && inq.attribution?.fbclid && (
+                                  <div style={{ marginTop: '0.55rem', paddingTop: '0.45rem', borderTop: '1px solid rgba(24, 119, 242, 0.15)', fontSize: '0.62rem', color: '#60a5fa', display: 'flex', alignItems: 'center', gap: '0.3rem', overflow: 'hidden' }}>
+                                    <svg width="8" height="8" viewBox="0 0 24 24" fill="#1877f2"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
+                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={inq.attribution.fbclid}>fbclid: {inq.attribution.fbclid.slice(0, 18)}…</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* FILTERS & SELECTION CONTROLS CONTAINER */}
               <div className={styles.leadsControlPanel}>
                 {/* 1. SIDE-BY-SIDE SOURCE & STATUS FILTERS */}
@@ -6199,6 +6436,23 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 </>
               )}
             </div>
+          )}
+
+          {/* TAB: META ADS REAL-TIME PIPELINE */}
+          {!isTeacher && activeTab === 'meta-ads' && (
+            <MetaAdsTab
+              inquiries={inquiries}
+              onUpdateStatus={(id, status, notes) => {
+                InquiryService.updateInquiryStatus(id, status, notes);
+                refreshData();
+              }}
+              onDeleteInquiry={(id) => {
+                handleDeleteInquiry(id);
+              }}
+              onRefresh={() => {
+                refreshData();
+              }}
+            />
           )}
 
           {/* TAB: ADMISSION FORM SUBMISSIONS */}
@@ -7061,6 +7315,101 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       ))}
                     </div>
                   )}
+                </div>
+
+                {/* CARD 5: META CONVERSIONS API */}
+                <div className={styles.settingsCard} style={{ borderTop: '1px solid rgba(24, 119, 242, 0.25)', boxShadow: '0 0 0 1px rgba(24, 119, 242, 0.08) inset' }}>
+                  <h3 className={styles.settingsCardTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="#1877f2">
+                      <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>
+                    </svg>
+                    Meta Conversions API
+                  </h3>
+                  <p className={styles.settingsCardDesc}>
+                    Server-side CRM integration that sends lead stage changes (New, Contacted, Enrolled) to Meta Events Manager. Fires automatically when you update a lead status.
+                  </p>
+
+                  {/* Event mapping table */}
+                  <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'hidden', marginBottom: '1rem' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.775rem' }}>
+                      <thead>
+                        <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border-subtle)' }}>
+                          <th style={{ padding: '0.5rem 0.85rem', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600 }}>CRM Status</th>
+                          <th style={{ padding: '0.5rem 0.85rem', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600 }}>Meta CAPI Event</th>
+                          <th style={{ padding: '0.5rem 0.85rem', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600 }}>Fires Automatically</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'] as const).map((s, idx) => {
+                          const ev = getCapiEventNameForStatus(s);
+                          return (
+                            <tr key={s} style={{ borderBottom: idx < 3 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
+                              <td style={{ padding: '0.5rem 0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>{s}</td>
+                              <td style={{ padding: '0.5rem 0.85rem', color: ev ? '#60a5fa' : 'var(--text-muted)', fontStyle: ev ? 'normal' : 'italic' }}>{ev ?? 'No event'}</td>
+                              <td style={{ padding: '0.5rem 0.85rem' }}>
+                                {ev ? (
+                                  <span style={{ color: '#4ade80', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
+                                    Yes
+                                  </span>
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)' }}>—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Test event button */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <button
+                      id="meta-capi-test-btn"
+                      disabled={capiTestStatus.loading}
+                      onClick={async () => {
+                        setCapiTestStatus({ loading: true, result: null, isError: false });
+                        const result = await triggerCapiTestEvent();
+                        setCapiTestStatus({
+                          loading: false,
+                          result: result.success ? 'Test event sent to Meta Events Manager. Check the Test Events tab.' : (result.error || result.message || 'Failed to send test event.'),
+                          isError: !result.success,
+                        });
+                      }}
+                      className={styles.btnSecondary}
+                      style={{ gap: '0.4rem', borderColor: 'rgba(24, 119, 242, 0.4)', color: '#60a5fa', opacity: capiTestStatus.loading ? 0.7 : 1 }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polygon points="5 3 19 12 5 21 5 3"/>
+                      </svg>
+                      {capiTestStatus.loading ? 'Sending...' : 'Send Test Event to Meta'}
+                    </button>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Requires META_TEST_EVENT_CODE in server/.env</span>
+                  </div>
+
+                  {capiTestStatus.result && (
+                    <div style={{
+                      marginTop: '0.75rem',
+                      padding: '0.6rem 0.85rem',
+                      background: capiTestStatus.isError ? 'rgba(239, 68, 68, 0.08)' : 'rgba(74, 222, 128, 0.08)',
+                      border: `1px solid ${capiTestStatus.isError ? 'rgba(239, 68, 68, 0.25)' : 'rgba(74, 222, 128, 0.25)'}`,
+                      borderRadius: '6px',
+                      fontSize: '0.775rem',
+                      color: capiTestStatus.isError ? '#f87171' : '#4ade80',
+                      display: 'flex', alignItems: 'center', gap: '0.4rem',
+                    }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        {capiTestStatus.isError ? <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/> : <><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></>}
+                      </svg>
+                      {capiTestStatus.result}
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: '0.85rem', padding: '0.6rem 0.85rem', background: 'rgba(24, 119, 242, 0.06)', border: '1px solid rgba(24, 119, 242, 0.15)', borderRadius: '6px', fontSize: '0.725rem', color: '#93c5fd', lineHeight: '1.5' }}>
+                    <strong>Setup required:</strong> Add your <code style={{ background: 'rgba(255,255,255,0.08)', padding: '0 3px', borderRadius: '3px' }}>META_ACCESS_TOKEN</code> and <code style={{ background: 'rgba(255,255,255,0.08)', padding: '0 3px', borderRadius: '3px' }}>META_TEST_EVENT_CODE</code> to <code style={{ background: 'rgba(255,255,255,0.08)', padding: '0 3px', borderRadius: '3px' }}>server/.env</code>.
+                    Generate token from: Meta Events Manager → Dataset 976314001636856 → Settings → Generate Token.
+                  </div>
                 </div>
               </div>
             </div>
