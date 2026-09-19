@@ -69,6 +69,11 @@ function normalizeAndHashPhone(phone) {
  * @param {string}  [opts.phone]         - Raw phone (hashed internally)
  * @param {string}  [opts.fbclid]        - Raw fbclid from attribution
  * @param {string}  [opts.metaLeadId]    - Meta Lead Ad lead_id (15–17 digits)
+ * @param {string}  [opts.clientIpAddress] - Client IP for match quality
+ * @param {string}  [opts.clientUserAgent] - Client user-agent for match quality
+ * @param {string}  [opts.fbp]           - Meta _fbp cookie value
+ * @param {string}  [opts.fbc]           - Meta _fbc cookie value
+ * @param {string}  [opts.eventSourceUrl] - URL where the event occurred
  * @param {boolean} [opts.isTest]        - If true, includes test_event_code
  */
 function buildCapiPayload(opts) {
@@ -79,6 +84,11 @@ function buildCapiPayload(opts) {
     phone,
     fbclid,
     metaLeadId,
+    clientIpAddress,
+    clientUserAgent,
+    fbp,
+    fbc,
+    eventSourceUrl,
     isTest = false,
   } = opts;
 
@@ -90,8 +100,31 @@ function buildCapiPayload(opts) {
   const hashedPhone = normalizeAndHashPhone(phone);
   if (hashedPhone) userData.ph = [hashedPhone];
 
-  // fbclid stored as fbc cookie format: fb.1.<timestamp>.<fbclid>
-  if (fbclid && typeof fbclid === 'string' && fbclid.trim()) {
+  // Generate external_id from email for cross-device matching
+  if (hashedEmail) {
+    userData.external_id = [hashedEmail];
+  }
+
+  // Client IP address (from server-side request headers)
+  if (clientIpAddress && typeof clientIpAddress === 'string' && clientIpAddress.trim()) {
+    userData.client_ip_address = clientIpAddress.trim();
+  }
+
+  // Client user-agent (from browser navigator.userAgent or request headers)
+  if (clientUserAgent && typeof clientUserAgent === 'string' && clientUserAgent.trim()) {
+    userData.client_user_agent = clientUserAgent.trim();
+  }
+
+  // Meta _fbp cookie (first-party browser ID — critical for match quality)
+  if (fbp && typeof fbp === 'string' && fbp.trim()) {
+    userData.fbp = fbp.trim();
+  }
+
+  // Meta _fbc cookie or constructed from fbclid
+  if (fbc && typeof fbc === 'string' && fbc.trim()) {
+    userData.fbc = fbc.trim();
+  } else if (fbclid && typeof fbclid === 'string' && fbclid.trim()) {
+    // Construct fbc cookie format: fb.1.<timestamp>.<fbclid>
     const ts = Math.floor(Date.now() / 1000);
     userData.fbc = `fb.1.${ts}.${fbclid.trim()}`;
   }
@@ -104,19 +137,24 @@ function buildCapiPayload(opts) {
     }
   }
 
+  const eventData = {
+    action_source: 'website',
+    event_name: eventName,
+    event_time: eventTime,
+    custom_data: {
+      event_source: 'crm',
+      lead_event_source: CRM_SOURCE_NAME,
+    },
+    user_data: userData,
+  };
+
+  // Event source URL (page where the conversion happened)
+  if (eventSourceUrl && typeof eventSourceUrl === 'string' && eventSourceUrl.trim()) {
+    eventData.event_source_url = eventSourceUrl.trim();
+  }
+
   const eventPayload = {
-    data: [
-      {
-        action_source: 'system_generated',
-        event_name: eventName,
-        event_time: eventTime,
-        custom_data: {
-          event_source: 'crm',
-          lead_event_source: CRM_SOURCE_NAME,
-        },
-        user_data: userData,
-      },
-    ],
+    data: [eventData],
   };
 
   // Inject test_event_code when running in test mode
@@ -187,6 +225,11 @@ async function postToMeta(payload) {
  * @param {string}  [opts.phone]    - Lead's phone number (raw, hashed internally)
  * @param {string}  [opts.fbclid]   - Facebook click ID from attribution data
  * @param {string}  [opts.metaLeadId] - Meta Lead Ad ID if available
+ * @param {string}  [opts.clientIpAddress] - Client IP (from request headers)
+ * @param {string}  [opts.clientUserAgent] - Client user-agent string
+ * @param {string}  [opts.fbp]      - Meta _fbp cookie value
+ * @param {string}  [opts.fbc]      - Meta _fbc cookie value
+ * @param {string}  [opts.eventSourceUrl] - Page URL where event occurred
  */
 export async function sendCapiEventForStatus(opts) {
   try {
@@ -205,6 +248,11 @@ export async function sendCapiEventForStatus(opts) {
       phone: opts.phone,
       fbclid: opts.fbclid,
       metaLeadId: opts.metaLeadId,
+      clientIpAddress: opts.clientIpAddress,
+      clientUserAgent: opts.clientUserAgent,
+      fbp: opts.fbp,
+      fbc: opts.fbc,
+      eventSourceUrl: opts.eventSourceUrl,
     });
 
     await postToMeta(payload);

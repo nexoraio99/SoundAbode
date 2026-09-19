@@ -1,6 +1,6 @@
 import { AuthService } from './authService';
 import { GoogleSheetsService } from './googleSheetsService';
-import { getStoredAttribution, LeadAttribution, trackLeadConversionEvent } from '../utils/attribution';
+import { getStoredAttribution, refreshBrowserSignals, LeadAttribution, trackLeadConversionEvent } from '../utils/attribution';
 
 import { getApiBaseUrl } from './apiConfig';
 
@@ -177,7 +177,10 @@ export class InquiryService {
 
   public static addInquiry(inquiry: Omit<ContactInquiry, 'id' | 'submittedAt' | 'status'>): ContactInquiry {
     const inquiries = this.getStoredInquiries();
-    const attribution = inquiry.attribution || getStoredAttribution();
+    const attribution = {
+      ...(inquiry.attribution || getStoredAttribution()),
+      ...refreshBrowserSignals(), // Inject fresh _fbp, _fbc, user_agent for CAPI match quality
+    };
     const newInquiry: ContactInquiry = {
       ...inquiry,
       attribution,

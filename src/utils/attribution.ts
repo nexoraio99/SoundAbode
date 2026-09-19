@@ -8,6 +8,14 @@ export interface RawAttributionData {
   fbclid?: string;
   referrer?: string;
   landing_page?: string;
+  /** Meta first-party browser cookie (_fbp) for event deduplication & match quality */
+  fbp?: string;
+  /** Meta click cookie (_fbc) — auto-generated from fbclid if present */
+  fbc?: string;
+  /** Browser user-agent string for CAPI event match quality */
+  user_agent?: string;
+  /** Page URL where the form was submitted */
+  event_source_url?: string;
 }
 
 export interface LeadAttribution extends RawAttributionData {
@@ -147,6 +155,12 @@ export function captureFirstTouchAttribution(): LeadAttribution | null {
   const referrer = document.referrer || undefined;
   const landing_page = window.location.pathname + (window.location.search || '');
 
+  // Read Meta cookies for CAPI event match quality
+  const fbp = getCookie('_fbp') || undefined;
+  const fbc = getCookie('_fbc') || undefined;
+  const user_agent = navigator?.userAgent || undefined;
+  const event_source_url = window.location.href;
+
   const currentUrlData: RawAttributionData = {
     ...(utm_source ? { utm_source } : {}),
     ...(utm_medium ? { utm_medium } : {}),
@@ -156,7 +170,11 @@ export function captureFirstTouchAttribution(): LeadAttribution | null {
     ...(gclid ? { gclid } : {}),
     ...(fbclid ? { fbclid } : {}),
     ...(referrer ? { referrer } : {}),
+    ...(fbp ? { fbp } : {}),
+    ...(fbc ? { fbc } : {}),
+    ...(user_agent ? { user_agent } : {}),
     landing_page,
+    event_source_url,
   };
 
   const currentHasCampaign = hasCampaignSignals(currentUrlData);
@@ -264,6 +282,31 @@ export function trackLeadConversionEvent(params?: {
   } catch (err) {
     console.warn('[Analytics] GA4 conversion notice:', err);
   }
+}
+
+/**
+ * Reads a browser cookie by name.
+ * Returns empty string if not found or not in browser.
+ */
+function getCookie(name: string): string {
+  if (typeof document === 'undefined') return '';
+  const match = document.cookie.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]*)'));
+  return match ? decodeURIComponent(match[1]) : '';
+}
+
+/**
+ * Refreshes volatile browser signals (fbp, fbc, user_agent, event_source_url)
+ * on existing stored attribution without overwriting first-touch campaign data.
+ * Call this right before form submission to ensure fresh cookie values.
+ */
+export function refreshBrowserSignals(): Partial<RawAttributionData> {
+  if (typeof window === 'undefined') return {};
+  return {
+    fbp: getCookie('_fbp') || undefined,
+    fbc: getCookie('_fbc') || undefined,
+    user_agent: navigator?.userAgent || undefined,
+    event_source_url: window.location.href,
+  };
 }
 
 // Auto-run once on module import if running in browser

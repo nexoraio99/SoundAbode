@@ -497,6 +497,11 @@ const attributionSchema = new mongoose.Schema(
     gclid: { type: String, default: '' },
     referrer: { type: String, default: '' },
     landing_page: { type: String, default: '' },
+    // Meta CAPI match quality fields (captured from browser at form submission)
+    fbp: { type: String, default: '' },
+    fbc: { type: String, default: '' },
+    user_agent: { type: String, default: '' },
+    event_source_url: { type: String, default: '' },
   },
   { _id: false }
 );
@@ -1799,17 +1804,53 @@ app.post('/api/inquiries', async (req, res) => {
       gclid: String(rawAttribution.gclid || ''),
       referrer: String(rawAttribution.referrer || ''),
       landing_page: String(rawAttribution.landing_page || ''),
+      // Meta CAPI match quality fields (forwarded from browser)
+      fbp: String(rawAttribution.fbp || ''),
+      fbc: String(rawAttribution.fbc || ''),
+      user_agent: String(rawAttribution.user_agent || ''),
+      event_source_url: String(rawAttribution.event_source_url || ''),
     };
+
+    // Capture server-side client IP for CAPI match quality
+    const clientIp = req.headers['x-forwarded-for']
+      ? String(req.headers['x-forwarded-for']).split(',')[0].trim()
+      : req.socket?.remoteAddress || '';
 
     // Forward to Google Sheets server-side
     forwardToGoogleSheets(inquiryData);
 
+    let savedInquiry = inquiryData;
     if (mongoose.connection.readyState === 1) {
       const inquiry = new InquiryModel(inquiryData);
       await inquiry.save();
-      return res.status(201).json(inquiry);
+      savedInquiry = inquiry;
+      res.status(201).json(inquiry);
+    } else {
+      res.status(201).json(inquiryData);
     }
-    res.status(201).json(inquiryData);
+
+    // ─── Meta CAPI: Fire Lead event on new form submission (fire-and-forget) ───
+    // Sends browser-captured signals (fbp, fbc, user_agent) + server-side IP
+    // for maximum event match quality.
+    Promise.resolve().then(async () => {
+      try {
+        await sendCapiEventForStatus({
+          status: 'NEW',
+          email: savedInquiry.email || '',
+          phone: savedInquiry.phone || '',
+          fbclid: savedInquiry.attribution?.fbclid || '',
+          metaLeadId: savedInquiry.metaLeadId || '',
+          // Match quality boosters
+          clientIpAddress: clientIp,
+          clientUserAgent: savedInquiry.attribution?.user_agent || req.headers['user-agent'] || '',
+          fbp: savedInquiry.attribution?.fbp || '',
+          fbc: savedInquiry.attribution?.fbc || '',
+          eventSourceUrl: savedInquiry.attribution?.event_source_url || '',
+        });
+      } catch (capiErr) {
+        console.error('[CAPI] Non-critical dispatch error (inquiry POST):', capiErr?.message);
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1833,6 +1874,11 @@ app.patch('/api/inquiries/:id', requireAuth, async (req, res) => {
               phone: updated.phone || '',
               fbclid: updated.attribution?.fbclid || '',
               metaLeadId: updated.metaLeadId || '',
+              // Match quality: use stored browser signals from original form submission
+              clientUserAgent: updated.attribution?.user_agent || '',
+              fbp: updated.attribution?.fbp || '',
+              fbc: updated.attribution?.fbc || '',
+              eventSourceUrl: updated.attribution?.event_source_url || '',
             });
           } catch (capiErr) {
             // Non-critical: log only, never re-throw
