@@ -31,6 +31,8 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
     verifyTokenConfigured: boolean;
     appSecretConfigured: boolean;
     pageAccessTokenConfigured: boolean;
+    tokenStatus?: string;
+    tokenError?: string;
   } | null>(null);
 
   // Auto-refresh interval every 12s for real-time sync
@@ -198,9 +200,17 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
             <div>
               <h1 className={styles.metaTitle}>
                 Meta Ads Pipeline
-                <span className={styles.liveSyncBadge}>
-                  <span className={styles.pulseDot} />
-                  Live Sync
+                <span className={styles.liveSyncBadge} style={
+                  webhookConfig?.tokenStatus === 'expired'
+                    ? { background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }
+                    : undefined
+                }>
+                  <span className={styles.pulseDot} style={
+                    webhookConfig?.tokenStatus === 'expired'
+                      ? { background: '#ef4444', boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.25)' }
+                      : undefined
+                  } />
+                  {webhookConfig?.tokenStatus === 'expired' ? 'Token Expired' : 'Live Sync'}
                 </span>
               </h1>
               <p className={styles.metaSubtitle}>
@@ -231,10 +241,12 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
                   const result = await InquiryService.syncMetaLeads();
                   onRefresh();
                   setLastRefreshed(new Date());
-                  if (result.cleaned > 0 || result.synced > 0) {
-                    showToast(`Sync complete: ${result.synced} leads updated, ${result.cleaned} test entries removed`);
+                  if ((result as any).tokenExpired) {
+                    showToast('Token expired! Generate a new Page Access Token in Meta Business Suite.');
+                  } else if (result.cleaned > 0 || (result as any).pulled > 0) {
+                    showToast(`Sync complete: ${(result as any).pulled || 0} leads pulled from Meta, ${result.cleaned} old entries cleaned`);
                   } else if (result.failed > 0) {
-                    showToast(`Sync complete: ${result.failed} leads could not be fetched from Meta`);
+                    showToast(`Sync: ${result.failed} leads could not be fetched`);
                   } else {
                     showToast('All leads are up to date');
                   }
@@ -273,6 +285,36 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
           </div>
         </div>
       </div>
+
+      {/* ─── Token Expiry Warning Banner ─── */}
+      {webhookConfig?.tokenStatus === 'expired' && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.08), rgba(239, 68, 68, 0.15))',
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          borderRadius: '12px',
+          padding: '1rem 1.25rem',
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '0.75rem',
+          marginBottom: '0',
+        }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" style={{ flexShrink: 0, marginTop: '2px' }}>
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <div style={{ flex: 1 }}>
+            <strong style={{ color: '#ef4444', fontSize: '0.9rem' }}>Page Access Token Expired</strong>
+            <p style={{ margin: '0.3rem 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Your META_PAGE_ACCESS_TOKEN expired. New leads from Meta ads cannot be fetched.
+              To fix: Go to <strong>Meta Business Suite &rarr; Settings &rarr; Business Apps &rarr; System Users</strong>,
+              generate a new Page Access Token with <code style={{ background: 'rgba(239,68,68,0.1)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontSize: '0.78rem' }}>leads_retrieval</code> and <code style={{ background: 'rgba(239,68,68,0.1)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontSize: '0.78rem' }}>pages_show_list</code> permissions,
+              then update <strong>META_PAGE_ACCESS_TOKEN</strong> in your server .env file and restart the server.
+              After updating, click <strong>Sync Now</strong> to pull all missed leads.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ─── Metric Cards ─── */}
       <div className={styles.statsGrid}>

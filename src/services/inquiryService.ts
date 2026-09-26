@@ -333,6 +333,8 @@ export class InquiryService {
     appSecretConfigured: boolean;
     pageAccessTokenConfigured: boolean;
     capiTokenConfigured: boolean;
+    tokenStatus?: string;
+    tokenError?: string;
     verifyToken: string;
     webhookEndpoint: string;
   }> {
@@ -354,6 +356,8 @@ export class InquiryService {
       appSecretConfigured: false,
       pageAccessTokenConfigured: false,
       capiTokenConfigured: true,
+      tokenStatus: 'unknown',
+      tokenError: '',
       verifyToken: 'soundabode_leads_2024',
       webhookEndpoint: '/api/webhooks/meta-leads',
     };

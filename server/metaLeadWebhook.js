@@ -418,3 +418,92 @@ export async function subscribePageToLeadWebhook(pageId = '1609738365919238', pa
   console.log(`[Meta Webhook] Subscribed page ${pageId} response:`, data);
   return data;
 }
+
+/**
+ * Pull-based lead retrieval: fetches ALL leads from all leadgen forms on a Facebook Page.
+ * This complements the push-based webhook approach and ensures no leads are missed
+ * (e.g. when the server was down, the token was expired at webhook time, etc.)
+ *
+ * Flow:
+ *  1. GET /{page-id}/leadgen_forms → list of all lead forms
+ *  2. For each form, GET /{form-id}/leads → all lead submissions
+ *  3. Parse each lead and return the full set
+ *
+ * @param {string} pageId - Facebook Page ID
+ * @param {string} [pageAccessToken] - Override token (defaults to env var)
+ * @returns {Promise<{leads: Array, forms: Array, error?: string}>}
+ */
+export async function fetchAllLeadsFromPage(pageId = '1609738365919238', pageAccessToken) {
+  const token = (pageAccessToken || process.env.META_PAGE_ACCESS_TOKEN || '').trim();
+  if (!token) {
+    return { leads: [], forms: [], error: 'META_PAGE_ACCESS_TOKEN is not configured' };
+  }
+
+  const results = { leads: [], forms: [], errors: [] };
+
+  try {
+    // Step 1: Fetch all leadgen forms on this page
+    const formsUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${pageId}/leadgen_forms?fields=id,name,status,leads_count,created_time&limit=50&access_token=${encodeURIComponent(token)}`;
+    const formsRes = await fetch(formsUrl, { headers: { Accept: 'application/json' } });
+    const formsData = await formsRes.json();
+
+    if (formsData.error) {
+      const errMsg = formsData.error.message || JSON.stringify(formsData.error);
+      console.error('[Meta Pull Sync] Failed to fetch forms:', errMsg);
+      return { leads: [], forms: [], error: errMsg };
+    }
+
+    const forms = formsData.data || [];
+    results.forms = forms.map(f => ({ id: f.id, name: f.name, status: f.status, leadsCount: f.leads_count }));
+    console.log(`[Meta Pull Sync] Found ${forms.length} leadgen forms on page ${pageId}`);
+
+    // Step 2: For each form, fetch all leads
+    for (const form of forms) {
+      try {
+        let leadsUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${form.id}/leads?fields=id,created_time,ad_id,form_id,field_data&limit=50&access_token=${encodeURIComponent(token)}`;
+
+        // Paginate through all leads in this form
+        while (leadsUrl) {
+          const leadsRes = await fetch(leadsUrl, { headers: { Accept: 'application/json' } });
+          const leadsData = await leadsRes.json();
+
+          if (leadsData.error) {
+            console.warn(`[Meta Pull Sync] Error fetching leads from form ${form.id}:`, leadsData.error.message);
+            results.errors.push({ formId: form.id, formName: form.name, error: leadsData.error.message });
+            break;
+          }
+
+          const leads = leadsData.data || [];
+          for (const rawLead of leads) {
+            const parsed = parseLeadFieldData(rawLead.field_data || []);
+            results.leads.push({
+              leadgenId: rawLead.id,
+              name: parsed.name,
+              email: parsed.email,
+              phone: parsed.phone,
+              courseInterest: parsed.courseInterest,
+              adId: rawLead.ad_id || '',
+              formId: rawLead.form_id || form.id,
+              formName: form.name || '',
+              additionalNotes: parsed.additionalNotes,
+              createdTime: rawLead.created_time,
+            });
+          }
+
+          // Follow pagination cursor
+          leadsUrl = leadsData.paging?.next || null;
+        }
+      } catch (formErr) {
+        console.warn(`[Meta Pull Sync] Exception on form ${form.id}:`, formErr.message);
+        results.errors.push({ formId: form.id, error: formErr.message });
+      }
+    }
+
+    console.log(`[Meta Pull Sync] Total leads fetched from all forms: ${results.leads.length}`);
+  } catch (err) {
+    console.error('[Meta Pull Sync] Top-level error:', err.message);
+    return { leads: [], forms: [], error: err.message };
+  }
+
+  return results;
+}
