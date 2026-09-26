@@ -22,6 +22,7 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
   const [webhookConfig, setWebhookConfig] = useState<{
@@ -224,12 +225,29 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
 
             <button
               id="meta-ads-refresh-btn"
-              onClick={() => {
-                onRefresh();
-                setLastRefreshed(new Date());
-                showToast('Synced with latest leads');
+              onClick={async () => {
+                setIsSyncing(true);
+                try {
+                  const result = await InquiryService.syncMetaLeads();
+                  onRefresh();
+                  setLastRefreshed(new Date());
+                  if (result.cleaned > 0 || result.synced > 0) {
+                    showToast(`Sync complete: ${result.synced} leads updated, ${result.cleaned} test entries removed`);
+                  } else if (result.failed > 0) {
+                    showToast(`Sync complete: ${result.failed} leads could not be fetched from Meta`);
+                  } else {
+                    showToast('All leads are up to date');
+                  }
+                } catch {
+                  onRefresh();
+                  setLastRefreshed(new Date());
+                  showToast('Synced with latest leads');
+                } finally {
+                  setIsSyncing(false);
+                }
               }}
               className={styles.btnSecondary}
+              disabled={isSyncing}
               title={`Last synced: ${lastRefreshed.toLocaleTimeString()}`}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -237,7 +255,7 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
                 <polyline points="1 20 1 14 7 14" />
                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
               </svg>
-              Sync Now
+              {isSyncing ? 'Syncing...' : 'Sync Now'}
             </button>
 
             <button

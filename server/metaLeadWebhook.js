@@ -373,18 +373,21 @@ export async function handleWebhookEvent(
               sendCapiEventForStatus,
             });
           } catch (fetchErr) {
-            console.warn(`[Meta Webhook] Notice: Lead ID ${leadgenId} is a test mock ID or unresolvable:`, fetchErr.message);
-            // If Meta sent a mock test payload (such as 444444444444 from the Test button),
-            // gracefully persist a test lead record so it appears in the CMS!
+            console.warn(`[Meta Webhook] Could not fetch lead details for leadgen_id ${leadgenId}:`, fetchErr.message);
+            // The Graph API call failed — this could be a real lead whose details
+            // couldn't be retrieved (expired token, missing permissions, data >90 days old),
+            // or a test/mock payload from the Meta Developer Dashboard.
+            // Persist a stub so the lead isn't lost, but do NOT assign fake contact info
+            // that would make it look like a real prospect.
             await persistMetaLead({
               leadgenId,
-              name: `Meta Test Lead (${String(leadgenId).slice(-4)})`,
-              email: `meta.test.${String(leadgenId).slice(-4)}@soundabode.com`,
-              phone: '+91 98200 12345',
+              name: `Meta Lead (${String(leadgenId).slice(-4)})`,
+              email: '',
+              phone: '',
               courseInterest: 'Music Production & Sound Engineering',
               adId,
               formId,
-              additionalNotes: 'Test event dispatched from Meta Developer Webhook button',
+              additionalNotes: `Lead details could not be fetched from Meta Graph API: ${fetchErr.message}. Use "Sync Now" to retry.`,
               InquiryModel,
               forwardToGoogleSheets,
               broadcastLiveEvent,

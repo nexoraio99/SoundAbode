@@ -358,5 +358,37 @@ export class InquiryService {
       webhookEndpoint: '/api/webhooks/meta-leads',
     };
   }
+
+  /**
+   * Sync Meta leads: cleans up fake test leads and re-fetches real lead data
+   * from Meta Graph API for any leads that couldn't be fetched originally.
+   */
+  public static async syncMetaLeads(): Promise<{
+    success: boolean;
+    synced: number;
+    cleaned: number;
+    failed: number;
+    details: Array<{ id: string; action: string; reason?: string; name?: string }>;
+  }> {
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch(`${API_BASE_URL}/webhooks/meta-leads/sync`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...AuthService.getAuthHeaders(),
+          },
+        });
+        if (res.ok) {
+          return await res.json();
+        }
+        const errData = await res.json().catch(() => ({}));
+        return { success: false, synced: 0, cleaned: 0, failed: 0, details: [{ id: '', action: 'error', reason: errData.error || `HTTP ${res.status}` }] };
+      } catch (err: any) {
+        return { success: false, synced: 0, cleaned: 0, failed: 0, details: [{ id: '', action: 'error', reason: err?.message || 'Network error' }] };
+      }
+    }
+    return { success: false, synced: 0, cleaned: 0, failed: 0, details: [] };
+  }
 }
 

@@ -28,12 +28,16 @@ let handleWebhookVerification = (req, res) => res.status(501).send('Webhook not 
 let handleWebhookEvent = async (_req, res) => res.status(501).send('Webhook not loaded');
 let persistMetaLead = async () => null;
 let subscribePageToLeadWebhook = async () => null;
+let fetchLeadFromMeta = async () => null;
+let parseLeadFieldData = () => ({ name: '', email: '', phone: '', courseInterest: '', additionalNotes: '' });
 try {
   const leadWebhookModule = await import('./metaLeadWebhook.js');
   handleWebhookVerification = leadWebhookModule.handleWebhookVerification;
   handleWebhookEvent = leadWebhookModule.handleWebhookEvent;
   persistMetaLead = leadWebhookModule.persistMetaLead;
   subscribePageToLeadWebhook = leadWebhookModule.subscribePageToLeadWebhook;
+  fetchLeadFromMeta = leadWebhookModule.fetchLeadFromMeta;
+  parseLeadFieldData = leadWebhookModule.parseLeadFieldData;
   console.log('[Meta Webhook] Meta Lead Ads Webhook module loaded successfully.');
 
   // Automatically ensure the Facebook Page is subscribed to this app's leadgen webhook
@@ -2009,6 +2013,96 @@ app.post('/api/webhooks/meta-leads/subscribe', async (req, res) => {
     const result = await subscribePageToLeadWebhook(pageId);
     res.json(result);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. POST: Sync — re-fetch unfetched Meta leads from Graph API & clean up fake test leads
+app.post('/api/webhooks/meta-leads/sync', async (req, res) => {
+  try {
+    const pageAccessToken = (process.env.META_PAGE_ACCESS_TOKEN || '').trim();
+    if (!pageAccessToken) {
+      return res.status(400).json({ error: 'META_PAGE_ACCESS_TOKEN is not configured in server/.env' });
+    }
+
+    const results = { synced: 0, failed: 0, cleaned: 0, details: [] };
+
+    // Step 1: Delete fake "Meta Test Lead" records that were created by the old bug
+    // These have fabricated @soundabode.com emails and +91 98200 12345 phone
+    const fakeTestLeads = await InquiryModel.find({
+      source: 'Meta Lead Ad',
+      $or: [
+        { email: { $regex: /^meta\.test\.\d+@soundabode\.com$/ } },
+        { name: { $regex: /^Meta Test Lead/ } },
+      ],
+    });
+
+    for (const fake of fakeTestLeads) {
+      const leadgenId = fake.metaLeadId;
+      if (!leadgenId) {
+        // No Meta lead ID — just delete the fake record
+        await InquiryModel.deleteOne({ _id: fake._id });
+        results.cleaned++;
+        results.details.push({ id: fake.id, action: 'deleted', reason: 'Fake test lead with no Meta ID' });
+        continue;
+      }
+
+      // Try to re-fetch real data from Meta
+      try {
+        const rawLead = await fetchLeadFromMeta(leadgenId, pageAccessToken);
+        const parsed = parseLeadFieldData(rawLead.field_data || []);
+
+        // Update the record with real data
+        fake.name = parsed.name || fake.name;
+        fake.email = parsed.email || '';
+        fake.phone = parsed.phone || '';
+        fake.courseInterest = parsed.courseInterest || fake.courseInterest;
+        fake.notes = 'Re-synced from Meta Graph API';
+        fake.message = parsed.additionalNotes ? `Responses: ${parsed.additionalNotes}` : fake.message;
+        await fake.save();
+        results.synced++;
+        results.details.push({ id: fake.id, action: 'synced', name: parsed.name, email: parsed.email });
+      } catch (fetchErr) {
+        // Could not fetch — lead data may have expired (>90 days) or ID is truly a test mock
+        await InquiryModel.deleteOne({ _id: fake._id });
+        results.cleaned++;
+        results.details.push({ id: fake.id, action: 'deleted', reason: `Graph API fetch failed: ${fetchErr.message}` });
+      }
+    }
+
+    // Step 2: Find any other unfetched Meta leads (empty email AND empty phone)
+    const unfetched = await InquiryModel.find({
+      source: 'Meta Lead Ad',
+      metaLeadId: { $exists: true, $ne: '' },
+      $and: [
+        { $or: [{ email: '' }, { email: { $exists: false } }] },
+        { $or: [{ phone: '' }, { phone: { $exists: false } }] },
+      ],
+    });
+
+    for (const stub of unfetched) {
+      try {
+        const rawLead = await fetchLeadFromMeta(stub.metaLeadId, pageAccessToken);
+        const parsed = parseLeadFieldData(rawLead.field_data || []);
+
+        stub.name = parsed.name || stub.name;
+        stub.email = parsed.email || '';
+        stub.phone = parsed.phone || '';
+        stub.courseInterest = parsed.courseInterest || stub.courseInterest;
+        stub.notes = 'Re-synced from Meta Graph API';
+        await stub.save();
+        results.synced++;
+        results.details.push({ id: stub.id, action: 'synced', name: parsed.name });
+      } catch (fetchErr) {
+        results.failed++;
+        results.details.push({ id: stub.id, action: 'fetch_failed', reason: fetchErr.message });
+      }
+    }
+
+    console.log(`[Meta Sync] Completed: ${results.synced} synced, ${results.cleaned} cleaned, ${results.failed} failed`);
+    res.json({ success: true, ...results });
+  } catch (err) {
+    console.error('[Meta Sync] Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
