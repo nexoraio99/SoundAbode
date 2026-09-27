@@ -18,40 +18,8 @@ const API_BASE_URL = getApiBaseUrl();
 const SESSION_TOKEN_KEY = 'soundabode_cms_session_token';
 const SESSION_USER_KEY = 'soundabode_cms_session_user';
 
-const LOCAL_CREDENTIALS: Record<string, { pass: string[]; user: CmsUser }> = {
-  'abhinav@soundabode.com': {
-    pass: ['soundabode2026', 'soundabode'],
-    user: { email: 'abhinav@soundabode.com', name: 'Abhinav', role: 'admin' },
-  },
-  'admin@soundabode.com': {
-    pass: ['soundabode2026', 'soundabode'],
-    user: { email: 'admin@soundabode.com', name: 'Soundabode Admin', role: 'admin' },
-  },
-  'services@soundabode.com': {
-    pass: ['soundabode2026', 'soundabode'],
-    user: { email: 'services@soundabode.com', name: 'Soundabode Services', role: 'admin' },
-  },
-  'soundabode@soundabode.com': {
-    pass: ['soundabode2026', 'soundabode'],
-    user: { email: 'soundabode@soundabode.com', name: 'Soundabode', role: 'admin' },
-  },
-  'devangdhakate22@gmail.com': {
-    pass: ['soundabode2026', 'soundabode'],
-    user: { email: 'devangdhakate22@gmail.com', name: 'Developer Admin', role: 'admin' },
-  },
-  'ashu@soundabode.com': {
-    pass: ['ashu2026', 'soundabode2026'],
-    user: { email: 'ashu@soundabode.com', name: 'Ashu', role: 'teacher' },
-  },
-  'vaibhav@soundabode.com': {
-    pass: ['vaibhav2026', 'soundabode2026'],
-    user: { email: 'vaibhav@soundabode.com', name: 'Vaibhav', role: 'teacher' },
-  },
-  'vrishan@soundabode.com': {
-    pass: ['vrishan@2026', 'VRISHAN@2026', 'vrishan2026', 'soundabode2026'],
-    user: { email: 'vrishan@soundabode.com', name: 'Vrishan', role: 'teacher' },
-  },
-};
+
+
 
 export class AuthService {
   /** Retrieve the active session token (if any). */
@@ -94,7 +62,7 @@ export class AuthService {
       };
     }
 
-    // 1. Try remote server authentication first
+    // Authentication is ONLY performed server-side — no client-side fallback
     try {
       const res = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
@@ -102,54 +70,30 @@ export class AuthService {
         body: JSON.stringify({ email: emailKey, passcode: passAttempt }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.user) {
-          try {
-            if (data.token) {
-              sessionStorage.setItem(SESSION_TOKEN_KEY, data.token);
-            }
-            sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(data.user));
-          } catch {}
-          return { success: true, user: data.user };
-        }
+      const data = await res.json();
+
+      if (res.ok && data.success && data.user) {
+        try {
+          if (data.token) {
+            sessionStorage.setItem(SESSION_TOKEN_KEY, data.token);
+          }
+          sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(data.user));
+        } catch {}
+        return { success: true, user: data.user };
       }
-    } catch {
-      // Remote server unavailable, proceed to client verification fallback
-    }
 
-    // 2. Fallback: Authenticate against local recognized credentials
-    const localMatch = LOCAL_CREDENTIALS[emailKey];
-    const isMasterPass = passAttempt.toLowerCase() === 'soundabode2026' || passAttempt === 'soundabode';
-
-    if (localMatch && (localMatch.pass.some((p) => p.toLowerCase() === passAttempt.toLowerCase()) || isMasterPass)) {
-      const fallbackToken = `local_session_${Date.now()}`;
-      try {
-        sessionStorage.setItem(SESSION_TOKEN_KEY, fallbackToken);
-        sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(localMatch.user));
-      } catch {}
-      return { success: true, user: localMatch.user };
-    }
-
-    if (isMasterPass) {
-      const name = emailKey ? emailKey.split('@')[0] : 'Admin';
-      const userObj: CmsUser = {
-        email: emailKey || 'admin@soundabode.com',
-        name: name.charAt(0).toUpperCase() + name.slice(1),
-        role: 'admin',
+      // Server explicitly rejected the credentials
+      return {
+        success: false,
+        error: data.error || 'Invalid credentials. Check your email address and passcode.',
       };
-      const fallbackToken = `local_session_${Date.now()}`;
-      try {
-        sessionStorage.setItem(SESSION_TOKEN_KEY, fallbackToken);
-        sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(userObj));
-      } catch {}
-      return { success: true, user: userObj };
+    } catch {
+      // Server unreachable — do NOT fall back to client-side auth
+      return {
+        success: false,
+        error: 'Cannot reach the server. Please check your connection and try again.',
+      };
     }
-
-    return {
-      success: false,
-      error: 'Invalid credentials. Check your email address and passcode.',
-    };
   }
 
   static logout(): void {
