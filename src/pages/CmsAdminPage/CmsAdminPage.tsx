@@ -5918,18 +5918,18 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 </div>
               </div>
 
-              {/* VIEW TOGGLE — Pipeline vs List */}
+              {/* VIEW TOGGLE — Pipeline vs List (Black & White Minimalist) */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                <div style={{ display: 'flex', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '3px', gap: '3px' }}>
+                <div style={{ display: 'flex', background: '#09090b', border: '1px solid #27272a', borderRadius: '8px', padding: '3px', gap: '3px' }}>
                   <button
                     id="lead-view-pipeline"
                     onClick={() => setLeadView('pipeline')}
                     style={{
-                      background: leadView === 'pipeline' ? 'var(--bg-panel)' : 'transparent',
-                      color: leadView === 'pipeline' ? 'var(--text-primary)' : 'var(--text-muted)',
+                      background: leadView === 'pipeline' ? '#ffffff' : 'transparent',
+                      color: leadView === 'pipeline' ? '#000000' : '#71717a',
                       border: 'none', borderRadius: '6px', padding: '0.35rem 0.85rem',
-                      fontSize: '0.775rem', fontWeight: leadView === 'pipeline' ? 600 : 500, cursor: 'pointer',
-                      boxShadow: leadView === 'pipeline' ? '0 1px 3px rgba(0,0,0,0.2)' : 'none', transition: 'all 0.15s ease',
+                      fontSize: '0.775rem', fontWeight: 600, cursor: 'pointer',
+                      boxShadow: leadView === 'pipeline' ? '0 1px 3px rgba(0,0,0,0.5)' : 'none', transition: 'all 0.15s ease',
                       display: 'flex', alignItems: 'center', gap: '0.4rem',
                     }}
                   >
@@ -5942,11 +5942,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     id="lead-view-list"
                     onClick={() => setLeadView('list')}
                     style={{
-                      background: leadView === 'list' ? 'var(--bg-panel)' : 'transparent',
-                      color: leadView === 'list' ? 'var(--text-primary)' : 'var(--text-muted)',
+                      background: leadView === 'list' ? '#ffffff' : 'transparent',
+                      color: leadView === 'list' ? '#000000' : '#71717a',
                       border: 'none', borderRadius: '6px', padding: '0.35rem 0.85rem',
-                      fontSize: '0.775rem', fontWeight: leadView === 'list' ? 600 : 500, cursor: 'pointer',
-                      boxShadow: leadView === 'list' ? '0 1px 3px rgba(0,0,0,0.2)' : 'none', transition: 'all 0.15s ease',
+                      fontSize: '0.775rem', fontWeight: 600, cursor: 'pointer',
+                      boxShadow: leadView === 'list' ? '0 1px 3px rgba(0,0,0,0.5)' : 'none', transition: 'all 0.15s ease',
                       display: 'flex', alignItems: 'center', gap: '0.4rem',
                     }}
                   >
@@ -5957,8 +5957,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     List
                   </button>
                 </div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
+                <div style={{ fontSize: '0.72rem', color: '#71717a', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
                   Status changes auto-sync to Meta Ads
                 </div>
               </div>
@@ -5969,39 +5969,49 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   {(['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'] as const).map((stage) => {
                     const stageLeads = inquiries.filter((inq) => inq.status === stage);
                     const capiEvent = getCapiEventNameForStatus(stage);
-                    const stageColors: Record<string, { accent: string; bg: string; border: string }> = {
-                      NEW:       { accent: '#3b82f6', bg: 'rgba(59, 130, 246, 0.07)',  border: 'rgba(59, 130, 246, 0.22)' },
-                      CONTACTED: { accent: '#f59e0b', bg: 'rgba(245, 158, 11, 0.07)', border: 'rgba(245, 158, 11, 0.22)' },
-                      ENROLLED:  { accent: '#22c55e', bg: 'rgba(34, 197, 94, 0.07)',  border: 'rgba(34, 197, 94, 0.22)'  },
-                      ARCHIVED:  { accent: '#6b7280', bg: 'rgba(107, 114, 128, 0.05)', border: 'rgba(107, 114, 128, 0.18)' },
+                    const stageLabels: Record<string, string> = {
+                      NEW: 'New Leads',
+                      CONTACTED: 'Contacted',
+                      ENROLLED: 'Enrolled',
+                      ARCHIVED: 'Archived',
                     };
-                    const col = stageColors[stage];
                     return (
-                      <div key={stage} className={styles.pipelineColumn} style={{ borderTop: `3px solid ${col.accent}` }}>
+                      <div key={stage} className={styles.pipelineColumn}>
                         {/* Column Header */}
                         <div className={styles.pipelineColHeader}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <span style={{ fontWeight: 700, fontSize: '0.8rem', color: col.accent, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{stage}</span>
-                            <span style={{
-                              background: col.bg, border: `1px solid ${col.border}`,
-                              color: col.accent, borderRadius: '20px', padding: '0.1rem 0.55rem',
-                              fontSize: '0.7rem', fontWeight: 700,
-                            }}>{stageLeads.length}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                            <span style={{ fontWeight: 600, fontSize: '0.78rem', color: '#ffffff', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                              {stageLabels[stage] || stage}
+                            </span>
+                            <span
+                              style={{
+                                background: '#18181b',
+                                border: '1px solid #27272a',
+                                color: '#ffffff',
+                                borderRadius: '12px',
+                                padding: '0.1rem 0.45rem',
+                                fontSize: '0.68rem',
+                                fontWeight: 600,
+                                fontFamily: 'monospace',
+                              }}
+                            >
+                              {stageLeads.length}
+                            </span>
                           </div>
                           {capiEvent ? (
-                            <span style={{ fontSize: '0.62rem', color: '#4ade80', background: 'rgba(74, 222, 128, 0.08)', border: '1px solid rgba(74, 222, 128, 0.2)', borderRadius: '4px', padding: '0.1rem 0.4rem', display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }}>
-                              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="3"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
+                            <span style={{ fontSize: '0.62rem', color: '#a1a1aa', background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '4px', padding: '0.12rem 0.4rem', display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }}>
+                              <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" strokeWidth="3"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
                               Meta: {capiEvent}
                             </span>
                           ) : (
-                            <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-subtle)', borderRadius: '4px', padding: '0.1rem 0.4rem', whiteSpace: 'nowrap' }}>No event</span>
+                            <span style={{ fontSize: '0.62rem', color: '#52525b', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: '4px', padding: '0.12rem 0.4rem', whiteSpace: 'nowrap' }}>No event</span>
                           )}
                         </div>
 
                         {/* Lead Cards */}
                         <div className={styles.pipelineCards}>
                           {stageLeads.length === 0 ? (
-                            <div style={{ textAlign: 'center', padding: '2rem 0.5rem', color: 'var(--text-muted)', fontSize: '0.75rem' }}>No leads in this stage</div>
+                            <div style={{ textAlign: 'center', padding: '2.5rem 0.5rem', color: '#64748b', fontSize: '0.74rem' }}>No leads in this stage</div>
                           ) : stageLeads.map((inq) => {
                             const av = getAvatarDetails(inq.name);
                             const sourceBadge = getSourceBadgeDetails(inq);
@@ -6015,19 +6025,24 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                               return `${Math.floor(hrs / 24)}d ago`;
                             })();
                             return (
-                              <div key={inq.id} className={styles.pipelineCard} style={{ borderLeft: `3px solid ${col.accent}` }}>
+                              <div key={inq.id} className={styles.pipelineCard}>
                                 {/* Card top: avatar + name + time */}
                                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', marginBottom: '0.55rem' }}>
                                   <div
-                                    className={styles.avatarCircle}
                                     style={{
-                                      background: av.bg,
-                                      border: `1px solid ${av.border}`,
-                                      width: '34px',
-                                      height: '34px',
+                                      background: '#18181b',
+                                      border: '1px solid #27272a',
+                                      color: '#ffffff',
+                                      width: '32px',
+                                      height: '32px',
+                                      borderRadius: '50%',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
                                       fontSize: '0.72rem',
-                                      fontWeight: 700,
+                                      fontWeight: 600,
                                       flexShrink: 0,
+                                      letterSpacing: '0.5px',
                                     }}
                                   >
                                     {av.initials}
@@ -6035,9 +6050,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   <div style={{ flex: 1, minWidth: 0 }}>
                                     <div
                                       style={{
-                                        fontWeight: 700,
+                                        fontWeight: 600,
                                         fontSize: '0.84rem',
-                                        color: 'var(--text-primary, #f8fafc)',
+                                        color: '#ffffff',
                                         whiteSpace: 'nowrap',
                                         overflow: 'hidden',
                                         textOverflow: 'ellipsis',
@@ -6047,7 +6062,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                     >
                                       {inq.name}
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)', marginTop: '0.15rem' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.68rem', color: '#71717a', marginTop: '0.15rem' }}>
                                       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                         <circle cx="12" cy="12" r="10" />
                                         <polyline points="12 6 12 12 16 14" />
@@ -6061,25 +6076,25 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                         display: 'flex',
                                         alignItems: 'center',
                                         gap: '0.25rem',
-                                        background: 'rgba(24, 119, 242, 0.12)',
-                                        border: '1px solid rgba(24, 119, 242, 0.28)',
+                                        background: 'rgba(255, 255, 255, 0.04)',
+                                        border: '1px solid rgba(255, 255, 255, 0.1)',
                                         borderRadius: '4px',
                                         padding: '0.15rem 0.35rem',
                                         flexShrink: 0,
                                       }}
-                                      title="Meta Ads Lead Form"
+                                      title="Meta Ads Lead"
                                     >
-                                      <svg width="11" height="11" viewBox="0 0 24 24" fill="#1877f2">
+                                      <svg width="10" height="10" viewBox="0 0 24 24" fill="#ffffff">
                                         <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069z"/>
                                       </svg>
-                                      <span style={{ fontSize: '0.62rem', fontWeight: 600, color: '#60a5fa' }}>Meta</span>
+                                      <span style={{ fontSize: '0.62rem', fontWeight: 500, color: '#d4d4d8' }}>Meta</span>
                                     </div>
                                   )}
                                 </div>
 
                                 {/* Course Info */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.74rem', color: 'var(--text-secondary, #cbd5e1)', marginBottom: '0.45rem' }}>
-                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, opacity: 0.7 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.73rem', color: '#a1a1aa', marginBottom: '0.45rem' }}>
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#71717a" strokeWidth="2" style={{ flexShrink: 0 }}>
                                     <path d="M9 18V5l12-2v13" />
                                     <circle cx="6" cy="18" r="3" />
                                     <circle cx="18" cy="16" r="3" />
@@ -6091,12 +6106,25 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                                 {/* Source Badge & Phone preview */}
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.4rem', marginBottom: '0.1rem', flexWrap: 'wrap' }}>
-                                  <span className={`${styles.badge} ${sourceBadge.className}`} style={{ fontSize: '0.62rem', display: 'inline-flex' }}>
-                                    <span className={styles.statusDot} />
+                                  <span
+                                    style={{
+                                      background: 'rgba(255, 255, 255, 0.04)',
+                                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                                      color: '#d4d4d8',
+                                      borderRadius: '4px',
+                                      padding: '0.12rem 0.45rem',
+                                      fontSize: '0.62rem',
+                                      fontWeight: 500,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.3rem',
+                                    }}
+                                  >
+                                    <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#ffffff' }} />
                                     {sourceBadge.label}
                                   </span>
                                   {inq.phone && (
-                                    <span style={{ fontSize: '0.65rem', color: 'var(--text-muted, #94a3b8)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontFamily: 'monospace' }}>
+                                    <span style={{ fontSize: '0.65rem', color: '#71717a', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontFamily: 'monospace' }}>
                                       <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
                                       {inq.phone}
                                     </span>
@@ -6107,25 +6135,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 <div className={styles.pipelineActionRow}>
                                   <div
                                     className={styles.stageDropdownWrapper}
-                                    style={{
-                                      background: col.bg,
-                                      border: `1px solid ${col.border}`,
-                                    }}
                                     title="Change lead stage"
                                   >
-                                    <span
-                                      className={styles.stageDot}
-                                      style={{
-                                        background: col.accent,
-                                        boxShadow: `0 0 6px ${col.accent}`,
-                                      }}
-                                    />
+                                    <span className={styles.stageDot} />
                                     <select
                                       id={`pipeline-stage-select-${inq.id}`}
                                       value={inq.status}
                                       onChange={(e) => handleInquiryStatusChange(inq.id, e.target.value as ContactInquiry['status'])}
                                       className={styles.stageSelect}
-                                      style={{ color: col.accent }}
                                       aria-label="Lead status stage"
                                     >
                                       <option value="NEW" className={styles.stageOption}>New</option>
@@ -6133,7 +6150,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                       <option value="ENROLLED" className={styles.stageOption}>Enrolled</option>
                                       <option value="ARCHIVED" className={styles.stageOption}>Archived</option>
                                     </select>
-                                    <svg className={styles.stageChevron} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={col.accent} strokeWidth="2.5">
+                                    <svg className={styles.stageChevron} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" strokeWidth="2">
                                       <polyline points="6 9 12 15 18 9" />
                                     </svg>
                                   </div>
@@ -6174,8 +6191,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                                 {/* Meta Attribution strip (for Meta Ads leads) */}
                                 {isMetaLead && inq.attribution?.fbclid && (
-                                  <div style={{ marginTop: '0.55rem', paddingTop: '0.45rem', borderTop: '1px solid rgba(24, 119, 242, 0.15)', fontSize: '0.62rem', color: '#60a5fa', display: 'flex', alignItems: 'center', gap: '0.3rem', overflow: 'hidden' }}>
-                                    <svg width="8" height="8" viewBox="0 0 24 24" fill="#1877f2"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
+                                  <div style={{ marginTop: '0.55rem', paddingTop: '0.45rem', borderTop: '1px solid #1f1f23', fontSize: '0.62rem', color: '#71717a', display: 'flex', alignItems: 'center', gap: '0.3rem', overflow: 'hidden' }}>
+                                    <svg width="8" height="8" viewBox="0 0 24 24" fill="#a1a1aa"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
                                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={inq.attribution.fbclid}>fbclid: {inq.attribution.fbclid.slice(0, 18)}…</span>
                                   </div>
                                 )}

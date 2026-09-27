@@ -342,21 +342,21 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
         <div className={styles.statCard}>
           <div className={styles.statTop}>
             <span className={styles.statLabel}>New / Uncontacted</span>
-            <div className={styles.statIconWrapper} style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#10b981' }}>
+            <div className={styles.statIconWrapper}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="10" />
                 <polyline points="12 6 12 12 14 14" />
               </svg>
             </div>
           </div>
-          <div className={styles.statValue} style={{ color: '#10b981' }}>{stats.newCount}</div>
+          <div className={styles.statValue}>{stats.newCount}</div>
           <div className={styles.statSubtext}>Requires immediate outreach</div>
         </div>
 
         <div className={styles.statCard}>
           <div className={styles.statTop}>
             <span className={styles.statLabel}>Contacted</span>
-            <div className={styles.statIconWrapper} style={{ background: 'rgba(0, 129, 251, 0.1)', color: '#0081fb' }}>
+            <div className={styles.statIconWrapper}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
               </svg>
@@ -369,15 +369,15 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
         <div className={styles.statCard}>
           <div className={styles.statTop}>
             <span className={styles.statLabel}>Enrolled &amp; Conversion</span>
-            <div className={styles.statIconWrapper} style={{ background: 'rgba(168, 85, 247, 0.1)', color: '#a855f7' }}>
+            <div className={styles.statIconWrapper}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
           </div>
-          <div className={styles.statValue} style={{ color: '#a855f7' }}>
+          <div className={styles.statValue}>
             {stats.enrolled}
-            <span style={{ fontSize: '1rem', fontWeight: 500, color: 'var(--text-muted)', marginLeft: '0.4rem' }}>
+            <span style={{ fontSize: '1rem', fontWeight: 500, color: 'var(--text-muted, #71717a)', marginLeft: '0.4rem' }}>
               ({stats.convRate}%)
             </span>
           </div>
@@ -629,7 +629,6 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
                   <button
                     onClick={() => onDeleteInquiry(lead.id)}
                     className={styles.miniActionBtn}
-                    style={{ color: '#ef4444' }}
                     title="Delete Lead"
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -707,7 +706,6 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
                     <button
                       onClick={() => onDeleteInquiry(lead.id)}
                       className={styles.miniActionBtn}
-                      style={{ color: '#ef4444' }}
                       title="Delete Lead"
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
