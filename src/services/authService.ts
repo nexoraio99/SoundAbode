@@ -14,7 +14,7 @@ import { getApiBaseUrl } from './apiConfig';
 
 const API_BASE_URL = getApiBaseUrl();
 
-// Session token key — stored in sessionStorage so it expires when the tab closes.
+// Persistent token key — stored in localStorage so credentials persist permanently across tab closes.
 const SESSION_TOKEN_KEY = 'soundabode_cms_session_token';
 const SESSION_USER_KEY = 'soundabode_cms_session_user';
 
@@ -25,7 +25,7 @@ export class AuthService {
   /** Retrieve the active session token (if any). */
   static getSessionToken(): string | null {
     try {
-      return sessionStorage.getItem(SESSION_TOKEN_KEY);
+      return localStorage.getItem(SESSION_TOKEN_KEY) || sessionStorage.getItem(SESSION_TOKEN_KEY);
     } catch {
       return null;
     }
@@ -44,7 +44,7 @@ export class AuthService {
   /** Return the stored user object from the current session. */
   static getCurrentUser(): CmsUser | null {
     try {
-      const raw = sessionStorage.getItem(SESSION_USER_KEY);
+      const raw = localStorage.getItem(SESSION_USER_KEY) || sessionStorage.getItem(SESSION_USER_KEY);
       return raw ? (JSON.parse(raw) as CmsUser) : null;
     } catch {
       return null;
@@ -75,9 +75,9 @@ export class AuthService {
       if (res.ok && data.success && data.user) {
         try {
           if (data.token) {
-            sessionStorage.setItem(SESSION_TOKEN_KEY, data.token);
+            localStorage.setItem(SESSION_TOKEN_KEY, data.token);
           }
-          sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(data.user));
+          localStorage.setItem(SESSION_USER_KEY, JSON.stringify(data.user));
         } catch {}
         return { success: true, user: data.user };
       }
@@ -98,6 +98,8 @@ export class AuthService {
 
   static logout(): void {
     try {
+      localStorage.removeItem(SESSION_TOKEN_KEY);
+      localStorage.removeItem(SESSION_USER_KEY);
       sessionStorage.removeItem(SESSION_TOKEN_KEY);
       sessionStorage.removeItem(SESSION_USER_KEY);
     } catch {
