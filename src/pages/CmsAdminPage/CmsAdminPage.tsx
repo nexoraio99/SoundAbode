@@ -745,12 +745,17 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     }
   };
 
-  // INQUIRY STATUS CYCLE HANDLER
+  // INQUIRY STATUS CYCLE & DIRECT SELECT HANDLERS
   const cycleInquiryStatus = (id: string, currentStatus: ContactInquiry['status']) => {
     const sequence: ContactInquiry['status'][] = ['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'];
     const currentIndex = sequence.indexOf(currentStatus);
     const nextStatus = sequence[(currentIndex + 1) % sequence.length];
     InquiryService.updateInquiryStatus(id, nextStatus);
+    refreshData();
+  };
+
+  const handleInquiryStatusChange = (id: string, newStatus: ContactInquiry['status']) => {
+    InquiryService.updateInquiryStatus(id, newStatus);
     refreshData();
   };
 
@@ -6010,71 +6015,161 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                               return `${Math.floor(hrs / 24)}d ago`;
                             })();
                             return (
-                              <div key={inq.id} className={styles.pipelineCard}>
+                              <div key={inq.id} className={styles.pipelineCard} style={{ borderLeft: `3px solid ${col.accent}` }}>
                                 {/* Card top: avatar + name + time */}
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', marginBottom: '0.55rem' }}>
-                                  <div className={styles.avatarCircle} style={{ background: av.bg, border: `1px solid ${av.border}`, width: '32px', height: '32px', fontSize: '0.7rem', flexShrink: 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', marginBottom: '0.55rem' }}>
+                                  <div
+                                    className={styles.avatarCircle}
+                                    style={{
+                                      background: av.bg,
+                                      border: `1px solid ${av.border}`,
+                                      width: '34px',
+                                      height: '34px',
+                                      fontSize: '0.72rem',
+                                      fontWeight: 700,
+                                      flexShrink: 0,
+                                    }}
+                                  >
                                     {av.initials}
                                   </div>
                                   <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: 600, fontSize: '0.825rem', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{inq.name}</div>
-                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{timeAgo}</div>
+                                    <div
+                                      style={{
+                                        fontWeight: 700,
+                                        fontSize: '0.84rem',
+                                        color: 'var(--text-primary, #f8fafc)',
+                                        whiteSpace: 'nowrap',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        lineHeight: '1.25',
+                                      }}
+                                      title={inq.name}
+                                    >
+                                      {inq.name}
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)', marginTop: '0.15rem' }}>
+                                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <circle cx="12" cy="12" r="10" />
+                                        <polyline points="12 6 12 12 16 14" />
+                                      </svg>
+                                      <span>{timeAgo}</span>
+                                    </div>
                                   </div>
                                   {isMetaLead && (
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="#1877f2" style={{ flexShrink: 0 }} aria-label="Meta Ads lead">
-                                      <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069z"/>
-                                    </svg>
+                                    <div
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.25rem',
+                                        background: 'rgba(24, 119, 242, 0.12)',
+                                        border: '1px solid rgba(24, 119, 242, 0.28)',
+                                        borderRadius: '4px',
+                                        padding: '0.15rem 0.35rem',
+                                        flexShrink: 0,
+                                      }}
+                                      title="Meta Ads Lead Form"
+                                    >
+                                      <svg width="11" height="11" viewBox="0 0 24 24" fill="#1877f2">
+                                        <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069z"/>
+                                      </svg>
+                                      <span style={{ fontSize: '0.62rem', fontWeight: 600, color: '#60a5fa' }}>Meta</span>
+                                    </div>
                                   )}
                                 </div>
 
-                                {/* Course + Source */}
-                                <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginBottom: '0.4rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{inq.courseInterest}</div>
-                                <span className={`${styles.badge} ${sourceBadge.className}`} style={{ fontSize: '0.62rem', marginBottom: '0.55rem', display: 'inline-flex' }}>
-                                  <span className={styles.statusDot} />
-                                  {sourceBadge.label}
-                                </span>
+                                {/* Course Info */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.74rem', color: 'var(--text-secondary, #cbd5e1)', marginBottom: '0.45rem' }}>
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, opacity: 0.7 }}>
+                                    <path d="M9 18V5l12-2v13" />
+                                    <circle cx="6" cy="18" r="3" />
+                                    <circle cx="18" cy="16" r="3" />
+                                  </svg>
+                                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={inq.courseInterest}>
+                                    {inq.courseInterest || 'General Inquiry'}
+                                  </span>
+                                </div>
 
-                                {/* Action row */}
-                                <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.35rem', flexWrap: 'wrap' }}>
-                                  <button
-                                    id={`pipeline-status-${inq.id}`}
-                                    onClick={() => cycleInquiryStatus(inq.id, inq.status)}
-                                    style={{
-                                      background: col.bg, border: `1px solid ${col.border}`, color: col.accent,
-                                      borderRadius: '5px', padding: '0.25rem 0.5rem', fontSize: '0.67rem', fontWeight: 600, cursor: 'pointer',
-                                      display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap',
-                                    }}
-                                    title="Click to advance stage"
-                                  >
-                                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-                                    Next Stage
-                                  </button>
+                                {/* Source Badge & Phone preview */}
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.4rem', marginBottom: '0.1rem', flexWrap: 'wrap' }}>
+                                  <span className={`${styles.badge} ${sourceBadge.className}`} style={{ fontSize: '0.62rem', display: 'inline-flex' }}>
+                                    <span className={styles.statusDot} />
+                                    {sourceBadge.label}
+                                  </span>
                                   {inq.phone && (
-                                    <a
-                                      href={`https://wa.me/${inq.phone.replace(/\D/g, '')}?text=${encodeURIComponent('Hi ' + inq.name + ', this is Soundabode Studios. We saw your inquiry about ' + inq.courseInterest + '. Can we connect?')}`}
-                                      target="_blank" rel="noopener noreferrer"
-                                      style={{
-                                        background: 'rgba(37, 211, 102, 0.1)', border: '1px solid rgba(37, 211, 102, 0.3)', color: '#25d366',
-                                        borderRadius: '5px', padding: '0.25rem 0.5rem', fontSize: '0.67rem', fontWeight: 600,
-                                        display: 'flex', alignItems: 'center', gap: '0.25rem', textDecoration: 'none', whiteSpace: 'nowrap',
-                                      }}
-                                      title={`WhatsApp ${inq.phone}`}
-                                    >
-                                      <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.556 4.116 1.528 5.843L.057 23.943l6.304-1.654A11.954 11.954 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0z"/></svg>
-                                      WA
-                                    </a>
+                                    <span style={{ fontSize: '0.65rem', color: 'var(--text-muted, #94a3b8)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontFamily: 'monospace' }}>
+                                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                                      {inq.phone}
+                                    </span>
                                   )}
-                                  <button
-                                    id={`pipeline-delete-${inq.id}`}
-                                    onClick={() => handleDeleteInquiry(inq.id)}
+                                </div>
+
+                                {/* Action row with stage dropdown selector and quick actions */}
+                                <div className={styles.pipelineActionRow}>
+                                  <div
+                                    className={styles.stageDropdownWrapper}
                                     style={{
-                                      background: 'rgba(239, 68, 68, 0.07)', border: '1px solid rgba(239, 68, 68, 0.2)', color: '#f87171',
-                                      borderRadius: '5px', padding: '0.25rem 0.5rem', fontSize: '0.67rem', cursor: 'pointer',
+                                      background: col.bg,
+                                      border: `1px solid ${col.border}`,
                                     }}
-                                    title="Delete lead"
+                                    title="Change lead stage"
                                   >
-                                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-                                  </button>
+                                    <span
+                                      className={styles.stageDot}
+                                      style={{
+                                        background: col.accent,
+                                        boxShadow: `0 0 6px ${col.accent}`,
+                                      }}
+                                    />
+                                    <select
+                                      id={`pipeline-stage-select-${inq.id}`}
+                                      value={inq.status}
+                                      onChange={(e) => handleInquiryStatusChange(inq.id, e.target.value as ContactInquiry['status'])}
+                                      className={styles.stageSelect}
+                                      style={{ color: col.accent }}
+                                      aria-label="Lead status stage"
+                                    >
+                                      <option value="NEW" className={styles.stageOption}>New</option>
+                                      <option value="CONTACTED" className={styles.stageOption}>Contacted</option>
+                                      <option value="ENROLLED" className={styles.stageOption}>Enrolled</option>
+                                      <option value="ARCHIVED" className={styles.stageOption}>Archived</option>
+                                    </select>
+                                    <svg className={styles.stageChevron} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={col.accent} strokeWidth="2.5">
+                                      <polyline points="6 9 12 15 18 9" />
+                                    </svg>
+                                  </div>
+
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}>
+                                    {inq.phone && (
+                                      <a
+                                        href={`https://wa.me/${inq.phone.replace(/\D/g, '')}?text=${encodeURIComponent('Hi ' + inq.name + ', this is Soundabode Studios. We saw your inquiry about ' + inq.courseInterest + '. Can we connect?')}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className={styles.pipelineWaBtn}
+                                        title={`WhatsApp ${inq.phone}`}
+                                        aria-label={`WhatsApp ${inq.name}`}
+                                      >
+                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                                          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+                                          <path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.556 4.116 1.528 5.843L.057 23.943l6.304-1.654A11.954 11.954 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0z"/>
+                                        </svg>
+                                        <span>WA</span>
+                                      </a>
+                                    )}
+                                    <button
+                                      id={`pipeline-delete-${inq.id}`}
+                                      onClick={() => handleDeleteInquiry(inq.id)}
+                                      className={styles.pipelineDelBtn}
+                                      title="Delete lead"
+                                      aria-label="Delete inquiry"
+                                    >
+                                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <polyline points="3 6 5 6 21 6"/>
+                                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                                        <path d="M10 11v6"/>
+                                        <path d="M14 11v6"/>
+                                      </svg>
+                                    </button>
+                                  </div>
                                 </div>
 
                                 {/* Meta Attribution strip (for Meta Ads leads) */}
