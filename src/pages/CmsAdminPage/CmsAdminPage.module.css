@@ -2190,15 +2190,104 @@
   color: #ffffff;
 }
 
+/* Mobile Pipeline Stage Pills (Tabs on phone to switch between stages) */
+.mobileStagePills {
+  display: none;
+}
+
 @media (max-width: 900px) {
   .pipelineBoard {
     grid-template-columns: repeat(2, 1fr);
+    gap: 0.85rem;
   }
 }
 
-@media (max-width: 560px) {
+@media (max-width: 768px) {
+  .mobileStagePills {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 3px;
+    margin-bottom: 0.85rem;
+    background: #09090b;
+    border: 1px solid #27272a;
+    border-radius: 8px;
+  }
+
+  .mobileStagePills::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mobileStagePillBtn {
+    background: transparent;
+    border: none;
+    color: #71717a;
+    padding: 0.35rem 0.65rem;
+    border-radius: 6px;
+    font-size: 0.74rem;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+  }
+
+  .mobileStagePillBtnActive {
+    background: #ffffff;
+    color: #000000;
+    font-weight: 600;
+  }
+
+  .mobileStageCount {
+    background: rgba(255, 255, 255, 0.12);
+    padding: 0.05rem 0.35rem;
+    border-radius: 10px;
+    font-size: 0.65rem;
+    font-family: monospace;
+  }
+
+  .mobileStagePillBtnActive .mobileStageCount {
+    background: rgba(0, 0, 0, 0.15);
+    color: #000000;
+  }
+
   .pipelineBoard {
     grid-template-columns: 1fr;
+    gap: 0.85rem;
+  }
+
+  .pipelineColumn {
+    min-width: 0 !important;
+    width: 100%;
+    padding: 0.85rem 0.75rem;
+    border-radius: 8px;
+  }
+
+  .pipelineCard {
+    padding: 0.75rem;
+    border-radius: 8px;
+  }
+
+  .stageDropdownWrapper {
+    min-height: 36px;
+  }
+
+  .pipelineWaBtn {
+    min-height: 36px;
+    padding: 0 0.65rem;
+    font-size: 0.72rem;
+  }
+
+  .pipelineDelBtn {
+    min-height: 36px;
+    min-width: 36px;
+    padding: 0;
   }
 }
 /* ──────────────────────────────────────────────────────────────────────────── */
@@ -3168,5 +3257,96 @@
     text-align: left;
   }
 }
+
+/* ─── STICKY MOBILE BOTTOM NAVIGATION BAR ────────────────────── */
+.mobileBottomNav {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .mobileBottomNav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: rgba(9, 9, 11, 0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid #27272a;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    z-index: 850;
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+  }
+
+  .mobileBottomNavBtn {
+    flex: 1;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: transparent;
+    border: none;
+    color: #71717a;
+    font-size: 0.65rem;
+    font-weight: 500;
+    cursor: pointer;
+    position: relative;
+    padding: 4px 2px;
+    border-radius: 6px;
+    transition: color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobileBottomNavBtnActive {
+    color: #ffffff;
+    font-weight: 600;
+  }
+
+  .mobileBottomNavBadge {
+    position: absolute;
+    top: 4px;
+    right: calc(50% - 16px);
+    background: #ffffff;
+    color: #000000;
+    font-size: 0.58rem;
+    font-weight: 700;
+    border-radius: 8px;
+    padding: 0.05rem 0.32rem;
+    line-height: 1.1;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  }
+
+  /* Ensure content is never obscured by the mobile bottom navigation bar */
+  .contentArea {
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Make sure header doesn't crowd on small mobile screens */
+  .topAdminHeader {
+    position: sticky;
+    top: 0;
+    z-index: 800;
+    background: rgba(9, 9, 11, 0.95);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .cmsBrandName {
+    font-size: 0.82rem;
+  }
+
+  .dbStatusPill {
+    font-size: 0.62rem;
+    padding: 0.15rem 0.4rem;
+  }
+}
+
 
 

@@ -231,6 +231,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const [selectedInquiryIds, setSelectedInquiryIds] = useState<string[]>([]);
   // Lead pipeline view toggle: 'pipeline' | 'list'
   const [leadView, setLeadView] = useState<'pipeline' | 'list'>('pipeline');
+  // Mobile pipeline stage filter: 'ALL' | 'NEW' | 'CONTACTED' | 'ENROLLED' | 'ARCHIVED'
+  const [mobilePipelineStage, setMobilePipelineStage] = useState<'ALL' | 'NEW' | 'CONTACTED' | 'ENROLLED' | 'ARCHIVED'>('ALL');
   // Meta CAPI test state
   const [capiTestStatus, setCapiTestStatus] = useState<{ loading: boolean; result: string | null; isError: boolean }>({ loading: false, result: null, isError: false });
 
@@ -5965,8 +5967,27 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
               {/* KANBAN PIPELINE VIEW */}
               {leadView === 'pipeline' && (
-                <div className={styles.pipelineBoard}>
-                  {(['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'] as const).map((stage) => {
+                <>
+                  {/* MOBILE QUICK STAGE SWITCHER (Visible only on mobile) */}
+                  <div className={styles.mobileStagePills}>
+                    {(['ALL', 'NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'] as const).map((st) => (
+                      <button
+                        key={st}
+                        onClick={() => setMobilePipelineStage(st)}
+                        className={`${styles.mobileStagePillBtn} ${mobilePipelineStage === st ? styles.mobileStagePillBtnActive : ''}`}
+                      >
+                        {st === 'ALL' ? 'All' : st.charAt(0) + st.slice(1).toLowerCase()}
+                        <span className={styles.mobileStageCount}>
+                          {st === 'ALL' ? inquiries.length : inquiries.filter((inq) => inq.status === st).length}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className={styles.pipelineBoard}>
+                    {((mobilePipelineStage === 'ALL'
+                      ? ['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED']
+                      : [mobilePipelineStage]) as ('NEW' | 'CONTACTED' | 'ENROLLED' | 'ARCHIVED')[]).map((stage) => {
                     const stageLeads = inquiries.filter((inq) => inq.status === stage);
                     const capiEvent = getCapiEventNameForStatus(stage);
                     const stageLabels: Record<string, string> = {
@@ -6204,7 +6225,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     );
                   })}
                 </div>
-              )}
+              </>
+            )}
 
               {/* FILTERS & SELECTION CONTROLS CONTAINER */}
               <div className={styles.leadsControlPanel}>
@@ -9555,6 +9577,75 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           </button>
         </div>
       )}
+
+      {/* MOBILE BOTTOM NAVIGATION BAR — Fast thumb-friendly navigation on phones */}
+      <nav className={styles.mobileBottomNav} aria-label="Mobile Navigation">
+        <button
+          onClick={() => setActiveTab('overview')}
+          className={`${styles.mobileBottomNavBtn} ${activeTab === 'overview' ? styles.mobileBottomNavBtnActive : ''}`}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></svg>
+          <span>Overview</span>
+        </button>
+
+        {!isTeacher && (
+          <button
+            onClick={() => setActiveTab('meta-ads')}
+            className={`${styles.mobileBottomNavBtn} ${activeTab === 'meta-ads' ? styles.mobileBottomNavBtnActive : ''}`}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z" />
+            </svg>
+            {(newMetaLeadsCount > 0 ? newMetaLeadsCount : metaLeadsCount) > 0 && (
+              <span className={styles.mobileBottomNavBadge}>
+                {newMetaLeadsCount > 0 ? newMetaLeadsCount : metaLeadsCount}
+              </span>
+            )}
+            <span>Meta Ads</span>
+          </button>
+        )}
+
+        {!isTeacher && (
+          <button
+            onClick={() => setActiveTab('inquiries')}
+            className={`${styles.mobileBottomNavBtn} ${activeTab === 'inquiries' ? styles.mobileBottomNavBtnActive : ''}`}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
+            {newInquiryCount > 0 && <span className={styles.mobileBottomNavBadge}>{newInquiryCount}</span>}
+            <span>Leads</span>
+          </button>
+        )}
+
+        {!isTeacher ? (
+          <button
+            onClick={() => setActiveTab('students')}
+            className={`${styles.mobileBottomNavBtn} ${activeTab === 'students' ? styles.mobileBottomNavBtnActive : ''}`}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>
+            <span>Students</span>
+          </button>
+        ) : (
+          <button
+            onClick={() => setActiveTab('attendance')}
+            className={`${styles.mobileBottomNavBtn} ${activeTab === 'attendance' ? styles.mobileBottomNavBtnActive : ''}`}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /></svg>
+            <span>Attendance</span>
+          </button>
+        )}
+
+        <button
+          onClick={() => setIsMobileMenuOpen(true)}
+          className={`${styles.mobileBottomNavBtn} ${isMobileMenuOpen ? styles.mobileBottomNavBtnActive : ''}`}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+          <span>Menu</span>
+        </button>
+      </nav>
     </div>
   );
 };

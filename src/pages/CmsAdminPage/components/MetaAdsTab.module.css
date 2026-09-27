@@ -790,3 +790,258 @@
   z-index: 1100;
   animation: fadeIn 0.2s ease-out;
 }
+
+/* ─── MOBILE RESPONSIVENESS (< 900px, < 768px, < 480px) ────────────────────── */
+@media (max-width: 900px) {
+  .leadsGrid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 0.85rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .metaContainer {
+    gap: 0.85rem;
+  }
+
+  .heroCard {
+    padding: 1rem;
+    gap: 0.85rem;
+    border-radius: 10px;
+  }
+
+  .heroHeaderRow {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.85rem;
+  }
+
+  .titleArea {
+    align-items: flex-start;
+    gap: 0.65rem;
+  }
+
+  .metaBrandIcon {
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+  }
+
+  .metaTitle {
+    font-size: 1.15rem;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+  }
+
+  .liveSyncBadge {
+    font-size: 0.68rem;
+    padding: 0.15rem 0.5rem;
+  }
+
+  .metaSubtitle {
+    font-size: 0.76rem;
+    line-height: 1.4;
+  }
+
+  .heroActions {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  .heroActions button {
+    width: 100%;
+    min-height: 40px;
+    padding: 0 0.75rem;
+    font-size: 0.78rem;
+    justify-content: center;
+  }
+
+  .statsGrid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.55rem;
+  }
+
+  .statCard {
+    padding: 0.75rem 0.85rem;
+    gap: 0.35rem;
+    border-radius: 8px;
+  }
+
+  .statLabel {
+    font-size: 0.66rem;
+    letter-spacing: 0.03em;
+  }
+
+  .statIconWrapper {
+    width: 26px;
+    height: 26px;
+  }
+
+  .statIconWrapper svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .statValue {
+    font-size: 1.35rem;
+  }
+
+  .statSubtext {
+    font-size: 0.66rem;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0.65rem 0.75rem;
+    gap: 0.55rem;
+    border-radius: 8px;
+  }
+
+  .filterGroup {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .searchBox {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .searchInput {
+    height: 38px;
+    font-size: 0.8rem;
+  }
+
+  .statusPills {
+    width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 3px;
+    gap: 3px;
+  }
+
+  .statusPills::-webkit-scrollbar {
+    display: none;
+  }
+
+  .statusPillBtn {
+    flex-shrink: 0;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.74rem;
+    min-height: 32px;
+  }
+
+  .courseSelect {
+    width: 100%;
+    height: 38px;
+    font-size: 0.78rem;
+  }
+
+  .viewToggleGroup {
+    width: 100%;
+  }
+
+  .viewToggleBtn {
+    flex: 1;
+    justify-content: center;
+    min-height: 34px;
+  }
+
+  .leadsGrid {
+    grid-template-columns: 1fr !important;
+    gap: 0.75rem;
+    width: 100%;
+  }
+
+  .leadCard {
+    padding: 0.85rem;
+    gap: 0.75rem;
+    border-radius: 8px;
+  }
+
+  .leadCardHeader {
+    gap: 0.5rem;
+  }
+
+  .leadName {
+    font-size: 0.92rem;
+  }
+
+  .leadTime {
+    font-size: 0.68rem;
+  }
+
+  .statusDropdown {
+    min-height: 36px;
+    font-size: 0.76rem;
+    padding: 0.3rem 0.6rem;
+  }
+
+  .contactInfoBox {
+    padding: 0.65rem 0.75rem;
+    gap: 0.55rem;
+  }
+
+  .contactRow {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.4rem;
+  }
+
+  .contactMain {
+    font-size: 0.8rem;
+    justify-content: space-between;
+  }
+
+  .contactActions {
+    display: flex;
+    gap: 0.4rem;
+    width: 100%;
+  }
+
+  .contactActions .miniActionBtn {
+    flex: 1;
+    min-height: 36px;
+    font-size: 0.76rem;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .metaMetaRow {
+    font-size: 0.68rem;
+    padding-top: 0.5rem;
+  }
+
+  .emptyState {
+    padding: 2rem 1rem;
+    border-radius: 10px;
+  }
+
+  .guideModal {
+    padding: 1.15rem;
+    max-width: 95vw;
+    max-height: 85vh;
+    border-radius: 10px;
+  }
+
+  .configValueBox {
+    font-size: 0.75rem;
+    padding: 0.4rem 0.6rem;
+  }
+
+  .toastSuccess {
+    left: 1rem;
+    right: 1rem;
+    bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+    justify-content: center;
+  }
+}
