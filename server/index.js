@@ -1485,49 +1485,34 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
   const emailKey = (typeof email === 'string' ? email : '').trim().toLowerCase();
   const passAttempt = (typeof passcode === 'string' ? passcode : '').trim();
 
+  if (!emailKey) {
+    return res.status(400).json({ error: 'Email is required.' });
+  }
+
   if (!passAttempt) {
     return res.status(400).json({ error: 'Passcode is required.' });
   }
 
+  // Reject unrecognized emails immediately — no fallback
+  if (!PRESET_USERS[emailKey]) {
+    return res.status(401).json({ error: 'Invalid credentials. Check your email address and passcode.' });
+  }
+
+  const userConfig = PRESET_USERS[emailKey];
   const adminPass = (process.env.ADMIN_PASSCODE || 'soundabode2026').trim();
+  const expectedPass = (process.env[userConfig.passEnv] || userConfig.defaultPass || '').trim();
 
   const matches = (attempt, expected) => {
     if (!expected) return false;
     return attempt === expected || attempt.toLowerCase() === expected.toLowerCase();
   };
 
-  // 1. Direct email+passcode match
-  if (emailKey && PRESET_USERS[emailKey]) {
-    const userConfig = PRESET_USERS[emailKey];
-    const expectedPass = (process.env[userConfig.passEnv] || userConfig.defaultPass || '').trim();
-    if (matches(passAttempt, expectedPass) || matches(passAttempt, adminPass)) {
-      const userObj = { email: emailKey, name: userConfig.name, role: userConfig.role };
-      const token = createSession(userObj);
-      return res.json({ success: true, user: userObj, token });
-    }
-  }
-
-  // 2. Admin master passcode match for any soundabode email or recognized admin
-  if (matches(passAttempt, adminPass)) {
-    const name = emailKey ? emailKey.split('@')[0].replace(/[^a-zA-Z0-9]/g, ' ') : 'Admin';
-    const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
-    const userObj = {
-      email: emailKey || 'admin@soundabode.com',
-      name: capitalized || 'Soundabode Admin',
-      role: 'admin',
-    };
+  // Authentication: email must be recognized AND passcode must match
+  // either the user's specific passcode or the admin master passcode
+  if (matches(passAttempt, expectedPass) || matches(passAttempt, adminPass)) {
+    const userObj = { email: emailKey, name: userConfig.name, role: userConfig.role };
     const token = createSession(userObj);
     return res.json({ success: true, user: userObj, token });
-  }
-
-  // 3. Match by passcode value alone (no email provided or email alias)
-  for (const [userEmail, userConfig] of Object.entries(PRESET_USERS)) {
-    const expectedPass = (process.env[userConfig.passEnv] || userConfig.defaultPass || '').trim();
-    if (matches(passAttempt, expectedPass)) {
-      const userObj = { email: emailKey || userEmail, name: userConfig.name, role: userConfig.role };
-      const token = createSession(userObj);
-      return res.json({ success: true, user: userObj, token });
-    }
   }
 
   return res.status(401).json({ error: 'Invalid credentials. Check your email address and passcode.' });
