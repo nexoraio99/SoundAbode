@@ -124,15 +124,69 @@ export function parseLeadFieldData(fieldData = []) {
   };
 }
 
+let cachedResolvedPageToken = null;
+let cachedResolvedForRaw = null;
+
+/**
+ * Resolves the effective Page Access Token.
+ * If the user configured a System User Token, this function automatically exchanges
+ * it with Meta's Graph API to get the actual Page Access Token for the target page.
+ */
+export async function resolvePageAccessToken(rawToken, pageId = '1609738365919238') {
+  const token = (rawToken || process.env.META_PAGE_ACCESS_TOKEN || '').trim();
+  if (!token) return '';
+
+  if (cachedResolvedForRaw === token && cachedResolvedPageToken) {
+    return cachedResolvedPageToken;
+  }
+
+  // Attempt 1: Fetch Page Access Token directly from /{pageId}?fields=access_token
+  try {
+    const exchangeUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${pageId}?fields=access_token&access_token=${encodeURIComponent(token)}`;
+    const exRes = await fetch(exchangeUrl);
+    const exData = await exRes.json();
+    if (exData && exData.access_token) {
+      console.log(`[Meta Token] Resolved Page Access Token for page ${pageId} from System User token.`);
+      cachedResolvedPageToken = exData.access_token;
+      cachedResolvedForRaw = token;
+      return cachedResolvedPageToken;
+    }
+  } catch (err) {
+    console.warn('[Meta Token] Could not exchange via page endpoint:', err.message);
+  }
+
+  // Attempt 2: Fetch Page Access Token from /me/accounts
+  try {
+    const accountsUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/me/accounts?access_token=${encodeURIComponent(token)}`;
+    const accRes = await fetch(accountsUrl);
+    const accData = await accRes.json();
+    if (accData && Array.isArray(accData.data) && accData.data.length > 0) {
+      const pageMatch = accData.data.find(p => String(p.id) === String(pageId)) || accData.data[0];
+      if (pageMatch && pageMatch.access_token) {
+        console.log(`[Meta Token] Resolved Page Access Token for ${pageMatch.name} (${pageMatch.id}) from /me/accounts.`);
+        cachedResolvedPageToken = pageMatch.access_token;
+        cachedResolvedForRaw = token;
+        return cachedResolvedPageToken;
+      }
+    }
+  } catch (err) {
+    console.warn('[Meta Token] Could not exchange via /me/accounts:', err.message);
+  }
+
+  // If not exchangeable, return raw token (it might already be a page access token)
+  return token;
+}
+
 /**
  * Fetch lead details from Meta Graph API using leadgen_id and Page Access Token
  */
 export async function fetchLeadFromMeta(leadgenId, pageAccessToken) {
-  if (!pageAccessToken) {
+  const effectiveToken = await resolvePageAccessToken(pageAccessToken);
+  if (!effectiveToken) {
     throw new Error('META_PAGE_ACCESS_TOKEN is not configured');
   }
 
-  const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${leadgenId}?fields=created_time,id,ad_id,form_id,field_data&access_token=${encodeURIComponent(pageAccessToken)}`;
+  const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${leadgenId}?fields=created_time,id,ad_id,form_id,field_data&access_token=${encodeURIComponent(effectiveToken)}`;
 
   const response = await fetch(url, {
     method: 'GET',
@@ -406,7 +460,7 @@ export async function handleWebhookEvent(
  * Programmatically subscribes the Facebook Page to this app's leadgen webhook
  */
 export async function subscribePageToLeadWebhook(pageId = '1609738365919238', pageAccessToken) {
-  const token = (pageAccessToken || process.env.META_PAGE_ACCESS_TOKEN || '').trim();
+  const token = await resolvePageAccessToken(pageAccessToken, pageId);
   if (!token) {
     throw new Error('META_PAGE_ACCESS_TOKEN is missing');
   }
@@ -434,7 +488,7 @@ export async function subscribePageToLeadWebhook(pageId = '1609738365919238', pa
  * @returns {Promise<{leads: Array, forms: Array, error?: string}>}
  */
 export async function fetchAllLeadsFromPage(pageId = '1609738365919238', pageAccessToken) {
-  const token = (pageAccessToken || process.env.META_PAGE_ACCESS_TOKEN || '').trim();
+  const token = await resolvePageAccessToken(pageAccessToken, pageId);
   if (!token) {
     return { leads: [], forms: [], error: 'META_PAGE_ACCESS_TOKEN is not configured' };
   }

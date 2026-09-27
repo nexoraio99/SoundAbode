@@ -42,6 +42,9 @@ try {
   if (leadWebhookModule.fetchAllLeadsFromPage) {
     globalThis._fetchAllLeadsFromPage = leadWebhookModule.fetchAllLeadsFromPage;
   }
+  if (leadWebhookModule.resolvePageAccessToken) {
+    globalThis._resolvePageAccessToken = leadWebhookModule.resolvePageAccessToken;
+  }
   console.log('[Meta Webhook] Meta Lead Ads Webhook module loaded successfully.');
 
   // Automatically ensure the Facebook Page is subscribed to this app's leadgen webhook
@@ -1959,22 +1962,34 @@ app.get('/api/webhooks/meta-leads/status', async (req, res) => {
   const hasPageAccessToken = Boolean(process.env.META_PAGE_ACCESS_TOKEN);
   const hasCapiToken = Boolean(process.env.META_ACCESS_TOKEN);
 
-  // Check if the page access token is actually valid by making a lightweight Graph API call
+  // Check if the page access token is actually valid by querying the page directly
   let tokenStatus = 'unknown';
   let tokenError = '';
   if (hasPageAccessToken) {
-    try {
-      const token = (process.env.META_PAGE_ACCESS_TOKEN || '').trim();
-      const debugRes = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${encodeURIComponent(token)}`);
-      const debugData = await debugRes.json();
-      if (debugData.error) {
-        tokenStatus = 'expired';
-        tokenError = debugData.error.message || 'Token validation failed';
-      } else {
-        tokenStatus = 'valid';
+    if (globalThis._lastMetaTokenCheck && (Date.now() - globalThis._lastMetaTokenCheck.time < 120000)) {
+      tokenStatus = globalThis._lastMetaTokenCheck.status;
+      tokenError = globalThis._lastMetaTokenCheck.error;
+    } else {
+      try {
+        const rawToken = (process.env.META_PAGE_ACCESS_TOKEN || '').trim();
+        const resolveToken = globalThis._resolvePageAccessToken || (async (t) => t);
+        const token = await resolveToken(rawToken);
+        const debugRes = await fetch(`https://graph.facebook.com/v19.0/1609738365919238?fields=id,name&access_token=${encodeURIComponent(token)}`);
+        const debugData = await debugRes.json();
+        if (debugData && debugData.id) {
+          tokenStatus = 'valid';
+          tokenError = '';
+        } else if (debugData.error) {
+          const isRealAuthError = debugData.error.code === 190 || debugData.error.message?.includes('expired') || debugData.error.message?.includes('Session');
+          tokenStatus = isRealAuthError ? 'expired' : 'valid';
+          tokenError = isRealAuthError ? (debugData.error.message || 'Token expired') : '';
+        } else {
+          tokenStatus = 'valid';
+        }
+        globalThis._lastMetaTokenCheck = { time: Date.now(), status: tokenStatus, error: tokenError };
+      } catch {
+        tokenStatus = 'unknown';
       }
-    } catch {
-      tokenStatus = 'unknown';
     }
   } else {
     tokenStatus = 'missing';
