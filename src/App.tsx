@@ -12,6 +12,8 @@ import FaqSection from './components/sections/FaqSection';
 import SEO from './components/common/SEO';
 import { PolicyType } from './pages/PolicyPages/PolicyPage';
 import { captureFirstTouchAttribution } from './utils/attribution';
+import { useContentGuard } from './hooks/useContentGuard';
+import Protected from './components/common/Protected';
 
 const ContactPage = lazy(() => import('./pages/ContactPage/ContactPage').then((m) => ({ default: m.ContactPage })));
 const BlogPage = lazy(() => import('./pages/BlogPage/BlogPage').then((m) => ({ default: m.BlogPage })));
@@ -69,6 +71,7 @@ const getRouteFromLocation = (): { page: RoutePage; slug?: string } => {
 };
 
 export const App: React.FC = () => {
+  useContentGuard();
   const [currentRoute, setCurrentRoute] = useState(getRouteFromLocation);
   const hasTrackedInitialPageView = useRef(false);
 
@@ -254,92 +257,96 @@ export const App: React.FC = () => {
       <Suspense fallback={null}>
         {currentRoute.page === 'cms-admin' ? (
           <CmsAdminPage onNavigate={(p) => navigateTo(p as RoutePage)} />
-        ) : currentRoute.page === 'admission-dj' ? (
-          <AdmissionPage formType="DJ" onNavigateHome={() => navigateTo('home')} />
-        ) : currentRoute.page === 'admission-emp' ? (
-          <AdmissionPage formType="EMP" onNavigateHome={() => navigateTo('home')} />
-        ) : currentRoute.page === 'about' ? (
-          <AboutPage onNavigateHome={() => navigateTo('home')} />
-        ) : currentRoute.page === 'contact' ? (
-          <ContactPage onNavigateHome={() => navigateTo('home')} />
-        ) : currentRoute.page === 'blog' || currentRoute.page === 'blog-article' ? (
-          <BlogPage onNavigateHome={() => navigateTo('home')} articleSlug={currentRoute.page === 'blog-article' ? currentRoute.slug : undefined} />
-        ) : currentRoute.page === 'terms' ||
-          currentRoute.page === 'privacy' ||
-          currentRoute.page === 'refund-policy' ||
-          currentRoute.page === 'shipping-policy' ? (
-          <PolicyPage
-            initialPolicy={
-              currentRoute.page === 'terms'
-                ? 'terms'
-                : currentRoute.page === 'privacy'
-                ? 'privacy'
-                : currentRoute.page === 'refund-policy'
-                ? 'refund'
-                : 'shipping'
-            }
-            onNavigateHome={() => navigateTo('home')}
-            onSelectPolicy={(policy) => {
-              const pMap: Record<PolicyType, RoutePage> = {
-                terms: 'terms',
-                privacy: 'privacy',
-                refund: 'refund-policy',
-                shipping: 'shipping-policy',
-              };
-              setCurrentRoute({ page: pMap[policy] });
-            }}
-          />
-        ) : currentRoute.page === 'course-detail' ? (
-          <CourseDetailPage
-            courseSlug={currentRoute.slug || 'beginner-course'}
-            onNavigateHome={() => navigateTo('home')}
-            onNavigateCourses={() => navigateTo('courses')}
-          />
-        ) : currentRoute.page === 'courses' ? (
-          <CoursesPage onNavigateHome={() => navigateTo('home')} />
-        ) : currentRoute.page === 'try-now' ? (
-          <TryNowPage onNavigateHome={() => navigateTo('home')} />
         ) : (
-          <>
-          <SEO
-            title="Best Music Production & DJ School India | Soundabode Pune"
-            description="Soundabode is India’s most practical music academy offering certified Ableton Live Music Production, DJ Training, Audio Engineering, Film Scoring and Sound Design programs in Pune."
-            keywords="Soundabode, Music Production Academy Pune, DJ School India, Audio Engineering Courses, EDM Production Classes, Film Scoring India, Ableton Live Training"
-            canonical="https://soundabode.com/"
-            schema={{
-              '@context': 'https://schema.org',
-              '@type': 'EducationalOrganization',
-              name: 'Soundabode',
-              url: 'https://soundabode.com/',
-              logo: 'https://soundabode.com/Assets/og-soundabode-cover.jpg',
-              description: 'Soundabode is India’s most practical academy for Music Production, DJing & Audio Engineering with industry-grade studios and real-world training.',
-              address: {
-                '@type': 'PostalAddress',
-                streetAddress: 'Shop No. 218, 2nd Floor, Vision 9 Mall, Kunal Icon Road, Pimple Saudagar',
-                addressLocality: 'Pune',
-                addressRegion: 'Maharashtra',
-                postalCode: '411017',
-                addressCountry: 'IN',
-              },
-              sameAs: [
-                'https://www.instagram.com/soundabode',
-                'https://www.facebook.com/soundabode',
-                'https://www.youtube.com/@soundabode',
-              ],
-            }}
-          />
-          <TwoPanelHero />
-          <div className="deferRender">
-            <ProduceCreateReleaseSection />
-            <ArtistCarouselSection />
-            <TestimonialSection />
-            <StudioSetupSection />
-            <WhyChooseSoundabodeSection />
-            <FaqSection />
-          </div>
-          <Footer />
-        </>
-      )}
+          <Protected style={{ position: 'relative', width: '100%', minHeight: '100vh' }}>
+            {currentRoute.page === 'admission-dj' ? (
+              <AdmissionPage formType="DJ" onNavigateHome={() => navigateTo('home')} />
+            ) : currentRoute.page === 'admission-emp' ? (
+              <AdmissionPage formType="EMP" onNavigateHome={() => navigateTo('home')} />
+            ) : currentRoute.page === 'about' ? (
+              <AboutPage onNavigateHome={() => navigateTo('home')} />
+            ) : currentRoute.page === 'contact' ? (
+              <ContactPage onNavigateHome={() => navigateTo('home')} />
+            ) : currentRoute.page === 'blog' || currentRoute.page === 'blog-article' ? (
+              <BlogPage onNavigateHome={() => navigateTo('home')} articleSlug={currentRoute.page === 'blog-article' ? currentRoute.slug : undefined} />
+            ) : currentRoute.page === 'terms' ||
+              currentRoute.page === 'privacy' ||
+              currentRoute.page === 'refund-policy' ||
+              currentRoute.page === 'shipping-policy' ? (
+              <PolicyPage
+                initialPolicy={
+                  currentRoute.page === 'terms'
+                    ? 'terms'
+                    : currentRoute.page === 'privacy'
+                    ? 'privacy'
+                    : currentRoute.page === 'refund-policy'
+                    ? 'refund'
+                    : 'shipping'
+                }
+                onNavigateHome={() => navigateTo('home')}
+                onSelectPolicy={(policy) => {
+                  const pMap: Record<PolicyType, RoutePage> = {
+                    terms: 'terms',
+                    privacy: 'privacy',
+                    refund: 'refund-policy',
+                    shipping: 'shipping-policy',
+                  };
+                  setCurrentRoute({ page: pMap[policy] });
+                }}
+              />
+            ) : currentRoute.page === 'course-detail' ? (
+              <CourseDetailPage
+                courseSlug={currentRoute.slug || 'beginner-course'}
+                onNavigateHome={() => navigateTo('home')}
+                onNavigateCourses={() => navigateTo('courses')}
+              />
+            ) : currentRoute.page === 'courses' ? (
+              <CoursesPage onNavigateHome={() => navigateTo('home')} />
+            ) : currentRoute.page === 'try-now' ? (
+              <TryNowPage onNavigateHome={() => navigateTo('home')} />
+            ) : (
+              <>
+                <SEO
+                  title="Best Music Production & DJ School India | Soundabode Pune"
+                  description="Soundabode is India’s most practical music academy offering certified Ableton Live Music Production, DJ Training, Audio Engineering, Film Scoring and Sound Design programs in Pune."
+                  keywords="Soundabode, Music Production Academy Pune, DJ School India, Audio Engineering Courses, EDM Production Classes, Film Scoring India, Ableton Live Training"
+                  canonical="https://soundabode.com/"
+                  schema={{
+                    '@context': 'https://schema.org',
+                    '@type': 'EducationalOrganization',
+                    name: 'Soundabode',
+                    url: 'https://soundabode.com/',
+                    logo: 'https://soundabode.com/Assets/og-soundabode-cover.jpg',
+                    description: 'Soundabode is India’s most practical academy for Music Production, DJing & Audio Engineering with industry-grade studios and real-world training.',
+                    address: {
+                      '@type': 'PostalAddress',
+                      streetAddress: 'Shop No. 218, 2nd Floor, Vision 9 Mall, Kunal Icon Road, Pimple Saudagar',
+                      addressLocality: 'Pune',
+                      addressRegion: 'Maharashtra',
+                      postalCode: '411017',
+                      addressCountry: 'IN',
+                    },
+                    sameAs: [
+                      'https://www.instagram.com/soundabode',
+                      'https://www.facebook.com/soundabode',
+                      'https://www.youtube.com/@soundabode',
+                    ],
+                  }}
+                />
+                <TwoPanelHero />
+                <div className="deferRender">
+                  <ProduceCreateReleaseSection />
+                  <ArtistCarouselSection />
+                  <TestimonialSection />
+                  <StudioSetupSection />
+                  <WhyChooseSoundabodeSection />
+                  <FaqSection />
+                </div>
+                <Footer />
+              </>
+            )}
+          </Protected>
+        )}
       </Suspense>
 
       <CookieConsentBanner />

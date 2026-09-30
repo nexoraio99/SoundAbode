@@ -307,3 +307,51 @@ h1, h2, h3, h4, h5, h6 {
     padding: 1px 3px !important;
   }
 }
+
+/* ==========================================================================
+   Content Deterrent Layer (Casual deterrent only, not absolute DRM)
+   ========================================================================== */
+[data-protected] {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+[data-protected] img,
+[data-protected] video {
+  pointer-events: none;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+/* Exempt interactive & contact elements even if nested in protected containers */
+[data-protected] [data-unprotected],
+[data-protected] .unprotected,
+[data-protected] input,
+[data-protected] textarea,
+[data-protected] select,
+[data-protected] [contenteditable="true"],
+[data-protected] a[href^="tel:"],
+[data-protected] a[href^="mailto:"] {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  pointer-events: auto !important;
+  -webkit-touch-callout: default !important;
+}
+
+/* Print deterrent: hide protected regions from browser printing */
+@media print {
+  [data-protected] {
+    display: none !important;
+    visibility: hidden !important;
+  }
+}
+
+/* Optional tab blur state */
+body.sa-tab-hidden [data-protected] {
+  filter: blur(12px) !important;
+  transition: filter 0.2s ease;
+}
+

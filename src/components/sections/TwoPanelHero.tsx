@@ -299,6 +299,7 @@ export const TwoPanelHero: React.FC<TwoPanelHeroProps> = ({
           {/* Left Panel - DJ Courses */}
           <div
             ref={leftPanelRef}
+            data-protected="true"
             className={`${styles.panel} ${styles.leftPanel}`}
           >
             {leftPanelVideo && (
@@ -341,6 +342,7 @@ export const TwoPanelHero: React.FC<TwoPanelHeroProps> = ({
           {/* Right Panel - Music Production Courses */}
           <div
             ref={rightPanelRef}
+            data-protected="true"
             className={`${styles.panel} ${styles.rightPanel}`}
           >
             {rightPanelVideo && (
