@@ -109,8 +109,6 @@ export const AdmissionFormModal: React.FC<AdmissionFormModalProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    // Sync with remote admissions then fetch authoritative next form number
-    AdmissionService.getAllAdmissions();
     AdmissionService.getNextFormNumber(formType).then((no) => {
       if (!cancelled) setActiveFormNo(no);
     });

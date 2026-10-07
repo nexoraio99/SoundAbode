@@ -239,8 +239,21 @@ function broadcastLiveEvent(type, data) {
   }
 }
 
-// Live SSE endpoint for CMS Admin real-time updates
+// Live SSE endpoint for CMS Admin real-time updates (Authenticated only)
 app.get('/api/live-stream', (req, res) => {
+  let token = null;
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) {
+    token = authHeader.slice(7).trim();
+  } else if (req.query && req.query.token) {
+    token = String(req.query.token).trim();
+  }
+
+  const user = verifyToken(token);
+  if (!user) {
+    return res.status(401).json({ error: 'Unauthorized: Valid CMS session token required for live stream.' });
+  }
+
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -1716,7 +1729,7 @@ async function forwardToGoogleSheets(rawPayload) {
 }
 
 // ─── INQUIRIES / LEADS ─────────────────────────────────────────────────────────
-app.get('/api/test-google-sheets', async (req, res) => {
+app.get('/api/test-google-sheets', requireAuth, requireAdmin, async (req, res) => {
   const sheetsUrl = process.env.GOOGLE_SHEETS_URL || process.env.VITE_GOOGLE_SHEETS_URL;
   if (!sheetsUrl) {
     return res.status(400).json({
@@ -1736,11 +1749,10 @@ app.get('/api/test-google-sheets', async (req, res) => {
   res.json({
     success: true,
     message: 'Test lead dispatched to Google Sheets! Check server console log.',
-    sheetsUrl,
   });
 });
 
-app.get('/api/test-attendance-sheets', async (req, res) => {
+app.get('/api/test-attendance-sheets', requireAuth, requireAdmin, async (req, res) => {
   const sheetsUrl = process.env.GOOGLE_SHEETS_URL || process.env.VITE_GOOGLE_SHEETS_URL;
   if (!sheetsUrl) {
     return res.status(400).json({
@@ -1762,7 +1774,6 @@ app.get('/api/test-attendance-sheets', async (req, res) => {
   res.json({
     success: true,
     message: 'Test attendance record dispatched to Google Sheets! Check server console log.',
-    sheetsUrl,
   });
 });
 
@@ -1956,7 +1967,7 @@ app.post('/api/webhooks/meta-leads', async (req, res) => {
 });
 
 // 3. GET: Webhook and credentials status (for CMS Admin Meta Ads tab)
-app.get('/api/webhooks/meta-leads/status', async (req, res) => {
+app.get('/api/webhooks/meta-leads/status', requireAuth, async (req, res) => {
   const hasVerifyToken = Boolean(process.env.META_WEBHOOK_VERIFY_TOKEN);
   const hasAppSecret = Boolean(process.env.META_APP_SECRET);
   const hasPageAccessToken = Boolean(process.env.META_PAGE_ACCESS_TOKEN);
@@ -2009,7 +2020,7 @@ app.get('/api/webhooks/meta-leads/status', async (req, res) => {
 });
 
 // 4. POST: Simulate a realistic Meta Lead for immediate CMS validation
-app.post('/api/webhooks/meta-leads/simulate-test', async (req, res) => {
+app.post('/api/webhooks/meta-leads/simulate-test', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { name, email, phone, courseInterest, campaignName, formName } = req.body || {};
     const simulatedLeadgenId = `sim_${Date.now()}`;
@@ -2034,7 +2045,7 @@ app.post('/api/webhooks/meta-leads/simulate-test', async (req, res) => {
 });
 
 // 5. POST: Programmatically subscribe the Facebook Page to leadgen webhook
-app.post('/api/webhooks/meta-leads/subscribe', async (req, res) => {
+app.post('/api/webhooks/meta-leads/subscribe', requireAuth, requireAdmin, async (req, res) => {
   try {
     const pageId = req.body?.pageId || '1609738365919238';
     const result = await subscribePageToLeadWebhook(pageId);
@@ -2047,7 +2058,7 @@ app.post('/api/webhooks/meta-leads/subscribe', async (req, res) => {
 // 6. POST: Sync — pull-based lead retrieval from Meta Graph API + cleanup
 // This fetches ALL leads from ALL leadgen forms on the Facebook Page,
 // then upserts any that are missing from the database.
-app.post('/api/webhooks/meta-leads/sync', async (req, res) => {
+app.post('/api/webhooks/meta-leads/sync', requireAuth, requireAdmin, async (req, res) => {
   try {
     const pageAccessToken = (process.env.META_PAGE_ACCESS_TOKEN || '').trim();
     if (!pageAccessToken) {
@@ -2126,6 +2137,7 @@ app.post('/api/webhooks/meta-leads/sync', async (req, res) => {
           email: lead.email,
           phone: lead.phone,
           courseInterest: lead.courseInterest,
+          platform: lead.platform,
           adId: lead.adId,
           formId: lead.formId,
           formName: lead.formName,

@@ -618,7 +618,18 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
               {/* Attribution & Campaign Footer */}
               <div className={styles.metaMetaRow}>
                 <span>
-                  Source: <strong>{lead.attribution?.utm_source || 'Facebook/Instagram'}</strong>
+                  Source:{' '}
+                  <strong>
+                    {lead.attribution?.utm_source?.toLowerCase() === 'instagram' ||
+                    lead.attribution?.utm_source?.toLowerCase() === 'ig' ||
+                    lead.message?.toLowerCase().includes('instagram') ||
+                    lead.source?.toLowerCase().includes('instagram')
+                      ? 'Instagram'
+                      : lead.attribution?.utm_source?.toLowerCase() === 'facebook' ||
+                        lead.attribution?.utm_source?.toLowerCase() === 'fb'
+                      ? 'Facebook'
+                      : lead.attribution?.utm_source || 'Facebook/Instagram'}
+                  </strong>
                 </span>
                 {lead.metaLeadId && (
                   <span title={`Meta Lead ID: ${lead.metaLeadId}`}>

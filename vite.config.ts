@@ -28,6 +28,10 @@ export default defineConfig({
             }
             return 'vendor-deps';
           }
+          // NOTE: CMS admin code is intentionally NOT put in a manual chunk.
+          // CmsAdminPage is lazy()-loaded in App.tsx, so Rollup already isolates it.
+          // A manual chunk here would hoist shared modules (Vite preload helper,
+          // AuthService, etc.) into it and force every public page to load it.
         },
       },
     },

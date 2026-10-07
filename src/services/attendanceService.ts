@@ -64,179 +64,7 @@ export function sortStudentsById(students: EnrolledStudent[]): EnrolledStudent[]
   });
 }
 
-const INITIAL_STUDENTS: EnrolledStudent[] = [
-  {
-    id: 'std-001',
-    name: 'Shailendra Chakravarthy',
-    email: 'shailendrachakravarthy8@gmail.com',
-    phone: '9866514403/9307031006',
-    course: 'Complete DJ training course',
-    batch: 'Regular Batch',
-    enrolledDate: '2026-08-01',
-  },
-  {
-    id: 'std-002',
-    name: 'Deeksha Vishwakarma',
-    email: 'deekshavishwakarma705@gmail.com',
-    phone: '8319948935/8819007910',
-    course: 'Complete DJ training course',
-    batch: 'Regular Batch',
-    enrolledDate: '2026-08-01',
-  },
-  {
-    id: 'std-003',
-    name: 'Sonal Shandilya',
-    email: 'Sha.sonal@gmail.com',
-    phone: '9798880002',
-    course: 'Basic DJ training course',
-    batch: 'Weekend Batch',
-    enrolledDate: '2026-08-02',
-  },
-  {
-    id: 'std-004',
-    name: 'Ridhima Deshpande',
-    email: 'ridhimadeshpande990@gmail.com',
-    phone: '9527556666',
-    course: 'Special 3 months rekordbox course - 50,000',
-    batch: 'Special Batch',
-    enrolledDate: '2026-08-03',
-  },
-  {
-    id: 'std-005',
-    name: 'Pranavadeep Bagul',
-    email: 'pranavdeeponly@gmail.com',
-    phone: '9322060312',
-    course: 'Beginner electronic music production',
-    batch: 'Regular Batch',
-    enrolledDate: '2026-08-04',
-  },
-  {
-    id: 'std-006',
-    name: 'Chaitanya Jain',
-    email: 'djchaitanyajain100@gmail.com',
-    phone: '9172902597',
-    course: 'Beginner electronic music production',
-    batch: 'Regular Batch',
-    enrolledDate: '2026-08-06',
-  },
-  {
-    id: 'std-007',
-    name: 'Kush Kachoriya',
-    email: 'Kk.wav.work@gmail.com',
-    phone: '7046029474',
-    course: 'Beginner electronic music production',
-    batch: 'Regular Batch',
-    enrolledDate: '2026-08-07',
-  },
-  {
-    id: 'std-008',
-    name: 'Yogesh Kashid',
-    email: 'kashidyogesh096@gmail.com',
-    phone: '7875547537',
-    course: 'Basic DJ training course plus DJ training crash course',
-    batch: 'Crash Course Batch',
-    enrolledDate: '2026-08-08',
-  },
-  {
-    id: 'std-009',
-    name: 'Rohit Govvilkar',
-    email: 'rohietgovvilkar@gmail.com',
-    phone: '8767607223',
-    course: 'Basic training course',
-    batch: 'Regular Batch',
-    enrolledDate: '2026-08-09',
-  },
-  {
-    id: 'std-010',
-    name: 'Devansh Prasad',
-    email: 'regurgmusic@gmail.com',
-    phone: '9381340066',
-    course: 'Basic DJ training course',
-    batch: 'Regular Batch',
-    enrolledDate: '2026-08-10',
-  },
-  {
-    id: 'std-011',
-    name: 'Tavjot Singh',
-    email: 'tavjyotsingh76782222@gmail.com',
-    phone: '7678115930',
-    course: 'Complete DJ training course',
-    batch: 'Regular Batch',
-    enrolledDate: '2026-08-11',
-  },
-  {
-    id: 'std-012',
-    name: 'Sharvil Sonawane',
-    email: '',
-    phone: '9158979991/9049499991',
-    course: 'Beginner electronic music production',
-    batch: 'Regular Batch',
-    enrolledDate: '2026-08-12',
-  },
-  {
-    id: 'std-013',
-    name: 'Guruprasad Dabhekar',
-    email: 'dabhekarguruprasad894@gmail.com',
-    phone: '8857092595 / 9921228622',
-    course: 'Basic DJ Course',
-    batch: 'Regular Studio Batch (Mon/Wed/Fri)',
-    enrolledDate: '2026-07-28',
-  },
-  {
-    id: 'std-014',
-    name: 'Bela Lomash',
-    email: 'blomash@gmail.com',
-    phone: '+1 (562) 981-4693',
-    course: 'Basic DJ Course',
-    batch: 'Regular Studio Batch (Mon/Wed/Fri)',
-    enrolledDate: '2026-08-01',
-  },
-  {
-    id: 'std-015',
-    name: 'Gurbani Singh',
-    email: 'gurbanisingh040208@gmail.com',
-    phone: '7009385250',
-    course: 'Basic DJ Course',
-    batch: 'Regular Studio Batch (Mon/Wed/Fri)',
-    enrolledDate: '2026-08-09',
-  },
-  {
-    id: 'std-016',
-    name: 'Priyanka Bramhane',
-    email: 'priyankaingle01@gmail.com',
-    phone: '8446383170',
-    course: 'Complete DJ Training Course (Level 01 + Level 02)',
-    batch: 'Regular DJ Studio Batch',
-    enrolledDate: '2026-08-22',
-  },
-  {
-    id: 'std-017',
-    name: 'Devesh Walke',
-    email: 'deveshwalke83@gmail.com',
-    phone: '9607792149',
-    course: 'Beginner Electronic Music Production',
-    batch: 'Regular EMP Studio Batch',
-    enrolledDate: '2026-08-24',
-  },
-  {
-    id: 'std-018',
-    name: 'Melrick Mascarenhas',
-    email: 'melrickmascarenhas447@gmail.com',
-    phone: '7795903902',
-    course: 'Beginner Electronic Music Production',
-    batch: 'Regular EMP Studio Batch',
-    enrolledDate: '2026-08-31',
-  },
-  {
-    id: 'std-019',
-    name: 'Rahul Saha',
-    email: 'saharahul891@gmail.com',
-    phone: '8999107403',
-    course: 'Complete DJ Training Course (Level 01 + Level 02)',
-    batch: 'Regular DJ Studio Batch',
-    enrolledDate: '2026-09-04',
-  },
-];
+const INITIAL_STUDENTS: EnrolledStudent[] = [];
 
 const INITIAL_ATTENDANCE: AttendanceRecord[] = [];
 
@@ -256,12 +84,14 @@ function getAttendanceStorageKey(user?: CmsUser | null): string {
 // ─── Real-Time Live SSE Stream Initialization for Attendance ─────────────────
 let liveAttendanceEventSource: EventSource | null = null;
 
-function initAttendanceLiveStream() {
+export function initAttendanceLiveStream() {
   if (typeof window === 'undefined' || !('EventSource' in window)) return;
+  const token = AuthService.getSessionToken();
+  if (!token) return; // Only authenticated CMS users connect to SSE live stream
   if (liveAttendanceEventSource) return;
 
   try {
-    const sseUrl = `${API_BASE_URL}/live-stream`;
+    const sseUrl = `${API_BASE_URL}/live-stream?token=${encodeURIComponent(token)}`;
     liveAttendanceEventSource = new EventSource(sseUrl);
 
     liveAttendanceEventSource.addEventListener('ATTENDANCE_SAVED', (e: MessageEvent) => {
@@ -320,7 +150,7 @@ function initAttendanceLiveStream() {
   }
 }
 
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && AuthService.getSessionToken()) {
   initAttendanceLiveStream();
 }
 
@@ -453,6 +283,10 @@ export class AttendanceService {
   }
 
   public static clearUserCache(): void {
+    if (liveAttendanceEventSource) {
+      try { liveAttendanceEventSource.close(); } catch {}
+      liveAttendanceEventSource = null;
+    }
     try {
       const storageKey = getAttendanceStorageKey();
       localStorage.removeItem(storageKey);
@@ -697,6 +531,7 @@ export class AttendanceService {
 
   public static async fetchStudents(): Promise<EnrolledStudent[]> {
     if (typeof window !== 'undefined') {
+      initAttendanceLiveStream();
       try {
         const res = await fetch(`${API_BASE_URL}/students`, {
           headers: AuthService.getAuthHeaders(),

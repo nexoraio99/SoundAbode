@@ -186,7 +186,7 @@ export async function fetchLeadFromMeta(leadgenId, pageAccessToken) {
     throw new Error('META_PAGE_ACCESS_TOKEN is not configured');
   }
 
-  const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${leadgenId}?fields=created_time,id,ad_id,form_id,field_data&access_token=${encodeURIComponent(effectiveToken)}`;
+  const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${leadgenId}?fields=created_time,id,ad_id,form_id,field_data,platform,is_organic&access_token=${encodeURIComponent(effectiveToken)}`;
 
   const response = await fetch(url, {
     method: 'GET',
@@ -210,6 +210,7 @@ export async function persistMetaLead({
   email,
   phone,
   courseInterest,
+  platform = '',
   adId = '',
   formId = '',
   formName = '',
@@ -224,10 +225,21 @@ export async function persistMetaLead({
   const customId = `meta-${leadgenId}`;
   const submittedAt = createdTime ? new Date(createdTime) : new Date();
 
+  // Determine actual platform: Instagram ('ig') vs Facebook ('fb')
+  // Meta's explicit `platform` field is authoritative; name heuristics are only a fallback.
+  const normPlatform = String(platform || '').toLowerCase();
+  const heuristicText = `${formName || ''} ${campaignName || ''} ${additionalNotes || ''}`.toLowerCase();
+  const isInstagram = normPlatform
+    ? normPlatform === 'ig' || normPlatform === 'instagram'
+    : heuristicText.includes('instagram') || /\big\b/.test(String(formName || '').toLowerCase());
+
+  const resolvedSource = isInstagram ? 'instagram' : (normPlatform === 'fb' ? 'facebook' : (normPlatform || 'facebook'));
+
   const messageLines = [];
   if (formName || formId) messageLines.push(`Form: ${formName || formId}`);
   if (adId) messageLines.push(`Ad ID: ${adId}`);
   if (campaignName) messageLines.push(`Campaign: ${campaignName}`);
+  if (platform) messageLines.push(`Platform: ${isInstagram ? 'Instagram' : 'Facebook'}`);
   if (additionalNotes) messageLines.push(`Responses: ${additionalNotes}`);
 
   const inquiryData = {
@@ -237,23 +249,23 @@ export async function persistMetaLead({
     phone: (phone || '').trim(),
     courseInterest: (courseInterest || 'Music Production & Sound Engineering').trim(),
     message: messageLines.join('\n') || 'Meta Lead Ad Form Submission',
-    source: 'Meta Lead Ad',
+    source: isInstagram ? 'Instagram Lead Ad' : 'Meta Lead Ad',
     metaLeadId: String(leadgenId),
     attribution: {
-      source: 'Meta Ads',
-      utm_source: 'facebook',
+      source: isInstagram ? 'Instagram Ads' : 'Meta Ads',
+      utm_source: resolvedSource,
       utm_medium: 'lead_ad',
       utm_campaign: campaignName || (adId ? `ad_${adId}` : 'meta_lead_gen'),
       utm_content: formName || formId || '',
       utm_term: '',
       fbclid: '',
       gclid: '',
-      referrer: 'https://instagram.com',
+      referrer: isInstagram ? 'https://instagram.com' : 'https://facebook.com',
       landing_page: 'Meta Instant Form',
     },
     submittedAt,
     status: 'NEW',
-    notes: 'Generated via Meta Lead Ads',
+    notes: `Generated via Meta Lead Ads (${isInstagram ? 'Instagram' : 'Facebook'})`,
   };
 
   let savedRecord = inquiryData;
@@ -417,6 +429,7 @@ export async function handleWebhookEvent(
               email: parsed.email,
               phone: parsed.phone,
               courseInterest: parsed.courseInterest,
+              platform: rawLead.platform || '',
               adId: rawLead.ad_id || adId,
               formId: rawLead.form_id || formId,
               additionalNotes: parsed.additionalNotes,
@@ -514,7 +527,7 @@ export async function fetchAllLeadsFromPage(pageId = '1609738365919238', pageAcc
     // Step 2: For each form, fetch all leads
     for (const form of forms) {
       try {
-        let leadsUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${form.id}/leads?fields=id,created_time,ad_id,form_id,field_data&limit=50&access_token=${encodeURIComponent(token)}`;
+        let leadsUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${form.id}/leads?fields=id,created_time,ad_id,form_id,field_data,platform,is_organic&limit=50&access_token=${encodeURIComponent(token)}`;
 
         // Paginate through all leads in this form
         while (leadsUrl) {
@@ -536,6 +549,7 @@ export async function fetchAllLeadsFromPage(pageId = '1609738365919238', pageAcc
               email: parsed.email,
               phone: parsed.phone,
               courseInterest: parsed.courseInterest,
+              platform: rawLead.platform || '',
               adId: rawLead.ad_id || '',
               formId: rawLead.form_id || form.id,
               formName: form.name || '',

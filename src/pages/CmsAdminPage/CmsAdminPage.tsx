@@ -489,6 +489,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const handleLogout = () => {
     AuthService.logout();
     AttendanceService.clearUserCache();
+    AdmissionService.closeLiveStream();
     setIsAuthenticated(false);
     setCurrentUser(null);
   };

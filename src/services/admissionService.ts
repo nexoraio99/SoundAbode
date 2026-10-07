@@ -1,5 +1,4 @@
 import { AuthService } from './authService';
-import { AttendanceService } from './attendanceService';
 import { GoogleSheetsService } from './googleSheetsService';
 
 import { getApiBaseUrl } from './apiConfig';
@@ -45,12 +44,14 @@ if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
 // ─── Real-Time Live SSE Stream Initialization ────────────────────────────────
 let liveEventSource: EventSource | null = null;
 
-function initLiveStream() {
+export function initLiveStream() {
   if (typeof window === 'undefined' || !('EventSource' in window)) return;
+  const token = AuthService.getSessionToken();
+  if (!token) return; // Only authenticated CMS users connect to SSE live stream
   if (liveEventSource) return;
 
   try {
-    const sseUrl = `${API_BASE_URL}/live-stream`;
+    const sseUrl = `${API_BASE_URL}/live-stream?token=${encodeURIComponent(token)}`;
     liveEventSource = new EventSource(sseUrl);
 
     liveEventSource.addEventListener('ADMISSION_CREATED', (e) => {
@@ -94,13 +95,20 @@ function initLiveStream() {
   }
 }
 
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && AuthService.getSessionToken()) {
   initLiveStream();
 }
 
 type AdmissionListener = (admissions: AdmissionSubmission[]) => void;
 
 export class AdmissionService {
+  /** Close the authenticated SSE stream (call on logout). */
+  public static closeLiveStream(): void {
+    if (liveEventSource) {
+      try { liveEventSource.close(); } catch {}
+      liveEventSource = null;
+    }
+  }
   private static listeners: AdmissionListener[] = [];
 
   private static isMockAdmission(adm: AdmissionSubmission): boolean {
@@ -216,6 +224,9 @@ export class AdmissionService {
     const local = this.getStoredAdmissions();
 
     if (typeof window !== 'undefined') {
+      if (AuthService.getSessionToken()) {
+        initLiveStream();
+      }
       fetch(`${API_BASE_URL}/admissions`, {
         headers: AuthService.getAuthHeaders(),
       })
@@ -417,26 +428,30 @@ export class AdmissionService {
 
     // If marked as ENROLLED, automatically add as Enrolled Student
     if (status === 'ENROLLED') {
-      try {
-        const studentName = `${target.firstName} ${target.lastName}`.trim();
-        const existingStudents = AttendanceService.getAllStudents();
-        const alreadyExists = existingStudents.some(
-          (s) => s.name.toLowerCase() === studentName.toLowerCase() || (target.email && s.email === target.email)
-        );
+      import('./attendanceService').then(({ AttendanceService }) => {
+        try {
+          const studentName = `${target.firstName} ${target.lastName}`.trim();
+          const existingStudents = AttendanceService.getAllStudents();
+          const alreadyExists = existingStudents.some(
+            (s) => s.name.toLowerCase() === studentName.toLowerCase() || (target.email && s.email === target.email)
+          );
 
-        if (!alreadyExists) {
-          AttendanceService.addStudent({
-            name: studentName,
-            email: target.email || '',
-            phone: target.cellPhone || '',
-            course: target.courseOpted || (target.formType === 'DJ' ? 'DJ Training Course' : 'EMP Production'),
-            batch: `${target.formType === 'DJ' ? 'Regular DJ Studio Batch' : 'Regular EMP Studio Batch'}`,
-            enrolledDate: new Date().toISOString().split('T')[0],
-          });
+          if (!alreadyExists) {
+            AttendanceService.addStudent({
+              name: studentName,
+              email: target.email || '',
+              phone: target.cellPhone || '',
+              course: target.courseOpted || (target.formType === 'DJ' ? 'DJ Training Course' : 'EMP Production'),
+              batch: `${target.formType === 'DJ' ? 'Regular DJ Studio Batch' : 'Regular EMP Studio Batch'}`,
+              enrolledDate: new Date().toISOString().split('T')[0],
+            });
+          }
+        } catch (err) {
+          console.warn('Auto student enrollment error:', err);
         }
-      } catch (err) {
-        console.warn('Auto student enrollment error:', err);
-      }
+      }).catch((err) => {
+        console.warn('Could not load AttendanceService for auto enrollment:', err);
+      });
     }
 
     // Sync status update to backend API

@@ -44,7 +44,7 @@ export class GoogleSheetsService {
       submittedAt: payload.submittedAt || new Date().toISOString(),
     };
 
-    console.log('📝 Submitting Lead to Google Sheets:', data);
+    console.log('📝 Submitting Lead to Google Sheets...');
 
     if (!url) {
       console.warn(
