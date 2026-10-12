@@ -426,25 +426,48 @@ export class AdmissionService {
     admissions[index] = { ...target, status };
     this.saveAdmissions(admissions);
 
-    // If marked as ENROLLED, automatically add as Enrolled Student
+    // If marked as ENROLLED, automatically add or update Enrolled Student
     if (status === 'ENROLLED') {
-      import('./attendanceService').then(({ AttendanceService }) => {
+      import('./attendanceService').then(({ AttendanceService, getStudentCourses, getStudentBatches, isSameStudent }) => {
         try {
           const studentName = `${target.firstName} ${target.lastName}`.trim();
           const existingStudents = AttendanceService.getAllStudents();
-          const alreadyExists = existingStudents.some(
-            (s) => s.name.toLowerCase() === studentName.toLowerCase() || (target.email && s.email === target.email)
-          );
+          const targetCourse = (target.courseOpted || (target.formType === 'DJ' ? 'DJ Training Course' : 'EMP Production')).trim();
+          const targetBatch = (target.formType === 'DJ' ? 'Regular DJ Studio Batch' : 'Regular EMP Studio Batch').trim();
 
-          if (!alreadyExists) {
+          const existingStudent = existingStudents.find((s) => isSameStudent(s, studentName, target.email));
+
+          if (!existingStudent) {
             AttendanceService.addStudent({
               name: studentName,
               email: target.email || '',
               phone: target.cellPhone || '',
-              course: target.courseOpted || (target.formType === 'DJ' ? 'DJ Training Course' : 'EMP Production'),
-              batch: `${target.formType === 'DJ' ? 'Regular DJ Studio Batch' : 'Regular EMP Studio Batch'}`,
+              course: targetCourse,
+              courses: [targetCourse],
+              batch: targetBatch,
+              batches: [targetBatch],
               enrolledDate: new Date().toISOString().split('T')[0],
             });
+          } else {
+            const currentCourses = getStudentCourses(existingStudent);
+            const hasCourse = currentCourses.some((c) => c.toLowerCase() === targetCourse.toLowerCase());
+            const currentBatches = getStudentBatches(existingStudent);
+
+            if (!hasCourse && targetCourse) {
+              const updatedCourses = [...currentCourses, targetCourse];
+              if (!currentBatches.some((b) => b.toLowerCase() === targetBatch.toLowerCase())) {
+                currentBatches.push(targetBatch);
+              }
+
+              AttendanceService.updateStudent(existingStudent.id, {
+                course: updatedCourses.join(', '),
+                courses: updatedCourses,
+                batch: currentBatches.join(' | '),
+                batches: currentBatches,
+                phone: existingStudent.phone || target.cellPhone || '',
+                email: existingStudent.email || target.email || '',
+              });
+            }
           }
         } catch (err) {
           console.warn('Auto student enrollment error:', err);

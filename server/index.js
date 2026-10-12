@@ -569,7 +569,9 @@ const studentSchema = new mongoose.Schema({
   email: { type: String, default: '' },
   phone: { type: String, default: '' },
   course: { type: String, default: '' },
+  courses: [{ type: String }],
   batch: { type: String, default: '' },
+  batches: [{ type: String }],
   enrolledDate: { type: String, default: () => new Date().toISOString().split('T')[0] },
   attendanceRecords: [
     {
@@ -1937,6 +1939,83 @@ function buildDeleteQuery(id) {
   return { $or: conditions };
 }
 
+// ─── Student multi-course helpers ────────────────────────────────────────────
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function cleanStr(val, maxLen = 200) {
+  if (typeof val !== 'string') return '';
+  return val.trim().slice(0, maxLen);
+}
+
+// Splits on commas NOT followed by a digit (so "50,000" stays intact) and on pipes.
+const LIST_SPLIT_RE = /\s*,\s*(?!\d)|\s*\|\s*/;
+
+function toUniqueList(arr, fallbackStr) {
+  const source = Array.isArray(arr) && arr.length > 0
+    ? arr
+    : (typeof fallbackStr === 'string' && fallbackStr.trim() ? fallbackStr.split(LIST_SPLIT_RE) : []);
+  const out = [];
+  source.slice(0, 20).forEach((item) => {
+    const v = cleanStr(item);
+    if (v && !out.some((o) => o.toLowerCase() === v.toLowerCase())) out.push(v);
+  });
+  return out;
+}
+
+function mergeLists(a, b) {
+  const out = [...a];
+  b.forEach((v) => {
+    if (!out.some((o) => o.toLowerCase() === v.toLowerCase())) out.push(v);
+  });
+  return out;
+}
+
+// Whitelist incoming student payloads (blocks mass-assignment and `$` operator injection).
+function sanitizeStudentPayload(body) {
+  const src = body && typeof body === 'object' ? body : {};
+  const courses = toUniqueList(src.courses, src.course);
+  const batches = toUniqueList(src.batches, src.batch);
+  const out = {
+    id: cleanStr(src.id, 40),
+    name: cleanStr(src.name),
+    email: cleanStr(src.email).toLowerCase(),
+    phone: cleanStr(src.phone, 60),
+    courses,
+    course: courses.join(', '),
+    batches,
+    batch: batches.join(' | '),
+  };
+  const enrolledDate = cleanStr(src.enrolledDate, 20);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(enrolledDate)) out.enrolledDate = enrolledDate;
+  return out;
+}
+
+// Same person if emails match; a name match only counts when one side has no email.
+async function findMatchingStudent(name, email) {
+  const cleanEmail = cleanStr(email).toLowerCase();
+  const cleanName = cleanStr(name);
+  if (cleanEmail) {
+    const byEmail = await StudentModel.findOne({ email: new RegExp('^' + escapeRegex(cleanEmail) + '$', 'i') });
+    if (byEmail) return byEmail;
+  }
+  if (!cleanName) return null;
+  const byName = await StudentModel.find({ name: new RegExp('^' + escapeRegex(cleanName) + '$', 'i') }).limit(5);
+  return byName.find((s) => !cleanEmail || !s.email || !s.email.trim()) || null;
+}
+
+// Strip Mongo operator / dotted keys and immutable identifiers from generic update bodies.
+function stripUnsafeKeys(body) {
+  const out = {};
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return out;
+  Object.keys(body).forEach((k) => {
+    if (k.startsWith('$') || k.includes('.') || k === '_id' || k === 'id' || k === '__v') return;
+    out[k] = body[k];
+  });
+  return out;
+}
+
 app.delete('/api/inquiries/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -2266,34 +2345,40 @@ app.post('/api/admissions', async (req, res) => {
 app.patch('/api/admissions/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    const updates = stripUnsafeKeys(req.body);
     if (mongoose.connection.readyState === 1) {
-      const updated = await AdmissionModel.findOneAndUpdate({ id }, updates, { new: true });
+      const updated = await AdmissionModel.findOneAndUpdate({ id: String(id) }, updates, { new: true, runValidators: true });
       if (updated && updates.status === 'ENROLLED') {
-        const studentName = `${updated.firstName} ${updated.lastName}`.trim();
-        const queryOr = [];
-        if (updated.email && updated.email.trim()) {
-          queryOr.push({ email: updated.email.trim().toLowerCase() });
-        }
-        if (studentName) {
-          queryOr.push({ name: new RegExp('^' + studentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
-        }
+        const studentName = `${updated.firstName || ''} ${updated.lastName || ''}`.trim();
+        const existingStudent = await findMatchingStudent(studentName, updated.email);
 
-        let existingStudent = queryOr.length > 0 ? await StudentModel.findOne({ $or: queryOr }) : null;
         let assignedId = existingStudent?.id;
-
         if (!assignedId || !/^std-\d+$/i.test(assignedId)) {
           assignedId = await getNextStudentSequenceId();
         }
 
+        const targetCourse = cleanStr(updated.courseOpted) || (updated.formType === 'DJ' ? 'DJ Training Course' : 'EMP Production');
+        const targetBatch = updated.formType === 'DJ' ? 'Regular DJ Studio Batch' : 'Regular EMP Studio Batch';
+
+        const studentCourses = mergeLists(
+          existingStudent ? toUniqueList(existingStudent.courses, existingStudent.course) : [],
+          [targetCourse]
+        );
+        const studentBatches = mergeLists(
+          existingStudent ? toUniqueList(existingStudent.batches, existingStudent.batch) : [],
+          [targetBatch]
+        );
+
         const studentData = {
           id: assignedId,
-          name: studentName,
-          email: (updated.email || '').trim(),
-          phone: (updated.cellPhone || '').trim(),
-          course: updated.courseOpted || (updated.formType === 'DJ' ? 'DJ Training Course' : 'EMP Production'),
-          batch: `${updated.formType === 'DJ' ? 'Regular DJ Studio Batch' : 'Regular EMP Studio Batch'}`,
-          enrolledDate: new Date().toISOString().split('T')[0],
+          name: existingStudent?.name || studentName,
+          email: cleanStr(existingStudent?.email || updated.email).toLowerCase(),
+          phone: cleanStr(existingStudent?.phone || updated.cellPhone, 60),
+          course: studentCourses.join(', '),
+          courses: studentCourses,
+          batch: studentBatches.join(' | '),
+          batches: studentBatches,
+          enrolledDate: existingStudent?.enrolledDate || new Date().toISOString().split('T')[0],
         };
 
         const enrolledStudent = await StudentModel.findOneAndUpdate(
@@ -2611,25 +2696,29 @@ app.get('/api/students', requireAuth, async (req, res) => {
 
 app.post('/api/students', requireAuth, async (req, res) => {
   try {
-    const studentData = req.body || {};
+    const isNew = req.body && req.body.isNew === true;
+    const studentData = sanitizeStudentPayload(req.body);
+    if (!studentData.name) {
+      return res.status(400).json({ error: 'Student name is required' });
+    }
     if (mongoose.connection.readyState === 1) {
       const numMatch = String(studentData.id || '').match(/^std-(\d+)$/i);
       const numVal = numMatch ? parseInt(numMatch[1], 10) : NaN;
       const isValidSequentialId = !isNaN(numVal) && numVal > 0 && numVal < 10000;
 
-      if (!isValidSequentialId) {
-        // Check if student already exists by email or name to prevent duplicate creation
-        const queryOr = [];
-        if (studentData.email && typeof studentData.email === 'string' && studentData.email.trim()) {
-          queryOr.push({ email: studentData.email.trim().toLowerCase() });
-        }
-        if (studentData.name && typeof studentData.name === 'string' && studentData.name.trim()) {
-          queryOr.push({ name: new RegExp('^' + studentData.name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') });
-        }
-
-        let existing = queryOr.length > 0 ? await StudentModel.findOne({ $or: queryOr }) : null;
+      // New students: never trust the client-generated ID (another admin may already own it).
+      if (isNew || !isValidSequentialId) {
+        const existing = await findMatchingStudent(studentData.name, studentData.email);
         if (existing && existing.id && /^std-\d+$/i.test(existing.id)) {
+          // Same person enrolling again: keep their record and add the new course(s).
           studentData.id = existing.id;
+          studentData.courses = mergeLists(toUniqueList(existing.courses, existing.course), studentData.courses);
+          studentData.course = studentData.courses.join(', ');
+          studentData.batches = mergeLists(toUniqueList(existing.batches, existing.batch), studentData.batches);
+          studentData.batch = studentData.batches.join(' | ');
+          if (existing.enrolledDate) studentData.enrolledDate = existing.enrolledDate;
+          if (!studentData.email && existing.email) studentData.email = existing.email;
+          if (!studentData.phone && existing.phone) studentData.phone = existing.phone;
         } else {
           studentData.id = await getNextStudentSequenceId();
         }

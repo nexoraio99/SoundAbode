@@ -4,7 +4,7 @@ import admissionStyles from '../AdmissionPage/AdmissionPage.module.css';
 import SEO from '../../components/common/SEO';
 import { BlogService } from '../../services/blogService';
 import { InquiryService, ContactInquiry } from '../../services/inquiryService';
-import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord, canonicalizeStudentId, sortStudentsById } from '../../services/attendanceService';
+import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord, canonicalizeStudentId, sortStudentsById, getStudentCourses } from '../../services/attendanceService';
 import { AdmissionService, AdmissionSubmission } from '../../services/admissionService';
 import { AuthService, CmsUser } from '../../services/authService';
 import { getApiBaseUrl } from '../../services/apiConfig';
@@ -241,11 +241,20 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const [studentCourseFilter, setStudentCourseFilter] = useState('ALL');
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
-  const [studentFormData, setStudentFormData] = useState({
+  const [studentFormData, setStudentFormData] = useState<{
+    name: string;
+    email: string;
+    phone: string;
+    course: string;
+    courses: string[];
+    batch: string;
+    enrolledDate: string;
+  }>({
     name: '',
     email: '',
     phone: '',
     course: 'Pro DJ Course',
+    courses: ['Pro DJ Course'],
     batch: 'Regular Studio Batch',
     enrolledDate: new Date().toISOString().split('T')[0],
   });
@@ -454,8 +463,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const refreshData = () => {
     setPosts(BlogService.getAllPosts());
     setInquiries(InquiryService.getAllInquiries());
+    const currentAdmissions = AdmissionService.getAllAdmissions();
+    setAdmissions(currentAdmissions);
+    AttendanceService.reconcileWithAdmissions(currentAdmissions);
     AttendanceService.fetchStudents().then((sts) => setStudents(sortStudentsById(sts)));
-    setAdmissions(AdmissionService.getAllAdmissions());
     FeeService.fetchAndSync().then(setFees);
     // Trigger async remote sync — when it completes, saveAttendance fires notifyChange which bumps attendanceVersion via subscription
     AttendanceService.fetchAndSyncFromRemote();
@@ -1271,6 +1282,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       email: '',
       phone: '',
       course: 'Pro DJ Course',
+      courses: ['Pro DJ Course'],
       batch: 'Regular Studio Batch (Mon/Wed/Fri)',
       enrolledDate: new Date().toISOString().split('T')[0],
     });
@@ -1279,11 +1291,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
   const handleOpenEditStudentModal = (std: EnrolledStudent) => {
     setEditingStudentId(std.id);
+    const courses = getStudentCourses(std);
     setStudentFormData({
       name: std.name,
       email: std.email,
       phone: std.phone,
-      course: std.course,
+      course: courses.join(', ') || std.course,
+      courses: courses.length > 0 ? courses : [std.course || 'Pro DJ Course'],
       batch: std.batch,
       enrolledDate: std.enrolledDate,
     });
@@ -1294,10 +1308,20 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     e.preventDefault();
     if (!studentFormData.name.trim()) return;
 
+    const finalCourses = studentFormData.courses && studentFormData.courses.length > 0
+      ? studentFormData.courses
+      : (studentFormData.course ? getStudentCourses(studentFormData) : ['Pro DJ Course']);
+
+    const payload = {
+      ...studentFormData,
+      courses: finalCourses,
+      course: finalCourses.join(', '),
+    };
+
     if (editingStudentId) {
-      AttendanceService.updateStudent(editingStudentId, studentFormData);
+      AttendanceService.updateStudent(editingStudentId, payload);
     } else {
-      AttendanceService.addStudent(studentFormData);
+      AttendanceService.addStudent(payload);
     }
 
     setIsStudentModalOpen(false);
@@ -1707,15 +1731,19 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const filteredStudents = useMemo(() => {
     return sortStudentsById(
       students.filter((std) => {
+        const studentCourses = getStudentCourses(std);
         const matchesSearch =
           !studentSearch ||
           std.name.toLowerCase().includes(studentSearch.toLowerCase()) ||
           std.email.toLowerCase().includes(studentSearch.toLowerCase()) ||
           std.phone.includes(studentSearch) ||
           std.course.toLowerCase().includes(studentSearch.toLowerCase()) ||
+          studentCourses.some((c) => c.toLowerCase().includes(studentSearch.toLowerCase())) ||
           std.id.toLowerCase().includes(studentSearch.toLowerCase());
         const matchesCourse =
-          studentCourseFilter === 'ALL' || std.course.toLowerCase().includes(studentCourseFilter.toLowerCase());
+          studentCourseFilter === 'ALL' ||
+          studentCourses.some((c) => c.toLowerCase().includes(studentCourseFilter.toLowerCase())) ||
+          std.course.toLowerCase().includes(studentCourseFilter.toLowerCase());
         return matchesSearch && matchesCourse;
       })
     );
@@ -1745,8 +1773,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const enrolledCount = inquiries.filter((i) => i.status === 'ENROLLED').length;
   const conversionRate = inquiries.length > 0 ? Math.round((enrolledCount / inquiries.length) * 100) : 0;
   const newAdmissionsCount = useMemo(() => admissions.filter((a) => a.status === 'NEW').length, [admissions]);
-  const djStudentsCount = useMemo(() => students.filter((s) => (s.course || '').toLowerCase().includes('dj')).length, [students]);
-  const empStudentsCount = useMemo(() => students.filter((s) => !(s.course || '').toLowerCase().includes('dj')).length, [students]);
+  const djStudentsCount = useMemo(() => students.filter((s) => getStudentCourses(s).some((c) => c.toLowerCase().includes('dj'))).length, [students]);
+  const empStudentsCount = useMemo(() => students.filter((s) => getStudentCourses(s).some((c) => !c.toLowerCase().includes('dj'))).length, [students]);
 
   // Real Dynamic Course Distribution
   const dynamicCourseStats = useMemo(() => {
@@ -1755,13 +1783,18 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     let audioCount = 0;
 
     students.forEach((s) => {
-      const c = (s.course || '').toLowerCase();
-      if (c.includes('dj')) djCount++;
-      else if (c.includes('audio') || c.includes('sound')) audioCount++;
-      else empCount++;
+      const courses = getStudentCourses(s);
+      const lowerList = courses.map((c) => c.toLowerCase());
+      const hasDj = lowerList.some((c) => c.includes('dj'));
+      const hasAudio = lowerList.some((c) => c.includes('audio') || c.includes('sound'));
+      const hasEmp = lowerList.some((c) => c.includes('emp') || c.includes('production') || c.includes('electronic')) || (!hasDj && !hasAudio);
+
+      if (hasDj) djCount++;
+      if (hasAudio) audioCount++;
+      if (hasEmp) empCount++;
     });
 
-    const total = students.length || 1;
+    const total = (djCount + empCount + audioCount) || students.length || 1;
     return [
       { name: 'DJ Performance & Pioneer Decks', count: djCount, percentage: Math.round((djCount / total) * 100) || 0, color: '#f8fafc', trackBg: 'rgba(255, 255, 255, 0.08)' },
       { name: 'Electronic Music Production (Ableton Live)', count: empCount, percentage: Math.round((empCount / total) * 100) || 0, color: '#cbd5e1', trackBg: 'rgba(255, 255, 255, 0.08)' },
@@ -3653,16 +3686,26 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   </div>
                                 </td>
                                 <td>
-                                  <span style={{
-                                    display: 'inline-block',
-                                    background: 'var(--bg-surface)',
-                                    color: 'var(--text-secondary)',
-                                    border: '1px solid var(--border-medium)',
-                                    borderRadius: '5px',
-                                    fontSize: '0.725rem',
-                                    fontWeight: 500,
-                                    padding: '0.2rem 0.5rem',
-                                  }}>{std.course}</span>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
+                                    {getStudentCourses(std).map((courseName, idx) => (
+                                      <span
+                                        key={idx}
+                                        style={{
+                                          display: 'inline-block',
+                                          background: 'var(--bg-surface)',
+                                          color: 'var(--text-secondary)',
+                                          border: '1px solid var(--border-medium)',
+                                          borderRadius: '5px',
+                                          fontSize: '0.725rem',
+                                          fontWeight: 500,
+                                          padding: '0.2rem 0.5rem',
+                                          whiteSpace: 'nowrap',
+                                        }}
+                                      >
+                                        {courseName}
+                                      </span>
+                                    ))}
+                                  </div>
                                 </td>
                                 <td>
                                   <div style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>{std.batch}</div>
@@ -3746,9 +3789,17 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 <div className={styles.mobileCardSubText}>{std.email}</div>
                               </div>
                             </div>
-                            <span className={styles.badge} style={{ background: 'var(--bg-surface)', color: 'var(--text-secondary)', fontSize: '0.675rem' }}>
-                              {std.course}
-                            </span>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', justifyContent: 'flex-end', maxWidth: '60%' }}>
+                              {getStudentCourses(std).map((courseName, idx) => (
+                                <span
+                                  key={idx}
+                                  className={styles.badge}
+                                  style={{ background: 'var(--bg-surface)', color: 'var(--text-secondary)', fontSize: '0.675rem', whiteSpace: 'nowrap' }}
+                                >
+                                  {courseName}
+                                </span>
+                              ))}
+                            </div>
                           </div>
 
                           <div className={styles.mobileCardBody}>
@@ -5234,7 +5285,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       <div>
                         <h1 className={styles.pageTitle}>{activeStudent?.name}'s Attendance</h1>
                         <div className={styles.pageMetaBadge}>
-                          <span>{activeStudent?.course}</span>
+                          <span>{getStudentCourses(activeStudent).join(' & ') || activeStudent?.course}</span>
                           <span>•</span>
                           <span>{activeStudent?.batch}</span>
                         </div>
@@ -7892,7 +7943,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   >
                     {students.map((std) => (
                       <option key={std.id} value={std.id}>
-                        {std.name} ({std.course})
+                        {std.name} ({getStudentCourses(std).join(' & ') || std.course || 'General'})
                       </option>
                     ))}
                   </select>
@@ -8339,7 +8390,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>{std.name}</div>
-                            <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{std.course} • {std.batch}</div>
+                            <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{getStudentCourses(std).join(' & ') || std.course} • {std.batch}</div>
                           </div>
                         </label>
                       );
@@ -8462,24 +8513,86 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   </div>
                 </div>
 
-                {/* COURSE + DATE */}
-                <div className={styles.formRow}>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Course Opted</label>
-                    <select
-                      value={studentFormData.course}
-                      onChange={(e) => setStudentFormData({ ...studentFormData, course: e.target.value })}
-                      className={styles.formSelect}
-                    >
-                      <option value="DJ Course">DJ Course</option>
-                      <option value="Basic DJ Course">Basic DJ Course</option>
-                      <option value="Pro DJ Course">Pro DJ Course</option>
-                      <option value="Special DJ Course">Special DJ Course</option>
-                      <option value="DJ Pro Course">DJ Pro Course</option>
-                      <option value="EMP Basic">EMP Basic</option>
-                      <option value="EMP Diploma">EMP Diploma</option>
-                    </select>
+                {/* COURSE OPTED (MULTI-COURSE CAPABLE) */}
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>
+                    Enrolled Courses (Select one or multiple)
+                  </label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.5rem' }}>
+                    {[
+                      'Pro DJ Course',
+                      'Basic DJ Course',
+                      'Special DJ Course',
+                      'DJ Course',
+                      'EMP Diploma',
+                      'EMP Basic',
+                      'Audio Engineering & Sound Design',
+                    ].map((cName) => {
+                      const isSelected = (studentFormData.courses || []).some(
+                        (c) => c.toLowerCase() === cName.toLowerCase()
+                      );
+                      return (
+                        <button
+                          key={cName}
+                          type="button"
+                          onClick={() => {
+                            const current = studentFormData.courses || [];
+                            const updated = isSelected
+                              ? current.filter((c) => c.toLowerCase() !== cName.toLowerCase())
+                              : [...current, cName];
+                            setStudentFormData({
+                              ...studentFormData,
+                              courses: updated,
+                              course: updated.join(', '),
+                            });
+                          }}
+                          style={{
+                            padding: '0.3rem 0.6rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 500,
+                            borderRadius: '6px',
+                            border: isSelected ? '1px solid var(--accent-primary, #6366f1)' : '1px solid var(--border-medium)',
+                            background: isSelected ? 'rgba(99, 102, 241, 0.15)' : 'var(--bg-surface)',
+                            color: isSelected ? 'var(--accent-primary, #818cf8)' : 'var(--text-secondary)',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          {isSelected ? (
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          ) : (
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--border-medium)', display: 'inline-block' }} />
+                          )}
+                          {cName}
+                        </button>
+                      );
+                    })}
                   </div>
+                  <input
+                    type="text"
+                    placeholder="Course name(s), separated by commas if multiple..."
+                    value={studentFormData.course}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const split = val.split(',').map((s) => s.trim()).filter(Boolean);
+                      setStudentFormData({
+                        ...studentFormData,
+                        course: val,
+                        courses: split.length > 0 ? split : [val],
+                      });
+                    }}
+                    className={styles.formInput}
+                    style={{ fontSize: '0.8rem' }}
+                  />
+                </div>
+
+                {/* DATE & BATCH ROW */}
+                <div className={styles.formRow}>
                   <div className={styles.formGroup}>
                     <label className={styles.formLabel}>Enrolled Date</label>
                     <input
@@ -8489,18 +8602,16 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       className={styles.formInput}
                     />
                   </div>
-                </div>
-
-                {/* BATCH */}
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Batch &amp; Schedule</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Regular Studio Batch (Mon/Wed/Fri)"
-                    value={studentFormData.batch}
-                    onChange={(e) => setStudentFormData({ ...studentFormData, batch: e.target.value })}
-                    className={styles.formInput}
-                  />
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel}>Batch &amp; Schedule</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Regular Studio Batch (Mon/Wed/Fri)"
+                      value={studentFormData.batch}
+                      onChange={(e) => setStudentFormData({ ...studentFormData, batch: e.target.value })}
+                      className={styles.formInput}
+                    />
+                  </div>
                 </div>
 
               </div>
@@ -8556,7 +8667,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 </div>
                 <div>
                   <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>PROGRAM &amp; BATCH</div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>{activeStudent.course}</div>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>{getStudentCourses(activeStudent).join(', ') || activeStudent.course}</div>
                   <div style={{ fontSize: '0.75rem', color: '#475569' }}>{activeStudent.batch}</div>
                 </div>
               </div>

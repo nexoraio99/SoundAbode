@@ -7,9 +7,69 @@ export interface EnrolledStudent {
   email: string;
   phone: string;
   course: string;
+  courses?: string[];
   batch: string;
+  batches?: string[];
   avatarUrl?: string;
   enrolledDate: string;
+}
+
+// Splits on commas NOT followed by a digit (so "50,000" stays intact) and on pipes.
+const LIST_SPLIT_RE = /\s*,\s*(?!\d)|\s*\|\s*/;
+
+export function parseList(arr?: unknown, fallback?: unknown): string[] {
+  const source: unknown[] = Array.isArray(arr) && arr.length > 0
+    ? arr
+    : (typeof fallback === 'string' && fallback.trim() ? fallback.split(LIST_SPLIT_RE) : []);
+  const out: string[] = [];
+  source.forEach((item) => {
+    if (typeof item !== 'string') return;
+    const v = item.trim();
+    if (v && !out.some((o) => o.toLowerCase() === v.toLowerCase())) out.push(v);
+  });
+  return out;
+}
+
+export function getStudentCourses(student?: { course?: string; courses?: string[] } | null): string[] {
+  if (!student) return [];
+  return parseList(student.courses, student.course);
+}
+
+export function getStudentBatches(student?: { batch?: string; batches?: string[] } | null): string[] {
+  if (!student) return [];
+  return parseList(student.batches, student.batch);
+}
+
+function mergeLists(a: string[], b: string[]): string[] {
+  const out = [...a];
+  b.forEach((v) => {
+    if (!out.some((o) => o.toLowerCase() === v.toLowerCase())) out.push(v);
+  });
+  return out;
+}
+
+/** Ensures `courses`/`batches` arrays and the legacy `course`/`batch` strings stay in sync. */
+export function normalizeStudent<T extends EnrolledStudent>(s: T): T {
+  const courses = getStudentCourses(s);
+  const batches = getStudentBatches(s);
+  return {
+    ...s,
+    courses,
+    course: courses.join(', '),
+    batches,
+    batch: batches.join(' | '),
+  };
+}
+
+/**
+ * Same person if emails match. A name-only match counts only when one side has no email,
+ * so two different students who share a name are never merged.
+ */
+export function isSameStudent(s: { name?: string; email?: string }, name: string, email?: string): boolean {
+  const sEmail = (s.email || '').trim().toLowerCase();
+  const tEmail = (email || '').trim().toLowerCase();
+  if (sEmail && tEmail) return sEmail === tEmail;
+  return !!name && (s.name || '').trim().toLowerCase() === name.trim().toLowerCase();
 }
 
 export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'PRACTICE_SESSION' | 'GROUP_SESSION' | 'NA';
@@ -69,6 +129,7 @@ const INITIAL_STUDENTS: EnrolledStudent[] = [];
 const INITIAL_ATTENDANCE: AttendanceRecord[] = [];
 
 const STUDENTS_STORAGE_KEY = 'soundabode_enrolled_students';
+const RECONCILED_ADMISSIONS_KEY = 'soundabode_reconciled_admissions';
 const ATTENDANCE_EVENT_NAME = 'soundabode_attendance_updated';
 const API_BASE_URL = getApiBaseUrl();
 
@@ -306,20 +367,24 @@ export class AttendanceService {
     }
   }
 
-  private static syncStudentToRemote(student: EnrolledStudent): void {
+  private static syncStudentToRemote(student: EnrolledStudent, isNew = false): void {
     if (typeof window !== 'undefined') {
       fetch(`${API_BASE_URL}/students`, {
         method: 'POST',
         headers: AuthService.getAuthHeaders(),
-        body: JSON.stringify(student),
+        body: JSON.stringify({ ...student, isNew }),
       })
         .then(async (res) => {
           if (res.ok) {
             const saved = await res.json();
             if (saved && saved.id && saved.id !== student.id) {
-              const students = this.getStoredStudents();
-              const updated = students.map((s) => (s.id === student.id ? { ...s, id: saved.id } : s));
-              this.saveStudents(sortStudentsById(updated));
+              // Server reassigned the ID (collision) or merged into an existing record.
+              const withoutTemp = this.getStoredStudents().filter((s) => s.id !== student.id);
+              const savedNorm = normalizeStudent({ ...saved, id: canonicalizeStudentId(saved.id) } as EnrolledStudent);
+              const idx = withoutTemp.findIndex((s) => s.id === savedNorm.id);
+              if (idx !== -1) withoutTemp[idx] = savedNorm;
+              else withoutTemp.push(savedNorm);
+              this.saveStudents(sortStudentsById(withoutTemp));
             }
           }
         })
@@ -508,9 +573,34 @@ export class AttendanceService {
     let updated: EnrolledStudent[];
     if (existingIndex !== -1) {
       updated = [...students];
-      updated[existingIndex] = { ...updated[existingIndex], ...student, id: targetId };
+      const mergedCourses = Array.from(new Set([
+        ...getStudentCourses(updated[existingIndex]),
+        ...getStudentCourses(student),
+      ]));
+      const mergedBatches = Array.from(new Set([
+        ...getStudentBatches(updated[existingIndex]),
+        ...getStudentBatches(student),
+      ]));
+      updated[existingIndex] = {
+        ...updated[existingIndex],
+        ...student,
+        id: targetId,
+        courses: mergedCourses,
+        course: mergedCourses.join(', ') || student.course || updated[existingIndex].course,
+        batches: mergedBatches,
+        batch: mergedBatches.join(' | ') || student.batch || updated[existingIndex].batch,
+      };
     } else {
-      updated = [...students, { ...student, id: targetId }];
+      const courses = getStudentCourses(student);
+      const batches = getStudentBatches(student);
+      updated = [...students, {
+        ...student,
+        id: targetId,
+        courses,
+        course: courses.join(', ') || student.course,
+        batches,
+        batch: batches.join(' | ') || student.batch,
+      }];
     }
     const sorted = sortStudentsById(updated);
     const currentStored = this.getStoredStudents();
@@ -543,7 +633,18 @@ export class AttendanceService {
             const cleanRemote = sortStudentsById(
               remoteStudents
                 .filter((s: EnrolledStudent) => s && !mockIds.includes(s.id))
-                .map((s: EnrolledStudent) => ({ ...s, id: canonicalizeStudentId(s.id) }))
+                .map((s: EnrolledStudent) => {
+                  const courses = getStudentCourses(s);
+                  const batches = getStudentBatches(s);
+                  return {
+                    ...s,
+                    id: canonicalizeStudentId(s.id),
+                    courses,
+                    course: courses.join(', ') || s.course,
+                    batches,
+                    batch: batches.join(' | ') || s.batch,
+                  };
+                })
             );
             const currentStored = this.getStoredStudents();
             if (JSON.stringify(currentStored) !== JSON.stringify(cleanRemote)) {
@@ -583,13 +684,11 @@ export class AttendanceService {
     const nextNum = Math.max(19, maxNum) + 1;
     const nextId = `std-${String(nextNum).padStart(3, '0')}`;
 
-    const newStudent: EnrolledStudent = {
-      ...payload,
-      id: nextId,
-    };
+    // Temporary local ID; the server assigns the final one (see syncStudentToRemote).
+    const newStudent = normalizeStudent({ ...payload, id: nextId } as EnrolledStudent);
     const updated = sortStudentsById([...students, newStudent]);
     this.saveStudents(updated);
-    this.syncStudentToRemote(newStudent);
+    this.syncStudentToRemote(newStudent, true);
     return newStudent;
   }
 
@@ -597,10 +696,80 @@ export class AttendanceService {
     const students = this.getStoredStudents();
     const index = students.findIndex((s) => s.id === id);
     if (index === -1) return undefined;
-    students[index] = { ...students[index], ...payload };
+    const existing = students[index];
+
+    // Lists provided in the payload are authoritative (so courses can be removed);
+    // otherwise keep what the student already has.
+    const hasCourseInput = Array.isArray(payload.courses) || typeof payload.course === 'string';
+    const hasBatchInput = Array.isArray(payload.batches) || typeof payload.batch === 'string';
+
+    students[index] = normalizeStudent({
+      ...existing,
+      ...payload,
+      id: existing.id,
+      courses: hasCourseInput ? parseList(payload.courses, payload.course) : getStudentCourses(existing),
+      batches: hasBatchInput ? parseList(payload.batches, payload.batch) : getStudentBatches(existing),
+    } as EnrolledStudent);
     this.saveStudents(students);
     this.syncStudentToRemote(students[index]);
     return students[index];
+  }
+
+  /**
+   * Adds the course from each ENROLLED admission to the matching existing student.
+   * Each admission is applied only once, so a course an admin later removes is not re-added.
+   */
+  public static reconcileWithAdmissions(admissions: { id?: string; firstName: string; lastName: string; email?: string; cellPhone?: string; courseOpted?: string; formType?: string; status: string }[]): boolean {
+    if (!Array.isArray(admissions) || admissions.length === 0) return false;
+
+    let applied: string[] = [];
+    try {
+      const raw = JSON.parse(localStorage.getItem(RECONCILED_ADMISSIONS_KEY) || '[]');
+      if (Array.isArray(raw)) applied = raw.filter((x): x is string => typeof x === 'string');
+    } catch {
+      applied = [];
+    }
+    const appliedSet = new Set(applied);
+
+    const students = this.getStoredStudents();
+    const changedIds = new Set<string>();
+
+    admissions.forEach((adm) => {
+      if (adm.status !== 'ENROLLED' || !adm.id || appliedSet.has(adm.id)) return;
+      const studentName = `${adm.firstName || ''} ${adm.lastName || ''}`.trim();
+      const idx = students.findIndex((s) => isSameStudent(s, studentName, adm.email));
+      if (idx === -1) return; // Not on the roster yet; the server-side enrollment will create it.
+
+      const targetCourse = (adm.courseOpted || '').trim() || (adm.formType === 'DJ' ? 'DJ Training Course' : 'EMP Production');
+      const targetBatch = adm.formType === 'DJ' ? 'Regular DJ Studio Batch' : 'Regular EMP Studio Batch';
+      const student = students[idx];
+      const courses = mergeLists(getStudentCourses(student), [targetCourse]);
+      const batches = mergeLists(getStudentBatches(student), [targetBatch]);
+
+      if (courses.length !== getStudentCourses(student).length) {
+        students[idx] = normalizeStudent({
+          ...student,
+          courses,
+          batches,
+          phone: student.phone || adm.cellPhone || '',
+          email: student.email || adm.email || '',
+        });
+        changedIds.add(students[idx].id);
+      }
+      appliedSet.add(adm.id);
+    });
+
+    try {
+      localStorage.setItem(RECONCILED_ADMISSIONS_KEY, JSON.stringify(Array.from(appliedSet)));
+    } catch {
+      // Storage full / unavailable — reconcile will simply run again next time.
+    }
+
+    if (changedIds.size > 0) {
+      this.saveStudents(sortStudentsById(students));
+      students.filter((s) => changedIds.has(s.id)).forEach((s) => this.syncStudentToRemote(s));
+    }
+    return changedIds.size > 0;
   }
 
   public static async deleteStudent(id: string): Promise<boolean> {
