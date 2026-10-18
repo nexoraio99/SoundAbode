@@ -170,6 +170,89 @@ h1, h2, h3, h4, h5, h6 {
     print-color-adjust: exact !important;
   }
 
+  /* 4b. Official Attendance Report Modal Print Format */
+  #attendanceReportOverlay {
+    position: static !important;
+    display: block !important;
+    inset: auto !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    backdrop-filter: none !important;
+    overflow: visible !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  #attendanceReportOverlay [class*="modalCard"] {
+    position: static !important;
+    display: block !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #attendanceReportOverlay [class*="modalHeader"],
+  #attendanceReportOverlay [class*="modalFooter"],
+  #attendanceReportOverlay [class*="closeModalBtn"] {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  #attendanceReportOverlay [class*="modalBody"] {
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  #attendanceReportOverlay table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  #attendanceReportOverlay tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  #attendanceReportOverlay thead {
+    display: table-header-group !important;
+  }
+
+  /* Hide background dashboard elements when attendance report is open */
+  body:has(#attendanceReportOverlay) [class*="adminContainer"] > *:not(#attendanceReportOverlay),
+  body:has(#attendanceReportOverlay) [class*="topAdminHeader"],
+  body:has(#attendanceReportOverlay) [class*="adminSidebar"],
+  body:has(#attendanceReportOverlay) [class*="adminMain"],
+  body:has(#attendanceReportOverlay) [class*="tabsBar"],
+  body:has(#attendanceReportOverlay) [class*="pageHeaderRow"],
+  body:has(#attendanceReportOverlay) [class*="filterBar"],
+  body:has(#attendanceReportOverlay) [class*="kpiGrid"],
+  body:has(#attendanceReportOverlay) [class*="toastFeedback"] {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+  }
+
   [class*="formDocument"] * {
     visibility: visible !important;
   }

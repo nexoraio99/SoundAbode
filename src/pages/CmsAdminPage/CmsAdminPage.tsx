@@ -2614,7 +2614,694 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const totalMarked = activeAttendanceRecords.length;
   const attendancePercentage = totalMarked > 0 ? Math.round(((totalPresent + totalPractice + totalGroup) / totalMarked) * 100) : 0;
 
-  // Calendar Days Calculation for current calendarDate
+  const handleExportStudentAttendanceCSV = (student?: EnrolledStudent) => {
+    const targetStudent = student || activeStudent;
+    if (!targetStudent) return;
+
+    const headers = [
+      '#',
+      'Date',
+      'Time Slot',
+      'Attendance Status',
+      'Marked By',
+      'Mentor Notes / Remarks',
+      'Student Name',
+      'Student Email',
+      'Course',
+      'Batch',
+    ];
+
+    const sortedRecords = [...activeAttendanceRecords].sort((a, b) => {
+      const dateDiff = (b.date || '').localeCompare(a.date || '');
+      if (dateDiff !== 0) return dateDiff;
+      return (b.timeSlot || '').localeCompare(a.timeSlot || '');
+    });
+
+    const rows = sortedRecords.map((r, idx) => {
+      const statusLabel = r.status === 'PRACTICE_SESSION' || r.status === 'NA'
+        ? 'PRACTICE'
+        : r.status === 'GROUP_SESSION'
+          ? 'GROUP SESSION'
+          : r.status;
+
+      return [
+        `"${idx + 1}"`,
+        `"${r.date}"`,
+        `"${r.timeSlot}"`,
+        `"${statusLabel}"`,
+        `"${(r.markedByName || 'Staff').replace(/"/g, '""')}"`,
+        `"${(r.comment || '').replace(/"/g, '""')}"`,
+        `"${(targetStudent.name || '').replace(/"/g, '""')}"`,
+        `"${(targetStudent.email || '').replace(/"/g, '""')}"`,
+        `"${(getStudentCourses(targetStudent).join(', ') || targetStudent.course || '').replace(/"/g, '""')}"`,
+        `"${(targetStudent.batch || '').replace(/"/g, '""')}"`,
+      ].join(',');
+    });
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    const safeName = (targetStudent.name || 'student').toLowerCase().replace(/[^a-z0-9]/g, '_');
+    link.setAttribute('download', `soundabode_attendance_${safeName}_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handlePrintAttendanceReport = (student?: EnrolledStudent) => {
+    const targetStudent = student || activeStudent;
+    if (!targetStudent) return;
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      window.print();
+      return;
+    }
+
+    const sortedRecords = [...activeAttendanceRecords].sort((a, b) => {
+      const dateDiff = (b.date || '').localeCompare(a.date || '');
+      if (dateDiff !== 0) return dateDiff;
+      return (b.timeSlot || '').localeCompare(a.timeSlot || '');
+    });
+
+    const totalMarkedCount = sortedRecords.length;
+    const presentCount = sortedRecords.filter((r) => r.status === 'PRESENT').length;
+    const absentCount = sortedRecords.filter((r) => r.status === 'ABSENT').length;
+    const groupCount = sortedRecords.filter((r) => r.status === 'GROUP_SESSION').length;
+    const practiceCount = sortedRecords.filter((r) => r.status === 'PRACTICE_SESSION' || r.status === 'NA').length;
+    const ratePercentage = totalMarkedCount > 0
+      ? Math.round(((presentCount + practiceCount + groupCount) / totalMarkedCount) * 100)
+      : 0;
+
+    const sName = escapeHtml(targetStudent.name || 'Student');
+    const sEmail = escapeHtml(targetStudent.email || 'N/A');
+    const sPhone = escapeHtml(targetStudent.phone || 'N/A');
+    const sCourses = escapeHtml(getStudentCourses(targetStudent).join(', ') || targetStudent.course || 'Audio Engineering & DJ');
+    const sBatch = escapeHtml(targetStudent.batch || 'Regular Studio Batch');
+    const sEnrolled = escapeHtml(targetStudent.enrolledDate || 'N/A');
+    const reportDate = new Date().toLocaleDateString('en-IN', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+    const reportTime = new Date().toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    const rowsHtml = sortedRecords
+      .map((r, idx) => {
+        const isPresent = r.status === 'PRESENT';
+        const isAbsent = r.status === 'ABSENT';
+        const isGroup = r.status === 'GROUP_SESSION';
+        const isPractice = r.status === 'PRACTICE_SESSION' || r.status === 'NA';
+
+        const statusLabel = isPractice ? 'PRACTICE' : isGroup ? 'GROUP SESSION' : r.status;
+        const badgeClass = isPresent
+          ? 'badge-present'
+          : isAbsent
+            ? 'badge-absent'
+            : isGroup
+              ? 'badge-group'
+              : 'badge-practice';
+
+        return `
+          <tr>
+            <td class="col-num">${idx + 1}</td>
+            <td class="col-date"><strong>${escapeHtml(r.date)}</strong></td>
+            <td class="col-time">${escapeHtml(r.timeSlot)}</td>
+            <td class="col-status">
+              <span class="status-badge ${badgeClass}">${escapeHtml(statusLabel)}</span>
+            </td>
+            ${!isTeacher ? `<td class="col-marked"><strong>${escapeHtml(r.markedByName || 'Staff')}</strong></td>` : ''}
+            <td class="col-notes">${escapeHtml(r.comment || '—')}</td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>SoundAbode Attendance Report - ${sName}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 10mm 12mm;
+            }
+            * {
+              box-sizing: border-box;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            body {
+              margin: 0;
+              padding: 0;
+              background: #f1f5f9;
+              color: #0f172a;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+              font-size: 12px;
+              line-height: 1.45;
+            }
+
+            /* Screen Toolbar for Mobile & Desktop */
+            .no-print {
+              display: block;
+            }
+            @media print {
+              .no-print {
+                display: none !important;
+              }
+              body {
+                background: #ffffff !important;
+                padding: 0 !important;
+              }
+              .report-sheet {
+                padding: 0 !important;
+                margin: 0 !important;
+                box-shadow: none !important;
+                border: none !important;
+                max-width: 100% !important;
+                width: 100% !important;
+                border-radius: 0 !important;
+              }
+            }
+
+            .print-toolbar {
+              position: sticky;
+              top: 0;
+              z-index: 1000;
+              background: #090a0f;
+              border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+              color: #f8fafc;
+              padding: 10px 18px;
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              flex-wrap: wrap;
+              gap: 12px;
+              box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+            }
+            .toolbar-left {
+              display: flex;
+              align-items: center;
+              gap: 10px;
+            }
+            .toolbar-title {
+              font-size: 13.5px;
+              font-weight: 700;
+              color: #ffffff;
+              display: flex;
+              align-items: center;
+              gap: 6px;
+            }
+            .toolbar-subtitle {
+              font-size: 11.5px;
+              color: #94a3b8;
+            }
+            .toolbar-actions {
+              display: flex;
+              align-items: center;
+              gap: 8px;
+            }
+            .btn-action-print {
+              background: #e11d48;
+              color: #ffffff;
+              border: none;
+              border-radius: 6px;
+              padding: 8px 16px;
+              font-size: 13px;
+              font-weight: 700;
+              cursor: pointer;
+              display: inline-flex;
+              align-items: center;
+              gap: 6px;
+              box-shadow: 0 2px 6px rgba(225, 29, 72, 0.35);
+              transition: background 0.15s ease;
+            }
+            .btn-action-print:hover {
+              background: #be123c;
+            }
+            .btn-action-close {
+              background: #334155;
+              color: #f8fafc;
+              border: none;
+              border-radius: 6px;
+              padding: 8px 14px;
+              font-size: 12.5px;
+              font-weight: 600;
+              cursor: pointer;
+              display: inline-flex;
+              align-items: center;
+              gap: 5px;
+              transition: background 0.15s ease;
+            }
+            .btn-action-close:hover {
+              background: #475569;
+            }
+
+            /* Report Sheet Container */
+            .report-sheet {
+              max-width: 840px;
+              margin: 20px auto;
+              background: #ffffff;
+              padding: 32px 36px;
+              border-radius: 8px;
+              box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+              border: 1px solid #e2e8f0;
+            }
+
+            /* Header Branding */
+            .report-header {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              border-bottom: 2.5px solid #e11d48;
+              padding-bottom: 14px;
+              margin-bottom: 16px;
+            }
+            .brand-group {
+              display: flex;
+              align-items: center;
+              gap: 12px;
+            }
+            .brand-logo {
+              width: 44px;
+              height: 44px;
+              object-fit: contain;
+              border-radius: 6px;
+            }
+            .brand-title {
+              font-size: 20px;
+              font-weight: 900;
+              color: #e11d48;
+              letter-spacing: 0.6px;
+              margin: 0;
+              line-height: 1.15;
+            }
+            .brand-subtitle {
+              font-size: 10px;
+              color: #64748b;
+              margin-top: 3px;
+              font-weight: 500;
+            }
+            .header-meta {
+              text-align: right;
+            }
+            .meta-badge {
+              display: inline-block;
+              font-size: 9.5px;
+              font-weight: 800;
+              letter-spacing: 0.8px;
+              color: #ffffff;
+              background: #0f172a;
+              padding: 3px 8px;
+              border-radius: 4px;
+              margin-bottom: 4px;
+            }
+            .meta-date {
+              font-size: 10.5px;
+              color: #475569;
+              font-weight: 500;
+            }
+
+            /* Student Details Card */
+            .student-card {
+              display: grid;
+              grid-template-columns: 1.2fr 1fr;
+              gap: 14px;
+              background: #f8fafc;
+              border: 1px solid #e2e8f0;
+              border-radius: 6px;
+              padding: 12px 16px;
+              margin-bottom: 16px;
+            }
+            .card-label {
+              font-size: 9px;
+              font-weight: 700;
+              color: #64748b;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              margin-bottom: 2px;
+            }
+            .student-name {
+              font-size: 15px;
+              font-weight: 800;
+              color: #0f172a;
+              line-height: 1.2;
+            }
+            .student-contact {
+              font-size: 11px;
+              color: #475569;
+              margin-top: 2px;
+            }
+            .course-name {
+              font-size: 12.5px;
+              font-weight: 700;
+              color: #0f172a;
+              line-height: 1.25;
+            }
+            .course-batch {
+              font-size: 11px;
+              color: #475569;
+              margin-top: 2px;
+            }
+
+            /* KPI Summary Grid */
+            .kpi-grid {
+              display: grid;
+              grid-template-columns: repeat(5, 1fr);
+              gap: 8px;
+              margin-bottom: 18px;
+            }
+            .kpi-card {
+              background: #f8fafc;
+              border: 1px solid #e2e8f0;
+              border-radius: 6px;
+              padding: 8px 6px;
+              text-align: center;
+            }
+            .kpi-label {
+              font-size: 8.5px;
+              font-weight: 700;
+              color: #64748b;
+              text-transform: uppercase;
+              letter-spacing: 0.3px;
+              margin-bottom: 2px;
+            }
+            .kpi-val {
+              font-size: 17px;
+              font-weight: 800;
+              line-height: 1.1;
+              color: #0f172a;
+            }
+            .kpi-present {
+              background: #ecfdf5;
+              border-color: #a7f3d0;
+            }
+            .kpi-present .kpi-label,
+            .kpi-present .kpi-val {
+              color: #047857;
+            }
+            .kpi-absent {
+              background: #fef2f2;
+              border-color: #fecaca;
+            }
+            .kpi-absent .kpi-label,
+            .kpi-absent .kpi-val {
+              color: #b91c1c;
+            }
+            .kpi-group {
+              background: #f0f9ff;
+              border-color: #bae6fd;
+            }
+            .kpi-group .kpi-label,
+            .kpi-group .kpi-val {
+              color: #0284c7;
+            }
+            .kpi-rate {
+              background: #fef3c7;
+              border-color: #fde68a;
+            }
+            .kpi-rate .kpi-label,
+            .kpi-rate .kpi-val {
+              color: #b45309;
+            }
+
+            /* Attendance Table */
+            .table-wrap {
+              width: 100%;
+              margin-bottom: 20px;
+            }
+            .attendance-table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            .attendance-table thead {
+              display: table-header-group;
+            }
+            .attendance-table th {
+              background: #f1f5f9;
+              color: #334155;
+              font-weight: 700;
+              text-transform: uppercase;
+              font-size: 9px;
+              letter-spacing: 0.5px;
+              padding: 7px 9px;
+              border: 1px solid #cbd5e1;
+              text-align: left;
+            }
+            .attendance-table td {
+              padding: 6px 9px;
+              border: 1px solid #e2e8f0;
+              vertical-align: middle;
+              color: #1e293b;
+            }
+            .attendance-table tr {
+              page-break-inside: avoid;
+              break-inside: avoid;
+            }
+            .attendance-table tr:nth-child(even) {
+              background: #fafafa;
+            }
+            .col-num {
+              width: 32px;
+              text-align: center;
+              color: #64748b;
+              font-size: 9.5px;
+            }
+            .col-date {
+              width: 95px;
+              white-space: nowrap;
+              color: #0f172a;
+              font-weight: 600;
+            }
+            .col-time {
+              width: 155px;
+              white-space: nowrap;
+              color: #334155;
+            }
+            .col-status {
+              width: 120px;
+              text-align: center;
+              white-space: nowrap;
+            }
+            .col-marked {
+              width: 95px;
+              white-space: nowrap;
+              color: #e11d48;
+              font-weight: 600;
+            }
+            .col-notes {
+              color: #475569;
+              line-height: 1.35;
+              word-break: break-word;
+            }
+
+            .status-badge {
+              display: inline-block;
+              font-size: 9px;
+              font-weight: 700;
+              padding: 2.5px 8px;
+              border-radius: 999px;
+              letter-spacing: 0.2px;
+            }
+            .badge-present {
+              background: #ecfdf5;
+              color: #047857;
+              border: 1px solid #a7f3d0;
+            }
+            .badge-absent {
+              background: #fef2f2;
+              color: #b91c1c;
+              border: 1px solid #fecaca;
+            }
+            .badge-group {
+              background: #f0f9ff;
+              color: #0284c7;
+              border: 1px solid #bae6fd;
+            }
+            .badge-practice {
+              background: #faf5ff;
+              color: #7e22ce;
+              border: 1px solid #e9d5ff;
+            }
+
+            /* Footer & Signatures */
+            .report-footer {
+              border-top: 1px solid #cbd5e1;
+              padding-top: 14px;
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-end;
+              font-size: 9.5px;
+              color: #64748b;
+              line-height: 1.45;
+              page-break-inside: avoid;
+            }
+            .footer-brand-info {
+              max-width: 62%;
+            }
+            .footer-sign-box {
+              text-align: right;
+            }
+            .sign-line {
+              display: inline-block;
+              width: 150px;
+              border-top: 1px solid #94a3b8;
+              padding-top: 4px;
+              font-weight: 600;
+              color: #334155;
+              text-align: center;
+            }
+          </style>
+        </head>
+        <body>
+          <!-- SCREEN TOOLBAR -->
+          <div class="no-print print-toolbar">
+            <div class="toolbar-left">
+              <img src="${window.location.origin}/favicon-192x192.png" style="width: 26px; height: 26px; border-radius: 4px;" alt="Logo" />
+              <div>
+                <div class="toolbar-title">SoundAbode Academy • Official Attendance Report</div>
+                <div class="toolbar-subtitle">Trainee: ${sName} • ${totalMarkedCount} Recorded Sessions</div>
+              </div>
+            </div>
+            <div class="toolbar-actions">
+              <button type="button" id="btnPrintReport" class="btn-action-print">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                Print / Save PDF
+              </button>
+              <button type="button" id="btnCloseReport" class="btn-action-close">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                Close
+              </button>
+            </div>
+          </div>
+
+          <!-- PRINT SHEET -->
+          <div class="report-sheet">
+            <!-- BRAND HEADER -->
+            <div class="report-header">
+              <div class="brand-group">
+                <img src="${window.location.origin}/favicon-192x192.png" class="brand-logo" alt="Soundabode Logo" />
+                <div>
+                  <h1 class="brand-title">SOUNDABODE ACADEMY</h1>
+                  <div class="brand-subtitle">Vision 9 Mall, Pimple Saudagar, Pune • Audio Engineering &amp; DJ Academy</div>
+                </div>
+              </div>
+              <div class="header-meta">
+                <div><span class="meta-badge">OFFICIAL ATTENDANCE REPORT</span></div>
+                <div class="meta-date">Report Date: ${reportDate} • ${reportTime}</div>
+              </div>
+            </div>
+
+            <!-- STUDENT DETAILS -->
+            <div class="student-card">
+              <div>
+                <div class="card-label">Student Details</div>
+                <div class="student-name">${sName}</div>
+                <div class="student-contact">${sEmail} • ${sPhone}</div>
+              </div>
+              <div>
+                <div class="card-label">Program &amp; Batch</div>
+                <div class="course-name">${sCourses}</div>
+                <div class="course-batch">${sBatch} • Enrolled: ${sEnrolled}</div>
+              </div>
+            </div>
+
+            <!-- STATS SUMMARY -->
+            <div class="kpi-grid">
+              <div class="kpi-card">
+                <div class="kpi-label">Total Sessions</div>
+                <div class="kpi-val">${totalMarkedCount}</div>
+              </div>
+              <div class="kpi-card kpi-present">
+                <div class="kpi-label">Present</div>
+                <div class="kpi-val">${presentCount}</div>
+              </div>
+              <div class="kpi-card kpi-absent">
+                <div class="kpi-label">Absent</div>
+                <div class="kpi-val">${absentCount}</div>
+              </div>
+              <div class="kpi-card kpi-group">
+                <div class="kpi-label">Group / Practice</div>
+                <div class="kpi-val">${groupCount + practiceCount}</div>
+              </div>
+              <div class="kpi-card kpi-rate">
+                <div class="kpi-label">Attendance Rate</div>
+                <div class="kpi-val">${ratePercentage}%</div>
+              </div>
+            </div>
+
+            <!-- ATTENDANCE LEDGER TABLE -->
+            <div class="table-wrap">
+              <table class="attendance-table">
+                <thead>
+                  <tr>
+                    <th style="width: 32px; text-align: center;">#</th>
+                    <th style="width: 95px;">Date</th>
+                    <th style="width: 155px;">Time Slot</th>
+                    <th style="width: 120px; text-align: center;">Status</th>
+                    ${!isTeacher ? '<th style="width: 95px;">Marked By</th>' : ''}
+                    <th>Mentor Notes / Topics Covered</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rowsHtml || '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #94a3b8;">No attendance records found for this student.</td></tr>'}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- FOOTER -->
+            <div class="report-footer">
+              <div class="footer-brand-info">
+                <strong>SOUNDABODE ACADEMY</strong> • Shop 218, Vision 9 Mall, Kunal Icon Rd, Pimple Saudagar, Pune – 411017<br />
+                Ph: +91 99750 16189 | Email: services@soundabode.com | Web: www.soundabode.com<br />
+                <span style="font-size: 8.5px; color: #94a3b8;">Official academic ledger document verified and generated via SoundAbode CMS.</span>
+              </div>
+              <div class="footer-sign-box">
+                <div class="sign-line">Authorized Signatory</div>
+              </div>
+            </div>
+          </div>
+
+          <script>
+            window.addEventListener('DOMContentLoaded', function() {
+              var btnPrint = document.getElementById('btnPrintReport');
+              var btnClose = document.getElementById('btnCloseReport');
+              if (btnPrint) {
+                btnPrint.addEventListener('click', function() {
+                  window.print();
+                });
+              }
+              if (btnClose) {
+                btnClose.addEventListener('click', function() {
+                  window.close();
+                });
+              }
+              setTimeout(function() {
+                try {
+                  window.print();
+                } catch (e) {
+                  console.warn('Auto print error:', e);
+                }
+              }, 450);
+            });
+          </script>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(sanitizePrintHtml(htmlContent));
+    printWindow.document.close();
+    printWindow.focus();
+  };
   const year = calendarDate.getFullYear();
   const month = calendarDate.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -8631,126 +9318,192 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
       {/* PRINTABLE / PDF ATTENDANCE REPORT MODAL */}
       {isReportModalOpen && activeStudent && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modalCard} style={{ maxWidth: '750px', background: '#08090a' }}>
+        <div className={styles.modalOverlay} id="attendanceReportOverlay">
+          <div className={styles.modalCard} style={{ maxWidth: '840px', background: '#08090a' }}>
             <div className={styles.modalHeader}>
-              <h2 className={styles.modalTitle}>Official Student Attendance Report</h2>
-              <button onClick={() => setIsReportModalOpen(false)} className={styles.closeModalBtn}>
-                ✕
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e11d48" strokeWidth="2.2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                <h2 className={styles.modalTitle}>Official Student Attendance Report</h2>
+              </div>
+              <button onClick={() => setIsReportModalOpen(false)} className={styles.closeModalBtn} aria-label="Close modal">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
               </button>
             </div>
 
-            <div className={styles.modalBody} style={{ background: '#ffffff', color: '#0f172a', padding: '2rem', borderRadius: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #e11d48', paddingBottom: '0.85rem', marginBottom: '1.25rem', alignItems: 'center' }}>
+            <div className={styles.modalBody} style={{ background: '#ffffff', color: '#0f172a', padding: '1.5rem', borderRadius: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2.5px solid #e11d48', paddingBottom: '0.85rem', marginBottom: '1.25rem', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <img
                     src="/favicon-192x192.png"
                     alt="Soundabode Logo"
-                    style={{ width: '36px', height: '36px', borderRadius: '6px', objectFit: 'contain' }}
+                    style={{ width: '40px', height: '40px', borderRadius: '6px', objectFit: 'contain' }}
                   />
                   <div>
-                    <h1 style={{ fontSize: '1.35rem', fontWeight: 900, color: '#e11d48', margin: 0 }}>SOUNDABODE ACADEMY</h1>
+                    <h1 style={{ fontSize: '1.35rem', fontWeight: 900, color: '#e11d48', margin: 0, letterSpacing: '0.5px' }}>SOUNDABODE ACADEMY</h1>
                     <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Vision 9 Mall, Pimple Saudagar, Pune • Audio Engineering &amp; DJ Academy</div>
                   </div>
                 </div>
                 <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#475569' }}>
-                  <div>Report Date: {new Date().toLocaleDateString()}</div>
-                  <div style={{ fontWeight: 700, color: '#0f172a' }}>OFFICIAL ATTENDANCE REPORT</div>
+                  <div>Report Date: {new Date().toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+                  <div style={{ fontWeight: 800, color: '#0f172a', marginTop: '2px', letterSpacing: '0.5px' }}>OFFICIAL ATTENDANCE REPORT</div>
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', background: '#f8fafc', padding: '0.85rem', borderRadius: '6px', marginBottom: '1.25rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1rem', background: '#f8fafc', padding: '0.85rem 1rem', borderRadius: '6px', marginBottom: '1.25rem', border: '1px solid #e2e8f0' }}>
                 <div>
-                  <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>STUDENT NAME</div>
-                  <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>{activeStudent.name}</div>
-                  <div style={{ fontSize: '0.75rem', color: '#475569' }}>{activeStudent.email} • {activeStudent.phone}</div>
+                  <div style={{ fontSize: '0.68rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.4px' }}>STUDENT NAME</div>
+                  <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>{activeStudent.name}</div>
+                  <div style={{ fontSize: '0.75rem', color: '#475569', marginTop: '2px' }}>{activeStudent.email || 'No email registered'} • {activeStudent.phone || 'No phone'}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>PROGRAM &amp; BATCH</div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>{getStudentCourses(activeStudent).join(', ') || activeStudent.course}</div>
-                  <div style={{ fontSize: '0.75rem', color: '#475569' }}>{activeStudent.batch}</div>
+                  <div style={{ fontSize: '0.68rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.4px' }}>PROGRAM &amp; BATCH</div>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#0f172a' }}>{getStudentCourses(activeStudent).join(', ') || activeStudent.course || 'Audio Engineering & DJ'}</div>
+                  <div style={{ fontSize: '0.75rem', color: '#475569', marginTop: '2px' }}>{activeStudent.batch || 'Regular Studio Batch'}</div>
                 </div>
               </div>
 
               {/* STATS SUMMARY */}
-              <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.25rem' }}>
-                <div style={{ background: '#f1f5f9', padding: '0.65rem 1rem', borderRadius: '6px', flex: 1, textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.7rem', color: '#64748b' }}>TOTAL SESSIONS</div>
-                  <div style={{ fontSize: '1.15rem', fontWeight: 800 }}>{totalMarked}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: '0.65rem', marginBottom: '1.25rem' }}>
+                <div style={{ background: '#f1f5f9', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>TOTAL SESSIONS</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0f172a', marginTop: '2px' }}>{totalMarked}</div>
                 </div>
-                <div style={{ background: '#ecfdf5', padding: '0.65rem 1rem', borderRadius: '6px', flex: 1, textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.7rem', color: '#047857' }}>PRESENT</div>
-                  <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#047857' }}>{totalPresent}</div>
+                <div style={{ background: '#ecfdf5', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #a7f3d0' }}>
+                  <div style={{ fontSize: '0.66rem', color: '#047857', fontWeight: 700, textTransform: 'uppercase' }}>PRESENT</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#047857', marginTop: '2px' }}>{totalPresent}</div>
                 </div>
-                <div style={{ background: '#fef2f2', padding: '0.65rem 1rem', borderRadius: '6px', flex: 1, textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.7rem', color: '#b91c1c' }}>ABSENT</div>
-                  <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#b91c1c' }}>{totalAbsent}</div>
+                <div style={{ background: '#fef2f2', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #fecaca' }}>
+                  <div style={{ fontSize: '0.66rem', color: '#b91c1c', fontWeight: 700, textTransform: 'uppercase' }}>ABSENT</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#b91c1c', marginTop: '2px' }}>{totalAbsent}</div>
                 </div>
-                <div style={{ background: '#fef3c7', padding: '0.65rem 1rem', borderRadius: '6px', flex: 1, textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.7rem', color: '#b45309' }}>ATTENDANCE RATE</div>
-                  <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#b45309' }}>{attendancePercentage}%</div>
+                <div style={{ background: '#f0f9ff', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #bae6fd' }}>
+                  <div style={{ fontSize: '0.66rem', color: '#0284c7', fontWeight: 700, textTransform: 'uppercase' }}>GROUP / PRACTICE</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0284c7', marginTop: '2px' }}>{totalGroup + totalPractice}</div>
+                </div>
+                <div style={{ background: '#fef3c7', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #fde68a' }}>
+                  <div style={{ fontSize: '0.66rem', color: '#b45309', fontWeight: 700, textTransform: 'uppercase' }}>ATTENDANCE RATE</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#b45309', marginTop: '2px' }}>{attendancePercentage}%</div>
                 </div>
               </div>
 
-              {/* LOGS TABLE */}
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.775rem', textAlign: 'left' }}>
-                <thead>
-                  <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
-                    <th style={{ padding: '0.4rem 0.5rem' }}>Date</th>
-                    <th style={{ padding: '0.4rem 0.5rem' }}>Time Slot</th>
-                    <th style={{ padding: '0.4rem 0.5rem' }}>Status</th>
-                    {!isTeacher && <th style={{ padding: '0.4rem 0.5rem' }}>Marked By</th>}
-                    <th style={{ padding: '0.4rem 0.5rem' }}>Mentor Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activeAttendanceRecords.map((r) => (
-                    <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td style={{ padding: '0.4rem 0.5rem', fontWeight: 600 }}>{r.date}</td>
-                      <td style={{ padding: '0.4rem 0.5rem' }}>{r.timeSlot}</td>
-                      <td style={{
-                        padding: '0.4rem 0.5rem',
-                        fontWeight: 700,
-                        color: r.status === 'PRESENT'
-                          ? '#047857'
-                          : r.status === 'ABSENT'
-                            ? '#b91c1c'
-                            : r.status === 'GROUP_SESSION'
-                              ? '#0284c7'
-                              : '#7e22ce'
-                      }}>
-                        {r.status === 'PRACTICE_SESSION' || r.status === 'NA' ? 'PRACTICE SESSION' : r.status === 'GROUP_SESSION' ? 'GROUP SESSION' : r.status}
-                      </td>
-                      {!isTeacher && (
-                        <td style={{ padding: '0.4rem 0.5rem', fontWeight: 600, color: '#e11d48' }}>
-                          {r.markedByName || 'Staff'}
-                        </td>
-                      )}
-                      <td style={{ padding: '0.4rem 0.5rem', color: '#334155' }}>{r.comment || 'N/A'}</td>
+              {/* LOGS TABLE (Wrapped with horizontal scroll for mobile safety) */}
+              <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+                <table style={{ width: '100%', minWidth: '580px', borderCollapse: 'collapse', fontSize: '0.775rem', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                      <th style={{ padding: '0.5rem 0.6rem', width: '32px', textAlign: 'center', color: '#64748b' }}>#</th>
+                      <th style={{ padding: '0.5rem 0.6rem', width: '95px' }}>Date</th>
+                      <th style={{ padding: '0.5rem 0.6rem', width: '155px' }}>Time Slot</th>
+                      <th style={{ padding: '0.5rem 0.6rem', width: '120px', textAlign: 'center' }}>Status</th>
+                      {!isTeacher && <th style={{ padding: '0.5rem 0.6rem', width: '95px' }}>Marked By</th>}
+                      <th style={{ padding: '0.5rem 0.6rem' }}>Mentor Notes</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {activeAttendanceRecords.map((r, idx) => (
+                      <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                        <td style={{ padding: '0.45rem 0.6rem', textAlign: 'center', color: '#64748b', fontSize: '0.72rem' }}>{idx + 1}</td>
+                        <td style={{ padding: '0.45rem 0.6rem', fontWeight: 600, whiteSpace: 'nowrap' }}>{r.date}</td>
+                        <td style={{ padding: '0.45rem 0.6rem', whiteSpace: 'nowrap' }}>{r.timeSlot}</td>
+                        <td style={{ padding: '0.45rem 0.6rem', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          <span style={{
+                            display: 'inline-block',
+                            padding: '2px 8px',
+                            borderRadius: '999px',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            letterSpacing: '0.2px',
+                            background: r.status === 'PRESENT'
+                              ? '#ecfdf5'
+                              : r.status === 'ABSENT'
+                                ? '#fef2f2'
+                                : r.status === 'GROUP_SESSION'
+                                  ? '#f0f9ff'
+                                  : '#faf5ff',
+                            color: r.status === 'PRESENT'
+                              ? '#047857'
+                              : r.status === 'ABSENT'
+                                ? '#b91c1c'
+                                : r.status === 'GROUP_SESSION'
+                                  ? '#0284c7'
+                                  : '#7e22ce',
+                            border: `1px solid ${
+                              r.status === 'PRESENT'
+                                ? '#a7f3d0'
+                                : r.status === 'ABSENT'
+                                  ? '#fecaca'
+                                  : r.status === 'GROUP_SESSION'
+                                    ? '#bae6fd'
+                                    : '#e9d5ff'
+                            }`
+                          }}>
+                            {r.status === 'PRACTICE_SESSION' || r.status === 'NA' ? 'PRACTICE' : r.status === 'GROUP_SESSION' ? 'GROUP SESSION' : r.status}
+                          </span>
+                        </td>
+                        {!isTeacher && (
+                          <td style={{ padding: '0.45rem 0.6rem', fontWeight: 600, color: '#e11d48', whiteSpace: 'nowrap' }}>
+                            {r.markedByName || 'Staff'}
+                          </td>
+                        )}
+                        <td style={{ padding: '0.45rem 0.6rem', color: '#334155' }}>{r.comment || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
-            <div className={styles.modalFooter}>
-              <button onClick={() => window.print()} className={styles.btnSecondary} style={{ gap: '0.4rem' }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="6 9 6 2 18 2 18 9" />
-                  <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-                  <rect x="6" y="14" width="12" height="8" />
-                </svg>
-                Print PDF
-              </button>
-              <button onClick={() => setIsReportModalOpen(false)} className={styles.btnSecondary}>
-                Close
-              </button>
+            <div className={styles.modalFooter} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.6rem' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                {totalMarked} session{totalMarked !== 1 ? 's' : ''} recorded for {activeStudent.name}
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsReportModalOpen(false)}
+                  className={styles.btnSecondary}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExportStudentAttendanceCSV(activeStudent)}
+                  className={styles.btnSecondary}
+                  style={{ gap: '0.4rem', fontSize: '0.8rem' }}
+                  title="Export raw attendance records to CSV / Excel spreadsheet"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Export CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePrintAttendanceReport(activeStudent)}
+                  className={styles.btnPrimary}
+                  style={{ gap: '0.45rem', fontWeight: 600 }}
+                  title="Open formatted A4 report to Print or Save as PDF"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                    <polyline points="6 9 6 2 18 2 18 9" />
+                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                    <rect x="6" y="14" width="12" height="8" />
+                  </svg>
+                  Print / Save PDF
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
-
-
 
       {/* MODAL: FULL ADMISSION FORM VIEWER & SHARE OPTIONS */}
       {selectedAdmissionForModal && (
