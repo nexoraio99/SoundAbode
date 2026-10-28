@@ -21,7 +21,14 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
   const [courseFilter, setCourseFilter] = useState<string>('ALL');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [isGuideOpen, setIsGuideOpen] = useState(false);
-  const [isSimulating, setIsSimulating] = useState(false);
+
+  useEffect(() => {
+    if (!isGuideOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => e.key === 'Escape' && setIsGuideOpen(false);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isGuideOpen]);
+
   const [isSyncing, setIsSyncing] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
@@ -33,7 +40,19 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
     pageAccessTokenConfigured: boolean;
     tokenStatus?: string;
     tokenError?: string;
+    status?: string;
   } | null>(null);
+
+  // What the badge claims must match what the server reported
+  const connectionState = !webhookConfig
+    ? { key: 'unknown', label: 'Checking…' }
+    : webhookConfig.status === 'offline'
+      ? { key: 'unknown', label: 'Server unreachable' }
+      : webhookConfig.tokenStatus === 'expired'
+        ? { key: 'error', label: 'Token expired' }
+        : webhookConfig.pageAccessTokenConfigured
+          ? { key: 'ok', label: 'Connected' }
+          : { key: 'error', label: 'Not connected' };
 
   // Auto-refresh interval every 12s for real-time sync
   useEffect(() => {
@@ -147,41 +166,6 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
     }
   };
 
-  // Simulate a test lead
-  const handleSimulateLead = async () => {
-    setIsSimulating(true);
-    try {
-      const sampleNames = ['Rohan Kapoor', 'Ananya Deshmukh', 'Aditya Verma', 'Meera Nair', 'Kabir Sen'];
-      const sampleCourses = [
-        'Music Production & Sound Engineering',
-        'Electronic Music Production (Ableton Live)',
-        'Audio Post-Production & Mixing',
-        'DJing & Live Electronic Performance',
-      ];
-
-      const randomName = sampleNames[Math.floor(Math.random() * sampleNames.length)];
-      const randomCourse = sampleCourses[Math.floor(Math.random() * sampleCourses.length)];
-      const randomNum = Math.floor(1000 + Math.random() * 9000);
-
-      await InquiryService.simulateMetaLead({
-        name: randomName,
-        email: `${randomName.toLowerCase().replace(/\s+/g, '.')}${randomNum}@example.com`,
-        phone: `+91 98${Math.floor(10000000 + Math.random() * 90000000)}`,
-        courseInterest: randomCourse,
-        campaignName: 'Instagram Reels - Music Production 2024',
-        formName: 'Instant Admission Inquiry Form',
-      });
-
-      onRefresh();
-      setLastRefreshed(new Date());
-      showToast('Simulated Meta Lead Ad generated successfully!');
-    } catch (err: any) {
-      showToast(`Simulation error: ${err?.message || 'Failed'}`);
-    } finally {
-      setIsSimulating(false);
-    }
-  };
-
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://soundabode.com';
   const fullWebhookUrl = `${currentOrigin}/api/webhooks/meta-leads`;
   const verifyTokenString = webhookConfig?.verifyToken || 'soundabode_leads_2024';
@@ -200,39 +184,18 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
             <div>
               <h1 className={styles.metaTitle}>
                 Meta Ads Pipeline
-                <span className={styles.liveSyncBadge} style={
-                  webhookConfig?.tokenStatus === 'expired'
-                    ? { background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }
-                    : undefined
-                }>
-                  <span className={styles.pulseDot} style={
-                    webhookConfig?.tokenStatus === 'expired'
-                      ? { background: '#ef4444', boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.25)' }
-                      : undefined
-                  } />
-                  {webhookConfig?.tokenStatus === 'expired' ? 'Token Expired' : 'Live Sync'}
+                <span className={styles.liveSyncBadge} data-state={connectionState.key}>
+                  <span className={styles.pulseDot} />
+                  {connectionState.label}
                 </span>
               </h1>
               <p className={styles.metaSubtitle}>
-                Real-time lead capture from Facebook &amp; Instagram Lead Ad forms with automated Conversions API (CAPI) feedback.
+                Leads from your Facebook and Instagram lead forms. Stage changes are reported back to Meta.
               </p>
             </div>
           </div>
 
           <div className={styles.heroActions}>
-            <button
-              id="meta-ads-simulate-lead-btn"
-              onClick={handleSimulateLead}
-              disabled={isSimulating}
-              className={styles.btnPrimary}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              {isSimulating ? 'Generating...' : 'Simulate Test Lead'}
-            </button>
-
             <button
               id="meta-ads-refresh-btn"
               onClick={async () => {
@@ -258,7 +221,7 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
                   setIsSyncing(false);
                 }
               }}
-              className={styles.btnSecondary}
+              className={styles.btnPrimary}
               disabled={isSyncing}
               title={`Last synced: ${lastRefreshed.toLocaleTimeString()}`}
             >
@@ -282,6 +245,7 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
               </svg>
               Setup Guide
             </button>
+
           </div>
         </div>
       </div>
@@ -289,8 +253,8 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
       {/* ─── Token Expiry Warning Banner ─── */}
       {webhookConfig?.tokenStatus === 'expired' && (
         <div style={{
-          background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.08), rgba(239, 68, 68, 0.15))',
-          border: '1px solid rgba(239, 68, 68, 0.3)',
+          background: 'linear-gradient(135deg, rgba(225, 29, 72, 0.08), rgba(225, 29, 72, 0.15))',
+          border: '1px solid rgba(225, 29, 72, 0.3)',
           borderRadius: '12px',
           padding: '1rem 1.25rem',
           display: 'flex',
@@ -298,17 +262,17 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
           gap: '0.75rem',
           marginBottom: '0',
         }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" style={{ flexShrink: 0, marginTop: '2px' }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: '2px' }}>
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
             <line x1="12" y1="9" x2="12" y2="13" />
             <line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
           <div style={{ flex: 1 }}>
-            <strong style={{ color: '#ef4444', fontSize: '0.9rem' }}>Page Access Token Expired</strong>
+            <strong style={{ color: 'var(--accent-text)', fontSize: '0.9rem' }}>Page Access Token Expired</strong>
             <p style={{ margin: '0.3rem 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
               Your META_PAGE_ACCESS_TOKEN expired. New leads from Meta ads cannot be fetched.
               To fix: Go to <strong>Meta Business Suite &rarr; Settings &rarr; Business Apps &rarr; System Users</strong>,
-              generate a new Page Access Token with <code style={{ background: 'rgba(239,68,68,0.1)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontSize: '0.78rem' }}>leads_retrieval</code> and <code style={{ background: 'rgba(239,68,68,0.1)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontSize: '0.78rem' }}>pages_show_list</code> permissions,
+              generate a new Page Access Token with <code style={{ background: 'rgba(225, 29, 72,0.1)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontSize: '0.78rem' }}>leads_retrieval</code> and <code style={{ background: 'rgba(225, 29, 72,0.1)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontSize: '0.78rem' }}>pages_show_list</code> permissions,
               then update <strong>META_PAGE_ACCESS_TOKEN</strong> in your server .env file and restart the server.
               After updating, click <strong>Sync Now</strong> to pull all missed leads.
             </p>
@@ -321,33 +285,16 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
         <div className={styles.statCard}>
           <div className={styles.statTop}>
             <span className={styles.statLabel}>Total Meta Leads</span>
-            <div className={styles.statIconWrapper}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              </svg>
-            </div>
           </div>
           <div className={styles.statValue}>{stats.total}</div>
           <div className={styles.statSubtext}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-            </svg>
-            From native Facebook &amp; Instagram forms
+            From Facebook and Instagram lead forms
           </div>
         </div>
 
         <div className={styles.statCard}>
           <div className={styles.statTop}>
             <span className={styles.statLabel}>New / Uncontacted</span>
-            <div className={styles.statIconWrapper}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 14 14" />
-              </svg>
-            </div>
           </div>
           <div className={styles.statValue}>{stats.newCount}</div>
           <div className={styles.statSubtext}>Requires immediate outreach</div>
@@ -356,11 +303,6 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
         <div className={styles.statCard}>
           <div className={styles.statTop}>
             <span className={styles.statLabel}>Contacted</span>
-            <div className={styles.statIconWrapper}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-              </svg>
-            </div>
           </div>
           <div className={styles.statValue}>{stats.contacted}</div>
           <div className={styles.statSubtext}>Counseling in progress</div>
@@ -369,15 +311,10 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
         <div className={styles.statCard}>
           <div className={styles.statTop}>
             <span className={styles.statLabel}>Enrolled &amp; Conversion</span>
-            <div className={styles.statIconWrapper}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            </div>
           </div>
           <div className={styles.statValue}>
             {stats.enrolled}
-            <span style={{ fontSize: '1rem', fontWeight: 500, color: 'var(--text-muted, #71717a)', marginLeft: '0.4rem' }}>
+            <span style={{ fontSize: '1rem', fontWeight: 500, color: 'var(--text-muted, var(--text-muted))', marginLeft: '0.4rem' }}>
               ({stats.convRate}%)
             </span>
           </div>
@@ -480,15 +417,8 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
               : 'Incoming leads submitted on your Facebook and Instagram ads will appear here automatically in real time.'}
           </p>
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button onClick={handleSimulateLead} className={styles.btnPrimary}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              Simulate Test Lead
-            </button>
-            <button onClick={() => setIsGuideOpen(true)} className={styles.btnSecondary}>
-              View Setup Instructions
+            <button onClick={() => setIsGuideOpen(true)} className={styles.btnPrimary}>
+              View setup steps
             </button>
           </div>
         </div>
@@ -497,7 +427,7 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
           {filteredLeads.map((lead) => (
             <div
               key={lead.id}
-              className={`${styles.leadCard} ${lead.status === 'NEW' ? styles.leadCardNew : ''}`}
+              className={styles.leadCard}
             >
               <div className={styles.leadCardHeader}>
                 <div className={styles.leadNameCol}>
@@ -683,7 +613,7 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
                   </td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <span>{lead.phone || '—'}</span>
+                      <span>{lead.phone || 'N/A'}</span>
                       {lead.phone && (
                         <a
                           href={formatWhatsappLink(lead.phone, lead.name, lead.courseInterest)}
@@ -699,7 +629,7 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
                       )}
                     </div>
                   </td>
-                  <td>{lead.email || '—'}</td>
+                  <td>{lead.email || 'N/A'}</td>
                   <td>
                     <select
                       className={styles.statusDropdown}
@@ -812,15 +742,6 @@ export const MetaAdsTab: React.FC<MetaAdsTabProps> = ({
             </ol>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-              <button
-                onClick={() => {
-                  setIsGuideOpen(false);
-                  handleSimulateLead();
-                }}
-                className={styles.btnPrimary}
-              >
-                Test With Simulated Lead
-              </button>
               <button onClick={() => setIsGuideOpen(false)} className={styles.btnSecondary}>
                 Close
               </button>

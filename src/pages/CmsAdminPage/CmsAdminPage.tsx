@@ -390,8 +390,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   // Settings & Real-time states
   const [newPasscode, setNewPasscode] = useState('');
   const [settingsSuccessMsg, setSettingsSuccessMsg] = useState('');
-  const [emailAlertsEnabled, setEmailAlertsEnabled] = useState(true);
-  const [attendanceRemindersEnabled, setAttendanceRemindersEnabled] = useState(true);
   const [realtimeLeadToast, setRealtimeLeadToast] = useState<{ name: string; courseInterest: string; source?: string } | null>(null);
   const [dbStatus, setDbStatus] = useState<'connected' | 'connecting' | 'local'>('local');
 
@@ -548,6 +546,29 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     const interval = setInterval(verify, 60000);
     return () => clearInterval(interval);
   }, [isAuthenticated]);
+
+  // Escape closes the top-most open dialog (checked from the most nested outward)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (archivePrompt) return setArchivePrompt(null);
+      if (isReportModalOpen) return setIsReportModalOpen(false);
+      if (isIssueModalOpen) return setIsIssueModalOpen(false);
+      if (isReminderModalOpen) return setIsReminderModalOpen(false);
+      if (isFeeModalOpen) return setIsFeeModalOpen(false);
+      if (isAttendanceModalOpen) return setIsAttendanceModalOpen(false);
+      if (isGroupAttendanceModalOpen) return setIsGroupAttendanceModalOpen(false);
+      if (isStudentModalOpen) return setIsStudentModalOpen(false);
+      if (selectedAdmissionForModal) return setSelectedAdmissionForModal(null);
+      if (expandedLeadMessage) return setExpandedLeadMessage(null);
+      if (isMobileMenuOpen) return setIsMobileMenuOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    archivePrompt, isReportModalOpen, isIssueModalOpen, isReminderModalOpen, isFeeModalOpen, isAttendanceModalOpen,
+    isGroupAttendanceModalOpen, isStudentModalOpen, selectedAdmissionForModal, expandedLeadMessage, isMobileMenuOpen,
+  ]);
 
   const navigateToPublic = (path: string) => {
     if (onNavigate) {
@@ -892,13 +913,35 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   };
 
   // ADMISSION SUBMISSIONS HANDLERS
-  const cycleAdmissionStatus = (id: string, currentStatus: AdmissionSubmission['status']) => {
-    const sequence: AdmissionSubmission['status'][] = ['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'];
-    const currentIndex = sequence.indexOf(currentStatus);
-    const nextStatus = sequence[(currentIndex + 1) % sequence.length];
-    AdmissionService.updateStatus(id, nextStatus);
+  // Enrolling also creates the student record on the server, so confirm it first
+  const handleAdmissionStatusChange = (item: AdmissionSubmission, nextStatus: AdmissionSubmission['status']) => {
+    if (nextStatus === item.status) return;
+    if (
+      nextStatus === 'ENROLLED' &&
+      !window.confirm(`Enroll ${item.firstName} ${item.lastName}? This adds them to Students and Attendance.`)
+    ) {
+      return;
+    }
+    AdmissionService.updateStatus(item.id, nextStatus);
     refreshData();
   };
+
+  const renderAdmissionStatusSelect = (item: AdmissionSubmission) => (
+    <div className={`${styles.stageDropdownWrapper} ${styles.stageDropdownInline}`} data-stage={item.status} title="Change application status">
+      <span className={styles.stageDot} />
+      <select
+        value={item.status}
+        onChange={(e) => handleAdmissionStatusChange(item, e.target.value as AdmissionSubmission['status'])}
+        className={styles.stageSelect}
+        aria-label={`Status for ${item.firstName} ${item.lastName}`}
+      >
+        {LEAD_STAGES.map((st) => (
+          <option key={st} value={st} className={styles.stageOption}>{LEAD_STAGE_LABELS[st]}</option>
+        ))}
+      </select>
+      <svg className={styles.stageChevron} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
+    </div>
+  );
 
   const handleDeleteAdmission = async (id: string, formNo: string) => {
     if (window.confirm(`Delete submission ${formNo}?`)) {
@@ -978,7 +1021,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
             .courseTable { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.82rem; }
             .courseTable th { background: #f1f5f9; text-align: left; padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: 700; }
             .courseTable td { padding: 6px 10px; border: 1px solid #cbd5e1; }
-            .courseTable tr.selected { background: rgba(239, 68, 68, 0.06); }
+            .courseTable tr.selected { background: rgba(225, 29, 72, 0.06); }
             .disclaimerList { padding-left: 20px; font-size: 0.75rem; color: #475569; line-height: 1.5; margin: 8px 0; }
             .agreementBox { border: 1px solid #cbd5e1; background: #f8fafc; padding: 12px; border-radius: 6px; margin-top: 15px; font-size: 0.8rem; }
             .docFooterBranding { margin-top: 25px; padding-top: 15px; border-top: 1px solid #cbd5e1; display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; color: #64748b; }
@@ -1824,7 +1867,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           <option key={st} value={st} className={styles.stageOption}>{LEAD_STAGE_LABELS[st]}</option>
         ))}
       </select>
-      <svg className={styles.stageChevron} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
+      <svg className={styles.stageChevron} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
     </div>
   );
 
@@ -1934,7 +1977,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     }).length;
   }, [inquiries]);
   const enrolledCount = inquiries.filter((i) => i.status === 'ENROLLED').length;
-  const conversionRate = inquiries.length > 0 ? Math.round((enrolledCount / inquiries.length) * 100) : 0;
   const newAdmissionsCount = useMemo(() => admissions.filter((a) => a.status === 'NEW').length, [admissions]);
   const djStudentsCount = useMemo(() => students.filter((s) => getStudentCourses(s).some((c) => c.toLowerCase().includes('dj'))).length, [students]);
   const empStudentsCount = useMemo(() => students.filter((s) => getStudentCourses(s).some((c) => !c.toLowerCase().includes('dj'))).length, [students]);
@@ -1959,9 +2001,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
     const total = (djCount + empCount + audioCount) || students.length || 1;
     return [
-      { name: 'DJ Performance & Pioneer Decks', count: djCount, percentage: Math.round((djCount / total) * 100) || 0, color: '#f8fafc', trackBg: 'rgba(255, 255, 255, 0.08)' },
-      { name: 'Electronic Music Production (Ableton Live)', count: empCount, percentage: Math.round((empCount / total) * 100) || 0, color: '#cbd5e1', trackBg: 'rgba(255, 255, 255, 0.08)' },
-      { name: 'Audio Engineering & Sound Design', count: audioCount, percentage: Math.round((audioCount / total) * 100) || 0, color: '#94a3b8', trackBg: 'rgba(255, 255, 255, 0.08)' },
+      { name: 'DJ Performance & Pioneer Decks', count: djCount, percentage: Math.round((djCount / total) * 100) || 0, color: 'var(--text-primary)', trackBg: 'rgba(255, 255, 255, 0.08)' },
+      { name: 'Electronic Music Production (Ableton Live)', count: empCount, percentage: Math.round((empCount / total) * 100) || 0, color: 'var(--text-secondary)', trackBg: 'rgba(255, 255, 255, 0.08)' },
+      { name: 'Audio Engineering & Sound Design', count: audioCount, percentage: Math.round((audioCount / total) * 100) || 0, color: 'var(--text-muted)', trackBg: 'rgba(255, 255, 255, 0.08)' },
     ];
   }, [students]);
 
@@ -2688,11 +2730,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       .map((rec) => {
         const studentNames = rec.type === 'GROUP'
           ? `Group: ${rec.students.map((s) => s.name).join(', ') || `${rec.students.length} Students`}`
-          : (rec.student?.name || rec.studentId || '—');
+          : (rec.student?.name || rec.studentId || 'N/A');
         const course = rec.type === 'GROUP'
           ? Array.from(new Set(rec.students.map((s) => s.course).filter(Boolean))).join(', ') || 'Group Masterclass'
-          : (rec.student?.course || '—');
-        const batch = rec.type === 'GROUP' ? 'Group Session' : (rec.student?.batch || '—');
+          : (rec.student?.course || 'N/A');
+        const batch = rec.type === 'GROUP' ? 'Group Session' : (rec.student?.batch || 'N/A');
         const status = rec.status === 'GROUP_SESSION' ? `Group (${rec.students.length})` : rec.status;
 
         return `
@@ -2704,7 +2746,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
             <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(course)}</td>
             <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(batch)}</td>
             <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${escapeHtml(status)}</td>
-            <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(rec.comment || '—')}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(rec.comment || 'N/A')}</td>
           </tr>
         `;
       })
@@ -2898,7 +2940,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               <span class="status-badge ${badgeClass}">${escapeHtml(statusLabel)}</span>
             </td>
             ${!isTeacher ? `<td class="col-marked"><strong>${escapeHtml(r.markedByName || 'Staff')}</strong></td>` : ''}
-            <td class="col-notes">${escapeHtml(r.comment || '—')}</td>
+            <td class="col-notes">${escapeHtml(r.comment || 'N/A')}</td>
           </tr>
         `;
       })
@@ -3507,7 +3549,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     height="15"
                     viewBox="0 0 24 24"
                     fill="none"
-                    stroke="#94a3b8"
+                    stroke="currentColor"
                     strokeWidth="2"
                     style={{ position: 'absolute', left: '0.85rem', pointerEvents: 'none' }}
                   >
@@ -3535,7 +3577,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     height="15"
                     viewBox="0 0 24 24"
                     fill="none"
-                    stroke="#94a3b8"
+                    stroke="currentColor"
                     strokeWidth="2"
                     style={{ position: 'absolute', left: '0.85rem', pointerEvents: 'none' }}
                   >
@@ -3660,7 +3702,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 setIssueFeedbackToast(null);
               }}
               className={styles.btnSecondary}
-              style={{ gap: '0.35rem', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#f87171' }}
+              style={{ gap: '0.35rem', borderColor: 'rgba(225, 29, 72, 0.4)', color: 'var(--accent-text)' }}
               title="Report an issue or bug directly to the developer"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -3668,7 +3710,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               </svg>
               <span className={styles.navBtnLabel}>Report Issue</span>
             </button>
-            <button onClick={handleLogout} className={styles.btnGhost} style={{ color: '#f87171', padding: '0 0.5rem' }}>
+            <button onClick={handleLogout} className={styles.btnGhost} style={{ color: 'var(--accent-text)', padding: '0 0.5rem' }}>
               <span className={styles.navBtnLabel}>Sign Out</span>
             </button>
           </div>
@@ -3741,7 +3783,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                   Role: {isTeacher ? 'Teacher' : 'Administrator'} ({currentUser.email})
                 </div>
-                <div style={{ fontSize: '0.65rem', color: dbStatus === 'connected' ? '#34d399' : '#fbbf24', marginTop: '0.2rem' }}>
+                <div style={{ fontSize: '0.65rem', color: dbStatus === 'connected' ? 'var(--success-text)' : 'var(--warning-text)', marginTop: '0.2rem' }}>
                   ● {dbStatus === 'connected' ? 'Atlas Connected' : 'Local / Sync Mode'}
                 </div>
               </div>
@@ -3885,7 +3927,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 style={{
                   justifyContent: 'center',
                   borderColor: 'rgba(244, 63, 94, 0.4)',
-                  color: '#fb7185',
+                  color: 'var(--accent-text)',
                   background: 'rgba(244, 63, 94, 0.08)'
                 }}
               >
@@ -4065,16 +4107,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           {/* TAB 1: OVERVIEW & ANALYTICS DASHBOARD */}
           {!isTeacher && activeTab === 'overview' && (
             <div>
-              {/* EXECUTIVE HEADER & QUICK ACTION BAR */}
+              {/* HEADER & QUICK ACTIONS */}
               <div className={styles.pageHeaderRow}>
                 <div>
-                  <h1 className={styles.pageTitle}>Executive Overview</h1>
+                  <h1 className={styles.pageTitle}>Overview</h1>
                   <div className={styles.pageMetaBadge}>
-                    <span>SoundAbode Studios Command Center</span>
-                    <span>•</span>
-                    <span>{students.length} Enrolled</span>
-                    <span>•</span>
-                    <span>{admissions.length} Applications</span>
+                    <span>{students.length} enrolled</span>
+                    <span>·</span>
+                    <span>{admissions.length} applications</span>
                   </div>
                 </div>
 
@@ -4107,106 +4147,74 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 </div>
               </div>
 
-              {/* 4 SMART INTERACTIVE KPI CARDS */}
-              <div className={styles.kpiGrid}>
-                {/* CARD 1: ACTIVE TRAINEES */}
-                <div
-                  className={styles.kpiCard}
-                  onClick={() => setActiveTab('students')}
-                  title="View all enrolled students"
-                >
-                  <div className={styles.kpiTopRow}>
-                    <span className={styles.kpiLabel}>Enrolled Trainees</span>
-                    <div className={styles.kpiIconChip}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                        <circle cx="9" cy="7" r="4" />
-                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                      </svg>
-                    </div>
-                  </div>
-                  <div className={styles.kpiValue}>{students.length}</div>
-                  <div className={styles.kpiSubRow}>
-                    <span>{djStudentsCount} DJ</span>
-                    <span>•</span>
-                    <span>{empStudentsCount} EMP</span>
-                  </div>
-                </div>
-
-                {/* CARD 2: ADMISSION APPLICATIONS */}
-                <div
-                  className={styles.kpiCard}
-                  onClick={() => setActiveTab('admissions')}
-                  title="View all official admission submissions"
-                >
-                  <div className={styles.kpiTopRow}>
-                    <span className={styles.kpiLabel}>Admissions Pipeline</span>
-                    <div className={styles.kpiIconChip}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                        <polyline points="14 2 14 8 20 8" />
-                        <line x1="16" y1="13" x2="8" y2="13" />
-                        <line x1="16" y1="17" x2="8" y2="17" />
-                        <polyline points="10 9 9 9 8 9" />
-                      </svg>
-                    </div>
-                  </div>
-                  <div className={styles.kpiValue}>{admissions.length}</div>
-                  <div className={styles.kpiSubRow}>
-                    {newAdmissionsCount > 0 ? (
-                      <span>{newAdmissionsCount} Pending Review</span>
-                    ) : (
-                      <span>All Processed</span>
+              {/* WHAT NEEDS A REPLY TODAY: the screen's focal point */}
+              <section className={styles.needsAction} aria-label="Waiting on you">
+                <h2 className={styles.needsActionTitle}>Waiting on you</h2>
+                {newInquiryCount + unassignedLeadCount + newAdmissionsCount === 0 ? (
+                  <p className={styles.needsActionEmpty}>Nothing waiting. Every lead has an owner and every application has been reviewed.</p>
+                ) : (
+                  <div className={styles.needsActionItems}>
+                    {newInquiryCount > 0 && (
+                      <button
+                        type="button"
+                        className={styles.needsActionItem}
+                        onClick={() => { clearLeadFilters(); setLeadView('list'); setInquiryStatusFilter('NEW'); setActiveTab('inquiries'); }}
+                      >
+                        <strong>{newInquiryCount}</strong>
+                        <span>new {newInquiryCount === 1 ? 'lead' : 'leads'} to contact</span>
+                      </button>
+                    )}
+                    {unassignedLeadCount > 0 && (
+                      <button
+                        type="button"
+                        className={styles.needsActionItem}
+                        onClick={() => { clearLeadFilters(); setLeadAssigneeFilter('UNASSIGNED'); setActiveTab('inquiries'); }}
+                      >
+                        <strong>{unassignedLeadCount}</strong>
+                        <span>{unassignedLeadCount === 1 ? 'lead has' : 'leads have'} no owner</span>
+                      </button>
+                    )}
+                    {newAdmissionsCount > 0 && (
+                      <button
+                        type="button"
+                        className={styles.needsActionItem}
+                        onClick={() => { setAdmissionStatusFilter('NEW'); setActiveTab('admissions'); }}
+                      >
+                        <strong>{newAdmissionsCount}</strong>
+                        <span>{newAdmissionsCount === 1 ? 'application' : 'applications'} to review</span>
+                      </button>
                     )}
                   </div>
-                </div>
+                )}
+              </section>
 
-                {/* CARD 3: PROSPECT INQUIRIES */}
-                <div
-                  className={styles.kpiCard}
-                  onClick={() => setActiveTab('inquiries')}
-                  title="View lead funnel & inquiries"
-                >
-                  <div className={styles.kpiTopRow}>
-                    <span className={styles.kpiLabel}>Prospect Funnel</span>
-                    <div className={styles.kpiIconChip}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
-                        <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-                      </svg>
-                    </div>
-                  </div>
-                  <div className={styles.kpiValue}>{inquiries.length}</div>
-                  <div className={styles.kpiSubRow}>
-                    <span>{newInquiryCount} New Leads</span>
-                    <span>•</span>
-                    <span>{conversionRate}% Converted</span>
-                  </div>
-                </div>
+              {/* TOTALS */}
+              <div className={styles.kpiGrid}>
+                <button type="button" className={styles.kpiCard} onClick={() => setActiveTab('students')}>
+                  <span className={styles.kpiLabel}>Enrolled students</span>
+                  <span className={styles.kpiValue}>{students.length}</span>
+                  <span className={styles.kpiSubRow}>{djStudentsCount} DJ · {empStudentsCount} EMP</span>
+                </button>
 
-                {/* CARD 4: STUDIO ATTENDANCE RATE */}
-                <div
-                  className={styles.kpiCard}
-                  onClick={() => setActiveTab('attendance')}
-                  title="View daily and group attendance tracking"
-                >
-                  <div className={styles.kpiTopRow}>
-                    <span className={styles.kpiLabel}>Studio Sessions</span>
-                    <div className={styles.kpiIconChip}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                        <line x1="16" y1="2" x2="16" y2="6" />
-                        <line x1="8" y1="2" x2="8" y2="6" />
-                        <line x1="3" y1="10" x2="21" y2="10" />
-                      </svg>
-                    </div>
-                  </div>
-                  <div className={styles.kpiValue}>{allAttendanceRecords.length}</div>
-                  <div className={styles.kpiSubRow}>
-                    <span>{allAttendanceRecords.length > 0 ? 'Active Logs' : 'Ready to Mark'}</span>
-                  </div>
-                </div>
+                <button type="button" className={styles.kpiCard} onClick={() => setActiveTab('admissions')}>
+                  <span className={styles.kpiLabel}>Applications</span>
+                  <span className={styles.kpiValue}>{admissions.length}</span>
+                  <span className={styles.kpiSubRow}>
+                    {newAdmissionsCount > 0 ? `${newAdmissionsCount} awaiting review` : 'All reviewed'}
+                  </span>
+                </button>
+
+                <button type="button" className={styles.kpiCard} onClick={() => setActiveTab('inquiries')}>
+                  <span className={styles.kpiLabel}>Leads</span>
+                  <span className={styles.kpiValue}>{inquiries.length}</span>
+                  <span className={styles.kpiSubRow}>{enrolledCount} of {inquiries.length} enrolled</span>
+                </button>
+
+                <button type="button" className={styles.kpiCard} onClick={() => setActiveTab('attendance')}>
+                  <span className={styles.kpiLabel}>Sessions logged</span>
+                  <span className={styles.kpiValue}>{allAttendanceRecords.length}</span>
+                  <span className={styles.kpiSubRow}>{allAttendanceRecords.length > 0 ? 'Across all teachers' : 'None logged yet'}</span>
+                </button>
               </div>
 
               {/* REAL DATA ANALYTICS: 6-MONTH INTAKE TREND & COURSE BREAKDOWN */}
@@ -4223,11 +4231,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                     <div style={{ display: 'flex', gap: '0.65rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ width: '8px', height: '8px', background: '#64748b', borderRadius: '2px', display: 'inline-block' }} />
+                        <span style={{ width: '8px', height: '8px', background: 'var(--text-muted)', borderRadius: '2px', display: 'inline-block' }} />
                         Inquiries
                       </span>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ width: '8px', height: '8px', background: '#f8fafc', borderRadius: '2px', display: 'inline-block' }} />
+                        <span style={{ width: '8px', height: '8px', background: 'var(--text-primary)', borderRadius: '2px', display: 'inline-block' }} />
                         Admissions
                       </span>
                     </div>
@@ -4318,7 +4326,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       No admission applications received yet.
                     </div>
                   ) : (
-                    <table className={styles.dataTable}>
+                    <table className={`${styles.dataTable} ${styles.overviewAdmissionsTable}`}>
                       <thead>
                         <tr>
                           <th>Applicant</th>
@@ -4339,7 +4347,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                       src={safeImageUrl(adm.photoUrl)}
                                       alt={`${adm.firstName} ${adm.lastName}`}
                                       className={styles.avatarCircle}
-                                      style={{ objectFit: 'cover', border: '1.5px solid rgba(255, 255, 255, 0.2)' }}
+                                      style={{ objectFit: 'cover', border: '1.5px solid var(--border-strong)' }}
                                     />
                                   ) : (
                                     <div
@@ -4360,7 +4368,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                               </td>
                               <td>
                                 <button
-                                  onClick={() => cycleAdmissionStatus(adm.id, adm.status)}
+                                  onClick={() => setActiveTab('admissions')}
                                   className={`${styles.badge} ${adm.status === 'NEW'
                                       ? styles.badgeNew
                                       : adm.status === 'CONTACTED'
@@ -4370,10 +4378,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                           : styles.badgeArchived
                                     }`}
                                   style={{ cursor: 'pointer' }}
-                                  title="Click to cycle status"
+                                  title="Open in Submissions"
                                 >
-                                  <span className={styles.statusDot} />
-                                  {adm.status}
+                                  {LEAD_STAGE_LABELS[adm.status] || adm.status}
                                 </button>
                               </td>
                               <td style={{ textAlign: 'right' }}>
@@ -4411,7 +4418,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       No incoming prospect inquiries.
                     </div>
                   ) : (
-                    <table className={styles.dataTable}>
+                    <table className={`${styles.dataTable} ${styles.overviewLeadsTable}`}>
                       <thead>
                         <tr>
                           <th>Lead</th>
@@ -4462,8 +4469,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   style={{ cursor: 'pointer' }}
                                   title="Open in Leads"
                                 >
-                                  <span className={styles.statusDot} />
-                                  {inq.status}
+                                  {LEAD_STAGE_LABELS[inq.status] || inq.status}
                                 </button>
                               </td>
                             </tr>
@@ -4574,7 +4580,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                           fontSize: '0.725rem',
                                           fontWeight: 500,
                                           padding: '0.2rem 0.5rem',
-                                          whiteSpace: 'nowrap',
+                                          lineHeight: 1.35,
                                         }}
                                       >
                                         {courseName}
@@ -4595,11 +4601,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   {std.enrolledDate}
                                 </td>
                                 <td style={{ textAlign: 'right' }}>
-                                  <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+                                  <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap', maxWidth: '260px', marginLeft: 'auto' }}>
                                     <button
                                       onClick={() => handleOpenReminderModal(std, 'FEE_PAYMENT')}
                                       className={styles.btnSecondary}
-                                      style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.4)', gap: '0.25rem', whiteSpace: 'nowrap' }}
+                                      style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem', color: 'var(--text-primary)', borderColor: 'var(--border-strong)', gap: '0.25rem', whiteSpace: 'nowrap' }}
                                       title="Send email reminder via Zoho Mail SMTP"
                                     >
                                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -4664,18 +4670,15 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 <div className={styles.mobileCardSubText}>{std.email}</div>
                               </div>
                             </div>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', justifyContent: 'flex-end', maxWidth: '60%' }}>
+                          </div>
+
+                          {getStudentCourses(std).length > 0 && (
+                            <div className={styles.mobileCourseChips}>
                               {getStudentCourses(std).map((courseName, idx) => (
-                                <span
-                                  key={idx}
-                                  className={styles.badge}
-                                  style={{ background: 'var(--bg-surface)', color: 'var(--text-secondary)', fontSize: '0.675rem', whiteSpace: 'nowrap' }}
-                                >
-                                  {courseName}
-                                </span>
+                                <span key={idx} className={styles.mobileCourseChip}>{courseName}</span>
                               ))}
                             </div>
-                          </div>
+                          )}
 
                           <div className={styles.mobileCardBody}>
                             <div className={styles.mobileCardRow}>
@@ -4869,7 +4872,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       className={styles.summaryStatBlock}
                       style={{
                         border: classesTeacherFilter === 'ashu' ? '1px solid #38bdf8' : '1px solid var(--border-subtle)',
-                        background: classesTeacherFilter === 'ashu' ? 'rgba(56, 189, 248, 0.08)' : 'var(--bg-surface)',
+                        background: classesTeacherFilter === 'ashu' ? 'var(--bg-hover)' : 'var(--bg-surface)',
                         transition: 'all 0.15s ease',
                       }}
                     >
@@ -4912,7 +4915,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       className={styles.summaryStatBlock}
                       style={{
                         border: classesTeacherFilter === 'vaibhav' ? '1px solid #38bdf8' : '1px solid var(--border-subtle)',
-                        background: classesTeacherFilter === 'vaibhav' ? 'rgba(56, 189, 248, 0.08)' : 'var(--bg-surface)',
+                        background: classesTeacherFilter === 'vaibhav' ? 'var(--bg-hover)' : 'var(--bg-surface)',
                         transition: 'all 0.15s ease',
                       }}
                     >
@@ -4955,7 +4958,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       className={styles.summaryStatBlock}
                       style={{
                         border: classesTeacherFilter === 'vrishan' ? '1px solid #38bdf8' : '1px solid var(--border-subtle)',
-                        background: classesTeacherFilter === 'vrishan' ? 'rgba(56, 189, 248, 0.08)' : 'var(--bg-surface)',
+                        background: classesTeacherFilter === 'vrishan' ? 'var(--bg-hover)' : 'var(--bg-surface)',
                         transition: 'all 0.15s ease',
                       }}
                     >
@@ -4998,7 +5001,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       className={styles.summaryStatBlock}
                       style={{
                         border: classesTeacherFilter === 'abhinav' ? '1px solid #38bdf8' : '1px solid var(--border-subtle)',
-                        background: classesTeacherFilter === 'abhinav' ? 'rgba(56, 189, 248, 0.08)' : 'var(--bg-surface)',
+                        background: classesTeacherFilter === 'abhinav' ? 'var(--bg-hover)' : 'var(--bg-surface)',
                         transition: 'all 0.15s ease',
                       }}
                     >
@@ -5041,7 +5044,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       className={styles.summaryStatBlock}
                       style={{
                         border: hasActiveClassesFilter ? '1px solid #38bdf8' : '1px solid var(--border-subtle)',
-                        background: hasActiveClassesFilter ? 'rgba(56, 189, 248, 0.05)' : 'var(--bg-surface)',
+                        background: hasActiveClassesFilter ? 'var(--bg-hover)' : 'var(--bg-surface)',
                       }}
                     >
                       <div className={styles.summaryStatHeader}>
@@ -5257,7 +5260,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
                   Showing <strong style={{ color: 'var(--text-primary)' }}>{filteredClassesRecords.length}</strong> class {filteredClassesRecords.length === 1 ? 'session' : 'sessions'}
                   {hasActiveClassesFilter && (
-                    <span style={{ marginLeft: '0.4rem', color: '#38bdf8', fontWeight: 500 }}>
+                    <span style={{ marginLeft: '0.4rem', color: 'var(--text-primary)', fontWeight: 500 }}>
                       (filtered from {allClassesLogEntries.length} total sessions)
                     </span>
                   )}
@@ -5382,7 +5385,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   ) : (
                                     <>
                                       <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 500 }}>
-                                        {rec.student?.course || '—'}
+                                        {rec.student?.course || 'N/A'}
                                       </div>
                                       <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                                         {rec.student?.batch || 'Regular'}
@@ -5442,13 +5445,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                                 <td className={styles.colNotes}>
                                   <div style={{ fontSize: '0.78rem', color: rec.comment ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                                    {rec.comment || '—'}
+                                    {rec.comment || 'N/A'}
                                   </div>
                                 </td>
 
                                 <td className={styles.colLoggedAt}>
                                   <div className={styles.monoCell} style={{ fontSize: '0.72rem' }}>
-                                    {rec.updatedAt ? new Date(rec.updatedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true }) : '—'}
+                                    {rec.updatedAt ? new Date(rec.updatedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true }) : 'N/A'}
                                   </div>
                                 </td>
 
@@ -5616,9 +5619,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               {/* SUCCESS NOTIFICATION BANNER */}
               {groupSessionSuccessBanner && (
                 <div style={{
-                  background: 'rgba(56, 189, 248, 0.12)',
-                  border: '1px solid rgba(56, 189, 248, 0.3)',
-                  color: '#38bdf8',
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-strong)',
+                  color: 'var(--text-primary)',
                   padding: '0.75rem 1rem',
                   borderRadius: '8px',
                   marginBottom: '1rem',
@@ -5643,7 +5646,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       className={`${styles.attendanceSubTabBtn} ${attendanceSubTab === 'roster' ? styles.attendanceSubTabBtnActive : ''}`}
                     >
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 4 4v2" />
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                         <circle cx="12" cy="7" r="4" />
                       </svg>
                       Individual Students ({students.length})
@@ -5731,7 +5734,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         {latestGroupSessionFormatted}
                       </div>
                       <div className={styles.kpiSubText}>
-                        {groupSessionsList.length > 0 ? groupSessionsList[0].timeSlot : '—'}
+                        {groupSessionsList.length > 0 ? groupSessionsList[0].timeSlot : 'N/A'}
                       </div>
                     </div>
                   </div>
@@ -5847,7 +5850,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                       }}
                                       title={gs.comment || ''}
                                     >
-                                      {gs.comment || '—'}
+                                      {gs.comment || 'N/A'}
                                     </div>
                                   </td>
                                   <td style={{ textAlign: 'right' }}>
@@ -6012,13 +6015,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                     )}
                                     <div>
                                       <div className={styles.studentName}>{student.name}</div>
-                                      <div style={{ fontSize: '0.725rem', color: '#64748b' }}>{student.email}</div>
+                                      <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>{student.email}</div>
                                     </div>
                                   </div>
                                 </td>
                                 <td>
                                   <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 500 }}>{student.course}</div>
-                                  <div style={{ fontSize: '0.725rem', color: '#8a99ad' }}>{student.batch}</div>
+                                  <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>{student.batch}</div>
                                 </td>
                                 <td>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
@@ -6027,7 +6030,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                         className={styles.progressBarFill}
                                         style={{
                                           width: `${pct}%`,
-                                          background: pct >= 80 ? '#34d399' : pct >= 60 ? '#fbbf24' : '#f87171',
+                                          background: pct >= 80 ? 'var(--success-text)' : pct >= 60 ? 'var(--warning-text)' : 'var(--accent-text)',
                                         }}
                                       />
                                     </div>
@@ -6118,7 +6121,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   className={styles.progressBarFill}
                                   style={{
                                     width: `${pct}%`,
-                                    background: pct >= 80 ? '#34d399' : pct >= 60 ? '#fbbf24' : '#f87171',
+                                    background: pct >= 80 ? 'var(--success-text)' : pct >= 60 ? 'var(--warning-text)' : 'var(--accent-text)',
                                   }}
                                 />
                               </div>
@@ -6354,7 +6357,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                       return (
                         <div style={{ marginTop: '1rem', marginBottom: '1.25rem' }}>
-                          <div style={{ fontSize: '0.725rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
+                          <div style={{ fontSize: '0.725rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
                             Conducted Sessions on this Date ({selectedDayRecords.length})
                           </div>
                           {selectedDayRecords.map((r) => {
@@ -6367,7 +6370,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 <div className={styles.sessionRecordHeader}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
                                     <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#e11d48" strokeWidth="2.5">
+                                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                                         <circle cx="12" cy="12" r="10" />
                                         <polyline points="12 6 12 12 16 14" />
                                       </svg>
@@ -6431,8 +6434,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 )}
 
                                 {isGroup && slotGroupInfo && slotGroupInfo.students.length > 0 && (
-                                  <div style={{ marginTop: '3px', background: 'rgba(56, 189, 248, 0.06)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(56, 189, 248, 0.15)' }}>
-                                    <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#38bdf8', marginBottom: '4px' }}>
+                                  <div style={{ marginTop: '3px', background: 'var(--bg-surface)', padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-strong)' }}>
+                                    <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
                                       Attending Students ({slotGroupInfo.count}):
                                     </div>
                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
@@ -6463,7 +6466,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     })()}
 
                     {/* QUICK TIME SLOTS GRID */}
-                    <div style={{ fontSize: '0.725rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem', marginTop: '0.75rem' }}>
+                    <div style={{ fontSize: '0.725rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.5rem', marginTop: '0.75rem' }}>
                       Standard Time Slots
                     </div>
                     <div className={styles.timeSlotGrid}>
@@ -6532,7 +6535,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 </div>
                               )}
                             </div>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e11d48" strokeWidth="2">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                               <path d="M12 20h9" />
                               <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
                             </svg>
@@ -6565,7 +6568,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       openNewBlogModal();
                     }
                   }}
-                  className={styles.btnPrimary}
+                  className={`${styles.btnPrimary} ${styles.hideOnMobile}`}
                   style={{ gap: '0.4rem' }}
                 >
                   {articleSubTab === 'editor' ? (
@@ -6764,11 +6767,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                         )}
                                         <div>
                                           <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 500 }}>{name}</div>
-                                          <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{role}</div>
+                                          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{role}</div>
                                         </div>
                                       </div>
                                     </td>
-                                    <td style={{ fontSize: '0.75rem', color: '#64748b' }}>{post.publishedAt}</td>
+                                    <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{post.publishedAt}</td>
                                     <td style={{ textAlign: 'right' }}>
                                       <div style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
                                         <button onClick={() => openEditBlogModal(post)} className={styles.btnGhost}>
@@ -6855,7 +6858,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 </div>
               </div>
 
-              {/* TOOLBAR — view toggle, search, filters */}
+              {/* TOOLBAR: view toggle, search, filters */}
               <div className={styles.leadsToolbar}>
                 <div className={styles.leadsToolbarTop}>
                   <div className={styles.viewToggle} role="tablist" aria-label="Lead view">
@@ -6986,7 +6989,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                           <div className={styles.pipelineCards}>
                             {stageLeads.length === 0 ? (
-                              <div style={{ textAlign: 'center', padding: '2.5rem 0.5rem', color: '#64748b', fontSize: '0.74rem' }}>No leads in this stage</div>
+                              <div style={{ textAlign: 'center', padding: '2.5rem 0.5rem', color: 'var(--text-muted)', fontSize: '0.74rem' }}>No leads in this stage</div>
                             ) : stageLeads.map((inq) => {
                               const av = getAvatarDetails(inq.name);
                               const sourceBadge = getSourceBadgeDetails(inq);
@@ -7151,7 +7154,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 const isSelected = selectedInquiryIds.includes(inq.id);
                                 const sourceBadge = getSourceBadgeDetails(inq);
                                 return (
-                                  <tr key={inq.id} style={isSelected ? { backgroundColor: 'rgba(239, 68, 68, 0.05)' } : {}}>
+                                  <tr key={inq.id} style={isSelected ? { backgroundColor: 'rgba(225, 29, 72, 0.05)' } : {}}>
                                     <td style={{ textAlign: 'center' }}>
                                       <input
                                         type="checkbox"
@@ -7171,12 +7174,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                       </div>
                                     </td>
                                     <td>
-                                      <div style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>{inq.phone || '—'}</div>
+                                      <div style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>{inq.phone || 'N/A'}</div>
                                       <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>{inq.email}</div>
                                     </td>
                                     <td>
                                       <span className={`${styles.badge} ${sourceBadge.className}`}>
-                                        <span className={styles.statusDot} />
                                         {sourceBadge.label}
                                       </span>
                                     </td>
@@ -7210,7 +7212,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           const isSelected = selectedInquiryIds.includes(inq.id);
                           const sourceBadge = getSourceBadgeDetails(inq);
                           return (
-                            <div key={inq.id} className={styles.mobileDataCard} style={isSelected ? { border: '1px solid rgba(239, 68, 68, 0.4)', background: 'rgba(239, 68, 68, 0.03)' } : {}}>
+                            <div key={inq.id} className={styles.mobileDataCard} style={isSelected ? { border: '1px solid rgba(225, 29, 72, 0.4)', background: 'rgba(225, 29, 72, 0.03)' } : {}}>
                               <div className={styles.mobileCardHeader}>
                                 <div className={styles.mobileCardTitleBox}>
                                   <input
@@ -7236,7 +7238,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 <div className={styles.mobileCardRow}>
                                   <span className={styles.mobileCardLabel}>Source</span>
                                   <span className={`${styles.badge} ${sourceBadge.className}`} style={{ fontSize: '0.65rem' }}>
-                                    <span className={styles.statusDot} />
                                     {sourceBadge.label}
                                   </span>
                                 </div>
@@ -7315,7 +7316,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       transition: 'all 0.15s ease',
                     }}
                   >
-                    All Submissions ({admissions.length})
+                    All ({admissions.length})
                   </button>
                   <button
                     onClick={() => setAdmissionTypeFilter('DJ')}
@@ -7332,7 +7333,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       transition: 'all 0.15s ease',
                     }}
                   >
-                    DJ Forms ({admissions.filter((a) => a.formType === 'DJ').length})
+                    DJ ({admissions.filter((a) => a.formType === 'DJ').length})
                   </button>
                   <button
                     onClick={() => setAdmissionTypeFilter('EMP')}
@@ -7349,7 +7350,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       transition: 'all 0.15s ease',
                     }}
                   >
-                    EMP Forms ({admissions.filter((a) => a.formType === 'EMP').length})
+                    EMP ({admissions.filter((a) => a.formType === 'EMP').length})
                   </button>
                 </div>
               </div>
@@ -7440,7 +7441,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                         src={safeImageUrl(item.photoUrl)}
                                         alt={`${item.firstName} ${item.lastName}`}
                                         className={styles.avatarCircle}
-                                        style={{ objectFit: 'cover', border: '1.5px solid var(--accent-primary, #6366f1)' }}
+                                        style={{ objectFit: 'cover', border: '1.5px solid var(--accent-primary, var(--border-strong))' }}
                                       />
                                     ) : (
                                       <div
@@ -7469,22 +7470,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   {formattedDate}
                                 </td>
                                 <td>
-                                  <button
-                                    onClick={() => cycleAdmissionStatus(item.id, item.status)}
-                                    className={`${styles.badge} ${item.status === 'NEW'
-                                        ? styles.badgeNew
-                                        : item.status === 'CONTACTED'
-                                          ? styles.badgeContacted
-                                          : item.status === 'ENROLLED'
-                                            ? styles.badgeEnrolled
-                                            : styles.badgeArchived
-                                      }`}
-                                    style={{ cursor: 'pointer' }}
-                                    title="Click to cycle status"
-                                  >
-                                    <span className={styles.statusDot} />
-                                    {item.status}
-                                  </button>
+                                  {renderAdmissionStatusSelect(item)}
                                 </td>
                                 <td style={{ textAlign: 'right' }}>
                                   <div style={{ display: 'flex', gap: '0.3rem', justifyContent: 'flex-end', alignItems: 'center' }}>
@@ -7541,7 +7527,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   src={safeImageUrl(item.photoUrl)}
                                   alt={`${item.firstName} ${item.lastName}`}
                                   className={styles.avatarCircle}
-                                  style={{ objectFit: 'cover', border: '1.5px solid var(--accent-primary, #6366f1)', width: '34px', height: '34px' }}
+                                  style={{ objectFit: 'cover', border: '1.5px solid var(--accent-primary, var(--border-strong))', width: '34px', height: '34px' }}
                                 />
                               ) : (
                                 <div
@@ -7556,21 +7542,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 <div className={styles.mobileCardSubText}>Form No: {item.formNo}</div>
                               </div>
                             </div>
-                            <button
-                              onClick={() => cycleAdmissionStatus(item.id, item.status)}
-                              className={`${styles.badge} ${item.status === 'NEW'
-                                  ? styles.badgeNew
-                                  : item.status === 'CONTACTED'
-                                    ? styles.badgeContacted
-                                    : item.status === 'ENROLLED'
-                                      ? styles.badgeEnrolled
-                                      : styles.badgeArchived
-                                }`}
-                              style={{ cursor: 'pointer', fontSize: '0.65rem' }}
-                            >
-                              <span className={styles.statusDot} />
-                              {item.status}
-                            </button>
+                            {renderAdmissionStatusSelect(item)}
                           </div>
 
                           <div className={styles.mobileCardBody}>
@@ -7713,7 +7685,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   </span>
                                 </td>
                                 <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                                  {receipt.date ? new Date(receipt.date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                                  {receipt.date ? new Date(receipt.date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A'}
                                 </td>
                                 <td style={{ fontWeight: 600 }}>{receipt.studentName}</td>
                                 <td style={{ color: 'var(--text-secondary)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -7723,14 +7695,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   ₹{receipt.amount.toLocaleString('en-IN')}
                                 </td>
                                 <td>
-                                  <span style={{ fontSize: '0.7rem', padding: '0.15rem 0.5rem', background: 'var(--bg-surface)', color: 'var(--text-secondary)', border: '1px solid var(--border-medium)', borderRadius: '4px', textTransform: 'uppercase', fontWeight: 500 }}>
+                                  <span style={{ fontSize: '0.7rem', padding: '0.15rem 0.5rem', background: 'var(--bg-surface)', color: 'var(--text-secondary)', border: '1px solid var(--border-medium)', borderRadius: '4px', fontWeight: 500 }}>
                                     {receipt.paymentMode}
                                   </span>
                                 </td>
                                 <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                                   {receipt.periodFrom && receipt.periodTo
                                     ? `${receipt.periodFrom} → ${receipt.periodTo}`
-                                    : '—'}
+                                    : 'N/A'}
                                 </td>
                                 <td>
                                   <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
@@ -7853,7 +7825,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 <div>
                   <h1 className={styles.pageTitle}>Console Settings</h1>
                   <div className={styles.pageMetaBadge}>
-                    <span>System security, notifications, and data exports</span>
+                    <span>Passcode, backups and issue reports</span>
                   </div>
                 </div>
               </div>
@@ -7862,11 +7834,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               <div className={styles.settingsContainer}>
                 {/* CARD 1: SECURITY CREDENTIALS */}
                 <div className={styles.settingsCard}>
-                  <h3 className={styles.settingsCardTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M21 2l-2 2m-1.5 1.5L4 19.5a2.5 2.5 0 1 1-3.5-3.5L16 2.5 17.5 4z" />
-                      <circle cx="18" cy="6" r="3" />
-                    </svg>
+                  <h3 className={styles.settingsCardTitle}>
                     Console Passcode Security
                   </h3>
                   <p className={styles.settingsCardDesc}>
@@ -7893,50 +7861,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   )}
                 </div>
 
-                {/* CARD 2: NOTIFICATION PREFERENCES */}
-                <div className={styles.settingsCard}>
-                  <h3 className={styles.settingsCardTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-                      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-                    </svg>
-                    Notification Preferences
-                  </h3>
-                  <p className={styles.settingsCardDesc}>
-                    Configure automated email alerts and studio class log notifications.
-                  </p>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.25rem' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-primary)', cursor: 'pointer' }}>
-                      <span>Instant Email Alerts for New Student Leads</span>
-                      <input
-                        type="checkbox"
-                        checked={emailAlertsEnabled}
-                        onChange={(e) => setEmailAlertsEnabled(e.target.checked)}
-                        style={{ accentColor: 'var(--accent-red)', width: '16px', height: '16px', cursor: 'pointer' }}
-                      />
-                    </label>
-
-                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-primary)', cursor: 'pointer' }}>
-                      <span>Daily Student Attendance Class Log Reminders</span>
-                      <input
-                        type="checkbox"
-                        checked={attendanceRemindersEnabled}
-                        onChange={(e) => setAttendanceRemindersEnabled(e.target.checked)}
-                        style={{ accentColor: 'var(--accent-red)', width: '16px', height: '16px', cursor: 'pointer' }}
-                      />
-                    </label>
-                  </div>
-                </div>
-
                 {/* CARD 3: DATABASE BACKUP EXPORT & RESTORE */}
                 <div className={styles.settingsCard}>
-                  <h3 className={styles.settingsCardTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <ellipse cx="12" cy="5" rx="9" ry="3" />
-                      <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-                      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-                    </svg>
+                  <h3 className={styles.settingsCardTitle}>
                     Data Snapshot Backup &amp; Restore
                   </h3>
                   <p className={styles.settingsCardDesc}>
@@ -7968,27 +7895,24 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       />
                     </label>
 
-                    <button onClick={handleGenerateServerBackup} className={styles.btnSecondary} style={{ gap: '0.4rem', borderColor: 'rgba(59, 130, 246, 0.4)', color: '#60a5fa' }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                      </svg>
-                      + Save Server Snapshot Now
+                    <button onClick={handleGenerateServerBackup} className={styles.btnSecondary}>
+                      Save server snapshot now
                     </button>
                   </div>
 
                   {/* Automated Server Snapshots Table */}
-                  <div style={{ marginTop: '1rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '0.85rem' }}>
+                  <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-medium)', paddingTop: '0.85rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                      <h4 style={{ margin: 0, fontSize: '0.82rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      <h4 style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
                         Automated Server Daily Snapshots ({serverBackups.length})
                       </h4>
-                      <button onClick={fetchServerBackups} style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: '0.75rem', cursor: 'pointer', padding: 0 }}>
+                      <button onClick={fetchServerBackups} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', fontSize: '0.75rem', cursor: 'pointer', padding: 0 }}>
                         {isLoadingServerBackups ? 'Refreshing...' : 'Refresh List'}
                       </button>
                     </div>
 
                     {serverBackups.length === 0 ? (
-                      <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0.5rem 0 0' }}>No server snapshots generated yet.</p>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.5rem 0 0' }}>No server snapshots generated yet.</p>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '180px', overflowY: 'auto' }}>
                         {serverBackups.map((b) => (
@@ -7998,16 +7922,18 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'space-between',
+                              flexWrap: 'wrap',
+                              gap: '0.5rem',
                               padding: '0.45rem 0.75rem',
-                              background: 'rgba(255, 255, 255, 0.03)',
+                              background: 'var(--table-hover-bg)',
                               borderRadius: '6px',
-                              border: '1px solid rgba(255, 255, 255, 0.05)',
+                              border: '1px solid var(--border-subtle)',
                               fontSize: '0.78rem',
                             }}
                           >
-                            <div>
-                              <div style={{ fontWeight: 500, color: '#f1f5f9' }}>{b.filename}</div>
-                              <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                            <div style={{ minWidth: 0, flex: '1 1 200px' }}>
+                              <div style={{ fontWeight: 500, color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{b.filename}</div>
+                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                                 {new Date(b.createdAt).toLocaleString()} · {(b.sizeBytes / 1024).toFixed(1)} KB
                               </div>
                             </div>
@@ -8015,7 +7941,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                               <button
                                 onClick={() => handleRestoreServerBackup(b.filename)}
                                 className={styles.btnSecondary}
-                                style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem', color: '#4ade80', borderColor: 'rgba(74, 222, 128, 0.3)' }}
+                                style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem', color: 'var(--success-text)', borderColor: 'rgba(74, 222, 128, 0.3)' }}
                               >
                                 Restore
                               </button>
@@ -8037,11 +7963,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 {/* CARD 4: DEVELOPER ISSUES LOG */}
                 <div className={styles.settingsCard}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <h3 className={styles.settingsCardTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="2">
-                        <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                      </svg>
-                      Developer Issues &amp; Bug Reports Log
+                    <h3 className={styles.settingsCardTitle} style={{ margin: 0 }}>
+                    Developer Issues &amp; Bug Reports Log
                     </h3>
                     <button
                       onClick={() => {
@@ -8049,7 +7972,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         setIssueFeedbackToast(null);
                       }}
                       className={styles.btnSecondary}
-                      style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.4)', gap: '0.3rem' }}
+                      style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem', color: 'var(--accent-text)', borderColor: 'rgba(225, 29, 72, 0.4)', gap: '0.3rem' }}
                     >
                       + New Issue
                     </button>
@@ -8084,10 +8007,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 fontWeight: 700,
                                 padding: '0.15rem 0.45rem',
                                 borderRadius: '4px',
-                                textTransform: 'uppercase',
-                                background: issue.priority === 'Critical' ? 'rgba(239, 68, 68, 0.2)' : issue.priority === 'High' ? 'rgba(249, 115, 22, 0.2)' : 'rgba(59, 130, 246, 0.2)',
-                                color: issue.priority === 'Critical' ? '#f87171' : issue.priority === 'High' ? '#fb923c' : '#60a5fa',
-                                border: `1px solid ${issue.priority === 'Critical' ? 'rgba(239, 68, 68, 0.4)' : issue.priority === 'High' ? 'rgba(249, 115, 22, 0.4)' : 'rgba(59, 130, 246, 0.4)'}`
+                                background: issue.priority === 'Critical' ? 'rgba(225, 29, 72, 0.2)' : issue.priority === 'High' ? 'rgba(251, 191, 36, 0.2)' : 'rgba(161, 161, 170, 0.2)',
+                                color: issue.priority === 'Critical' ? 'var(--accent-text)' : issue.priority === 'High' ? 'var(--warning-text)' : 'var(--text-secondary)',
+                                border: `1px solid ${issue.priority === 'Critical' ? 'rgba(225, 29, 72, 0.4)' : issue.priority === 'High' ? 'rgba(251, 191, 36, 0.4)' : 'rgba(161, 161, 170, 0.4)'}`
                               }}>
                                 {issue.priority}
                               </span>
@@ -8104,13 +8026,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 }}
                                 style={{
                                   background: 'var(--bg-panel)',
-                                  color: issue.status === 'RESOLVED' ? '#34d399' : issue.status === 'IN_PROGRESS' ? '#fbbf24' : 'var(--text-primary)',
+                                  color: issue.status === 'RESOLVED' ? 'var(--success-text)' : issue.status === 'IN_PROGRESS' ? 'var(--warning-text)' : 'var(--text-primary)',
                                   border: '1px solid var(--border-medium)',
                                   borderRadius: '4px',
-                                  fontSize: '0.7rem',
-                                  padding: '0.15rem 0.4rem',
+                                  fontSize: '0.72rem',
+                                  padding: '0.35rem 0.5rem',
                                   fontWeight: 600
                                 }}
+                                aria-label="Issue status"
                               >
                                 <option value="OPEN">OPEN</option>
                                 <option value="IN_PROGRESS">IN PROGRESS</option>
@@ -8125,8 +8048,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                     setDeveloperIssues(updated);
                                   }
                                 }}
-                                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.85rem' }}
+                                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.85rem', minWidth: '32px' }}
                                 title="Delete issue"
+                                aria-label="Delete issue"
                               >
                                 ✕
                               </button>
@@ -8152,10 +8076,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                 {/* CARD 5: META CONVERSIONS API */}
                 <div className={styles.settingsCard} style={{ borderTop: '1px solid rgba(24, 119, 242, 0.25)', boxShadow: '0 0 0 1px rgba(24, 119, 242, 0.08) inset' }}>
-                  <h3 className={styles.settingsCardTitle} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="#1877f2">
-                      <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>
-                    </svg>
+                  <h3 className={styles.settingsCardTitle}>
                     Meta Conversions API
                   </h3>
                   <p className={styles.settingsCardDesc}>
@@ -8166,7 +8087,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: '8px', overflow: 'hidden', marginBottom: '1rem' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.775rem' }}>
                       <thead>
-                        <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border-subtle)' }}>
+                        <tr style={{ background: 'var(--table-hover-bg)', borderBottom: '1px solid var(--border-subtle)' }}>
                           <th style={{ padding: '0.5rem 0.85rem', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600 }}>CRM Status</th>
                           <th style={{ padding: '0.5rem 0.85rem', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600 }}>Meta CAPI Event</th>
                           <th style={{ padding: '0.5rem 0.85rem', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600 }}>Fires Automatically</th>
@@ -8178,15 +8099,15 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           return (
                             <tr key={s} style={{ borderBottom: idx < 3 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
                               <td style={{ padding: '0.5rem 0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>{s}</td>
-                              <td style={{ padding: '0.5rem 0.85rem', color: ev ? '#60a5fa' : 'var(--text-muted)', fontStyle: ev ? 'normal' : 'italic' }}>{ev ?? 'No event'}</td>
+                              <td style={{ padding: '0.5rem 0.85rem', color: ev ? 'var(--text-secondary)' : 'var(--text-muted)', fontStyle: ev ? 'normal' : 'italic' }}>{ev ?? 'No event'}</td>
                               <td style={{ padding: '0.5rem 0.85rem' }}>
                                 {ev ? (
-                                  <span style={{ color: '#4ade80', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                                  <span style={{ color: 'var(--success-text)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
                                     Yes
                                   </span>
                                 ) : (
-                                  <span style={{ color: 'var(--text-muted)' }}>—</span>
+                                  <span style={{ color: 'var(--text-muted)' }}>No</span>
                                 )}
                               </td>
                             </tr>
@@ -8211,7 +8132,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         });
                       }}
                       className={styles.btnSecondary}
-                      style={{ gap: '0.4rem', borderColor: 'rgba(24, 119, 242, 0.4)', color: '#60a5fa', opacity: capiTestStatus.loading ? 0.7 : 1 }}
+                      style={{ gap: '0.4rem', borderColor: 'rgba(24, 119, 242, 0.4)', color: 'var(--text-primary)', opacity: capiTestStatus.loading ? 0.7 : 1 }}
                     >
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polygon points="5 3 19 12 5 21 5 3"/>
@@ -8225,11 +8146,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     <div style={{
                       marginTop: '0.75rem',
                       padding: '0.6rem 0.85rem',
-                      background: capiTestStatus.isError ? 'rgba(239, 68, 68, 0.08)' : 'rgba(74, 222, 128, 0.08)',
-                      border: `1px solid ${capiTestStatus.isError ? 'rgba(239, 68, 68, 0.25)' : 'rgba(74, 222, 128, 0.25)'}`,
+                      background: capiTestStatus.isError ? 'rgba(225, 29, 72, 0.08)' : 'rgba(74, 222, 128, 0.08)',
+                      border: `1px solid ${capiTestStatus.isError ? 'rgba(225, 29, 72, 0.25)' : 'rgba(74, 222, 128, 0.25)'}`,
                       borderRadius: '6px',
                       fontSize: '0.775rem',
-                      color: capiTestStatus.isError ? '#f87171' : '#4ade80',
+                      color: capiTestStatus.isError ? 'var(--accent-text)' : 'var(--success-text)',
                       display: 'flex', alignItems: 'center', gap: '0.4rem',
                     }}>
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -8239,8 +8160,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </div>
                   )}
 
-                  <div style={{ marginTop: '0.85rem', padding: '0.6rem 0.85rem', background: 'rgba(24, 119, 242, 0.06)', border: '1px solid rgba(24, 119, 242, 0.15)', borderRadius: '6px', fontSize: '0.725rem', color: '#93c5fd', lineHeight: '1.5' }}>
-                    <strong>Setup required:</strong> Add your <code style={{ background: 'rgba(255,255,255,0.08)', padding: '0 3px', borderRadius: '3px' }}>META_ACCESS_TOKEN</code> and <code style={{ background: 'rgba(255,255,255,0.08)', padding: '0 3px', borderRadius: '3px' }}>META_TEST_EVENT_CODE</code> to <code style={{ background: 'rgba(255,255,255,0.08)', padding: '0 3px', borderRadius: '3px' }}>server/.env</code>.
+                  <div style={{ marginTop: '0.85rem', padding: '0.6rem 0.85rem', background: 'rgba(24, 119, 242, 0.06)', border: '1px solid rgba(24, 119, 242, 0.15)', borderRadius: '6px', fontSize: '0.725rem', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                    <strong>Setup required:</strong> Add your <code style={{ background: 'var(--bg-surface)', padding: '0 3px', borderRadius: '3px' }}>META_ACCESS_TOKEN</code> and <code style={{ background: 'var(--bg-surface)', padding: '0 3px', borderRadius: '3px' }}>META_TEST_EVENT_CODE</code> to <code style={{ background: 'var(--bg-surface)', padding: '0 3px', borderRadius: '3px' }}>server/.env</code>.
                     Generate token from: Meta Events Manager → Dataset 976314001636856 → Settings → Generate Token.
                   </div>
                 </div>
@@ -8279,7 +8200,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       ₹{parseFloat(feeFormData.amount).toLocaleString('en-IN')}
                     </span>
                     <span style={{ color: 'var(--text-muted)', marginLeft: '0.5rem', fontStyle: 'italic' }}>
-                      — {numberToWords(parseFloat(feeFormData.amount) || 0)} Rupees Only
+                      ({numberToWords(parseFloat(feeFormData.amount) || 0)} Rupees Only)
                     </span>
                   </div>
                 )}
@@ -8492,8 +8413,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 })()}
                 <div className={styles.leadProfileInfo}>
                   <h3>{expandedLeadMessage.name}</h3>
-                  <span className={`${styles.badge} ${styles[`badge${expandedLeadMessage.status.charAt(0)}${expandedLeadMessage.status.slice(1).toLowerCase()}` as keyof typeof styles] || ''}`}>
-                    <span className={styles.statusDot} /> {expandedLeadMessage.status.toLowerCase()}
+                  <span className={`${styles.badge} ${styles[`badge${expandedLeadMessage.status.charAt(0)}${expandedLeadMessage.status.slice(1).toLowerCase()}` as keyof typeof styles] || ''}`}> {LEAD_STAGE_LABELS[expandedLeadMessage.status]}
                   </span>
                 </div>
               </section>
@@ -8553,7 +8473,6 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     const badge = getSourceBadgeDetails(expandedLeadMessage);
                     return (
                       <span className={`${styles.badge} ${badge.className}`} style={{ fontSize: '0.65rem' }}>
-                        <span className={styles.statusDot} />
                         {badge.label}
                       </span>
                     );
@@ -8574,31 +8493,31 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   </div>
                   <div className={styles.attributionItem}>
                     <span className={styles.attributionKey}>UTM Source</span>
-                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_source || '—'}</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_source || 'N/A'}</span>
                   </div>
                   <div className={styles.attributionItem}>
                     <span className={styles.attributionKey}>UTM Medium</span>
-                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_medium || '—'}</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_medium || 'N/A'}</span>
                   </div>
                   <div className={styles.attributionItem}>
                     <span className={styles.attributionKey}>UTM Campaign</span>
-                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_campaign || '—'}</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_campaign || 'N/A'}</span>
                   </div>
                   <div className={styles.attributionItem}>
                     <span className={styles.attributionKey}>UTM Content</span>
-                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_content || '—'}</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_content || 'N/A'}</span>
                   </div>
                   <div className={styles.attributionItem}>
                     <span className={styles.attributionKey}>UTM Term</span>
-                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_term || '—'}</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.utm_term || 'N/A'}</span>
                   </div>
                   <div className={styles.attributionItem}>
                     <span className={styles.attributionKey}>Google Click ID (GCLID)</span>
-                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.gclid || '—'}</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.gclid || 'N/A'}</span>
                   </div>
                   <div className={styles.attributionItem}>
                     <span className={styles.attributionKey}>Meta Click ID (FBCLID)</span>
-                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.fbclid || '—'}</span>
+                    <span className={styles.attributionVal}>{expandedLeadMessage.attribution?.fbclid || 'N/A'}</span>
                   </div>
                 </div>
               </section>
@@ -8712,7 +8631,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     <label className={styles.formLabel}>Custom Time Slot</label>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                       <div>
-                        <label className={styles.formLabel} style={{ fontSize: '0.725rem', color: '#8a99ad' }}>Start Time</label>
+                        <label className={styles.formLabel} style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>Start Time</label>
                         <input
                           type="time"
                           value={customTimeStart}
@@ -8723,7 +8642,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         />
                       </div>
                       <div>
-                        <label className={styles.formLabel} style={{ fontSize: '0.725rem', color: '#8a99ad' }}>End Time</label>
+                        <label className={styles.formLabel} style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>End Time</label>
                         <input
                           type="time"
                           value={customTimeEnd}
@@ -8746,8 +8665,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       onClick={() => setAttendanceFormStatus('PRESENT')}
                       style={{
                         background: attendanceFormStatus === 'PRESENT' ? 'rgba(52, 211, 153, 0.15)' : 'var(--bg-surface)',
-                        color: attendanceFormStatus === 'PRESENT' ? '#34d399' : 'var(--text-primary)',
-                        border: `1px solid ${attendanceFormStatus === 'PRESENT' ? '#34d399' : 'var(--border-subtle)'}`,
+                        color: attendanceFormStatus === 'PRESENT' ? 'var(--success-text)' : 'var(--text-primary)',
+                        border: `1px solid ${attendanceFormStatus === 'PRESENT' ? 'var(--success-text)' : 'var(--border-subtle)'}`,
                         padding: '0.5rem',
                         borderRadius: '6px',
                         fontSize: '0.78rem',
@@ -8759,7 +8678,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         gap: '0.4rem',
                       }}
                     >
-                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#34d399', display: 'inline-block' }} />
+                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--success-text)', display: 'inline-block' }} />
                       PRESENT
                     </button>
                     <button
@@ -8767,8 +8686,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       onClick={() => setAttendanceFormStatus('ABSENT')}
                       style={{
                         background: attendanceFormStatus === 'ABSENT' ? 'rgba(248, 113, 113, 0.15)' : 'var(--bg-surface)',
-                        color: attendanceFormStatus === 'ABSENT' ? '#f87171' : 'var(--text-primary)',
-                        border: `1px solid ${attendanceFormStatus === 'ABSENT' ? '#f87171' : 'var(--border-subtle)'}`,
+                        color: attendanceFormStatus === 'ABSENT' ? 'var(--accent-text)' : 'var(--text-primary)',
+                        border: `1px solid ${attendanceFormStatus === 'ABSENT' ? 'var(--accent-text)' : 'var(--border-subtle)'}`,
                         padding: '0.5rem',
                         borderRadius: '6px',
                         fontSize: '0.78rem',
@@ -8780,7 +8699,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         gap: '0.4rem',
                       }}
                     >
-                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#f87171', display: 'inline-block' }} />
+                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--accent-text)', display: 'inline-block' }} />
                       ABSENT
                     </button>
                     <button
@@ -8801,16 +8720,16 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         gap: '0.4rem',
                       }}
                     >
-                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#c084fc', display: 'inline-block' }} />
+                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--text-muted)', display: 'inline-block' }} />
                       PRACTICE SESSION
                     </button>
                     <button
                       type="button"
                       onClick={() => setAttendanceFormStatus('GROUP_SESSION')}
                       style={{
-                        background: attendanceFormStatus === 'GROUP_SESSION' ? 'rgba(56, 189, 248, 0.15)' : 'var(--bg-surface)',
-                        color: attendanceFormStatus === 'GROUP_SESSION' ? '#38bdf8' : 'var(--text-primary)',
-                        border: `1px solid ${attendanceFormStatus === 'GROUP_SESSION' ? '#38bdf8' : 'var(--border-subtle)'}`,
+                        background: attendanceFormStatus === 'GROUP_SESSION' ? 'var(--bg-hover)' : 'var(--bg-surface)',
+                        color: attendanceFormStatus === 'GROUP_SESSION' ? 'var(--text-primary)' : 'var(--text-primary)',
+                        border: `1px solid ${attendanceFormStatus === 'GROUP_SESSION' ? 'var(--text-primary)' : 'var(--border-subtle)'}`,
                         padding: '0.5rem',
                         borderRadius: '6px',
                         fontSize: '0.78rem',
@@ -8822,7 +8741,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         gap: '0.4rem',
                       }}
                     >
-                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#38bdf8', display: 'inline-block' }} />
+                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--text-muted)', display: 'inline-block' }} />
                       GROUP SESSION
                     </button>
                   </div>
@@ -8835,8 +8754,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   return (
                     <div
                       style={{
-                        background: 'rgba(56, 189, 248, 0.08)',
-                        border: '1px solid rgba(56, 189, 248, 0.25)',
+                        background: 'var(--bg-surface)',
+                        border: '1px solid var(--border-strong)',
                         borderRadius: '8px',
                         padding: '0.75rem 0.85rem',
                         marginBottom: '1rem',
@@ -8844,13 +8763,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     >
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.2">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
                             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                             <circle cx="9" cy="7" r="4" />
                             <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
                             <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                           </svg>
-                          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#38bdf8' }}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                             Group Session ({modalGroupDetails.count} Student{modalGroupDetails.count === 1 ? '' : 's'} Present)
                           </span>
                         </div>
@@ -8861,9 +8780,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             handleOpenGroupAttendanceModal(targetModalDate);
                           }}
                           style={{
-                            background: 'rgba(56, 189, 248, 0.2)',
-                            border: '1px solid #38bdf8',
-                            color: '#38bdf8',
+                            background: 'var(--bg-surface)',
+                            border: '1px solid var(--border-strong)',
+                            color: 'var(--text-primary)',
                             borderRadius: '4px',
                             padding: '2px 8px',
                             fontSize: '0.725rem',
@@ -8895,7 +8814,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           ))}
                         </div>
                       ) : (
-                        <div style={{ fontSize: '0.725rem', color: '#94a3b8' }}>
+                        <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>
                           No other students linked to this group session yet. Click "View / Edit Group Attendees" to add students.
                         </div>
                       )}
@@ -9012,7 +8931,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     <label className={styles.formLabel}>Custom Time Slot</label>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                       <div>
-                        <label className={styles.formLabel} style={{ fontSize: '0.725rem', color: '#8a99ad' }}>Start Time</label>
+                        <label className={styles.formLabel} style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>Start Time</label>
                         <input
                           type="time"
                           value={groupCustomTimeStart}
@@ -9023,7 +8942,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         />
                       </div>
                       <div>
-                        <label className={styles.formLabel} style={{ fontSize: '0.725rem', color: '#8a99ad' }}>End Time</label>
+                        <label className={styles.formLabel} style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>End Time</label>
                         <input
                           type="time"
                           value={groupCustomTimeEnd}
@@ -9049,7 +8968,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       style={{
                         background: 'none',
                         border: 'none',
-                        color: '#38bdf8',
+                        color: 'var(--text-primary)',
                         fontSize: '0.75rem',
                         fontWeight: 600,
                         cursor: 'pointer'
@@ -9093,8 +9012,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             padding: '0.45rem 0.65rem',
                             borderRadius: '6px',
                             cursor: 'pointer',
-                            background: isChecked ? 'rgba(56, 189, 248, 0.08)' : 'transparent',
-                            border: `1px solid ${isChecked ? 'rgba(56, 189, 248, 0.3)' : 'transparent'}`,
+                            background: isChecked ? 'var(--bg-hover)' : 'transparent',
+                            border: `1px solid ${isChecked ? 'var(--border-strong)' : 'transparent'}`,
                             marginBottom: '3px',
                             transition: 'all 0.15s ease'
                           }}
@@ -9103,7 +9022,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             type="checkbox"
                             checked={isChecked}
                             onChange={() => handleToggleSelectGroupStudent(std.id)}
-                            style={{ width: '16px', height: '16px', accentColor: '#38bdf8', cursor: 'pointer' }}
+                            style={{ width: '16px', height: '16px', accentColor: 'var(--accent-red)', cursor: 'pointer' }}
                           />
 
                           {avatar.avatarUrl ? (
@@ -9116,14 +9035,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>{std.name}</div>
-                            <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{getStudentCourses(std).join(' & ') || std.course} • {std.batch}</div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{getStudentCourses(std).join(' & ') || std.course} • {std.batch}</div>
                           </div>
                         </label>
                       );
                     })}
 
                     {filteredGroupStudents.length === 0 && (
-                      <div style={{ padding: '1rem', textAlign: 'center', fontSize: '0.775rem', color: '#64748b' }}>
+                      <div style={{ padding: '1rem', textAlign: 'center', fontSize: '0.775rem', color: 'var(--text-muted)' }}>
                         No students found matching "{groupStudentSearchQuery}".
                       </div>
                     )}
@@ -9277,7 +9196,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             fontSize: '0.75rem',
                             fontWeight: 500,
                             borderRadius: '6px',
-                            border: isSelected ? '1px solid var(--accent-primary, #6366f1)' : '1px solid var(--border-medium)',
+                            border: isSelected ? '1px solid var(--text-primary)' : '1px solid var(--border-medium)',
                             background: isSelected ? 'rgba(99, 102, 241, 0.15)' : 'var(--bg-surface)',
                             color: isSelected ? 'var(--accent-primary, #818cf8)' : 'var(--text-secondary)',
                             cursor: 'pointer',
@@ -9358,10 +9277,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       {/* PRINTABLE / PDF ATTENDANCE REPORT MODAL */}
       {isReportModalOpen && activeStudent && (
         <div className={styles.modalOverlay} id="attendanceReportOverlay">
-          <div className={styles.modalCard} style={{ maxWidth: '840px', background: '#08090a' }}>
+          <div className={styles.modalCard} style={{ maxWidth: '840px', background: 'var(--bg-page)' }}>
             <div className={styles.modalHeader}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e11d48" strokeWidth="2.2">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                   <polyline points="14 2 14 8 20 8" />
                 </svg>
@@ -9375,7 +9294,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               </button>
             </div>
 
-            <div className={styles.modalBody} style={{ background: '#ffffff', color: '#0f172a', padding: '1.5rem', borderRadius: '8px' }}>
+            <div className={`${styles.modalBody} ${styles.paperSheet}`} style={{ background: '#ffffff', color: '#0f172a', padding: '1.5rem', borderRadius: '8px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2.5px solid #e11d48', paddingBottom: '0.85rem', marginBottom: '1.25rem', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <img
@@ -9384,11 +9303,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     style={{ width: '40px', height: '40px', borderRadius: '6px', objectFit: 'contain' }}
                   />
                   <div>
-                    <h1 style={{ fontSize: '1.35rem', fontWeight: 900, color: '#e11d48', margin: 0, letterSpacing: '0.5px' }}>SOUNDABODE ACADEMY</h1>
-                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Vision 9 Mall, Pimple Saudagar, Pune • Audio Engineering &amp; DJ Academy</div>
+                    <h1 style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--accent-text)', margin: 0, letterSpacing: '0.5px' }}>SOUNDABODE ACADEMY</h1>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Vision 9 Mall, Pimple Saudagar, Pune • Audio Engineering &amp; DJ Academy</div>
                   </div>
                 </div>
-                <div style={{ textAlign: 'right', fontSize: '0.75rem', color: '#475569' }}>
+                <div style={{ textAlign: 'right', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                   <div>Report Date: {new Date().toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
                   <div style={{ fontWeight: 800, color: '#0f172a', marginTop: '2px', letterSpacing: '0.5px' }}>OFFICIAL ATTENDANCE REPORT</div>
                 </div>
@@ -9396,38 +9315,38 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1rem', background: '#f8fafc', padding: '0.85rem 1rem', borderRadius: '6px', marginBottom: '1.25rem', border: '1px solid #e2e8f0' }}>
                 <div>
-                  <div style={{ fontSize: '0.68rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.4px' }}>STUDENT NAME</div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.4px' }}>STUDENT NAME</div>
                   <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>{activeStudent.name}</div>
-                  <div style={{ fontSize: '0.75rem', color: '#475569', marginTop: '2px' }}>{activeStudent.email || 'No email registered'} • {activeStudent.phone || 'No phone'}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>{activeStudent.email || 'No email registered'} • {activeStudent.phone || 'No phone'}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: '0.68rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.4px' }}>PROGRAM &amp; BATCH</div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.4px' }}>PROGRAM &amp; BATCH</div>
                   <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#0f172a' }}>{getStudentCourses(activeStudent).join(', ') || activeStudent.course || 'Audio Engineering & DJ'}</div>
-                  <div style={{ fontSize: '0.75rem', color: '#475569', marginTop: '2px' }}>{activeStudent.batch || 'Regular Studio Batch'}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>{activeStudent.batch || 'Regular Studio Batch'}</div>
                 </div>
               </div>
 
               {/* STATS SUMMARY */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: '0.65rem', marginBottom: '1.25rem' }}>
                 <div style={{ background: '#f1f5f9', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>TOTAL SESSIONS</div>
+                  <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)', fontWeight: 700 }}>TOTAL SESSIONS</div>
                   <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0f172a', marginTop: '2px' }}>{totalMarked}</div>
                 </div>
                 <div style={{ background: '#ecfdf5', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #a7f3d0' }}>
-                  <div style={{ fontSize: '0.66rem', color: '#047857', fontWeight: 700, textTransform: 'uppercase' }}>PRESENT</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#047857', marginTop: '2px' }}>{totalPresent}</div>
+                  <div style={{ fontSize: '0.66rem', color: 'var(--success-text)', fontWeight: 700 }}>PRESENT</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--success-text)', marginTop: '2px' }}>{totalPresent}</div>
                 </div>
                 <div style={{ background: '#fef2f2', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #fecaca' }}>
-                  <div style={{ fontSize: '0.66rem', color: '#b91c1c', fontWeight: 700, textTransform: 'uppercase' }}>ABSENT</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#b91c1c', marginTop: '2px' }}>{totalAbsent}</div>
+                  <div style={{ fontSize: '0.66rem', color: 'var(--accent-text)', fontWeight: 700 }}>ABSENT</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--accent-text)', marginTop: '2px' }}>{totalAbsent}</div>
                 </div>
                 <div style={{ background: '#f0f9ff', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #bae6fd' }}>
-                  <div style={{ fontSize: '0.66rem', color: '#0284c7', fontWeight: 700, textTransform: 'uppercase' }}>GROUP / PRACTICE</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0284c7', marginTop: '2px' }}>{totalGroup + totalPractice}</div>
+                  <div style={{ fontSize: '0.66rem', color: 'var(--text-primary)', fontWeight: 700 }}>GROUP / PRACTICE</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '2px' }}>{totalGroup + totalPractice}</div>
                 </div>
                 <div style={{ background: '#fef3c7', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #fde68a' }}>
-                  <div style={{ fontSize: '0.66rem', color: '#b45309', fontWeight: 700, textTransform: 'uppercase' }}>ATTENDANCE RATE</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#b45309', marginTop: '2px' }}>{attendancePercentage}%</div>
+                  <div style={{ fontSize: '0.66rem', color: 'var(--warning-text)', fontWeight: 700 }}>ATTENDANCE RATE</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--warning-text)', marginTop: '2px' }}>{attendancePercentage}%</div>
                 </div>
               </div>
 
@@ -9436,7 +9355,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 <table style={{ width: '100%', minWidth: '580px', borderCollapse: 'collapse', fontSize: '0.775rem', textAlign: 'left' }}>
                   <thead>
                     <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
-                      <th style={{ padding: '0.5rem 0.6rem', width: '32px', textAlign: 'center', color: '#64748b' }}>#</th>
+                      <th style={{ padding: '0.5rem 0.6rem', width: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>#</th>
                       <th style={{ padding: '0.5rem 0.6rem', width: '95px' }}>Date</th>
                       <th style={{ padding: '0.5rem 0.6rem', width: '155px' }}>Time Slot</th>
                       <th style={{ padding: '0.5rem 0.6rem', width: '120px', textAlign: 'center' }}>Status</th>
@@ -9447,7 +9366,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   <tbody>
                     {activeAttendanceRecords.map((r, idx) => (
                       <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '0.45rem 0.6rem', textAlign: 'center', color: '#64748b', fontSize: '0.72rem' }}>{idx + 1}</td>
+                        <td style={{ padding: '0.45rem 0.6rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.72rem' }}>{idx + 1}</td>
                         <td style={{ padding: '0.45rem 0.6rem', fontWeight: 600, whiteSpace: 'nowrap' }}>{r.date}</td>
                         <td style={{ padding: '0.45rem 0.6rem', whiteSpace: 'nowrap' }}>{r.timeSlot}</td>
                         <td style={{ padding: '0.45rem 0.6rem', textAlign: 'center', whiteSpace: 'nowrap' }}>
@@ -9486,11 +9405,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           </span>
                         </td>
                         {!isTeacher && (
-                          <td style={{ padding: '0.45rem 0.6rem', fontWeight: 600, color: '#e11d48', whiteSpace: 'nowrap' }}>
+                          <td style={{ padding: '0.45rem 0.6rem', fontWeight: 600, color: 'var(--accent-text)', whiteSpace: 'nowrap' }}>
                             {r.markedByName || 'Staff'}
                           </td>
                         )}
-                        <td style={{ padding: '0.45rem 0.6rem', color: '#334155' }}>{r.comment || '—'}</td>
+                        <td style={{ padding: '0.45rem 0.6rem', color: '#334155' }}>{r.comment || 'N/A'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -9638,7 +9557,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     />
                     <div>
                       <h2 className={admissionStyles.docTitleH2}>Training Form</h2>
-                      <span style={{ fontSize: '0.82rem', color: '#64748b', fontWeight: 600 }}>
+                      <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: 600 }}>
                         {selectedAdmissionForModal.formType === 'DJ' ? 'Disk Jockey Training Course' : 'Electronic Music Production'}
                       </span>
                     </div>
@@ -9827,12 +9746,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   width: '34px',
                   height: '34px',
                   borderRadius: '8px',
-                  background: 'rgba(239, 68, 68, 0.15)',
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  background: 'rgba(225, 29, 72, 0.15)',
+                  border: '1px solid rgba(225, 29, 72, 0.3)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: '#f87171'
+                  color: 'var(--accent-text)'
                 }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -9870,10 +9789,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     borderRadius: '4px',
                     fontSize: '0.68rem',
                     fontWeight: 700,
-                    textTransform: 'uppercase',
-                    background: isTeacher ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                    color: isTeacher ? '#60a5fa' : '#34d399',
-                    border: `1px solid ${isTeacher ? 'rgba(59, 130, 246, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`
+                    background: isTeacher ? 'rgba(161, 161, 170, 0.15)' : 'rgba(74, 222, 128, 0.15)',
+                    color: isTeacher ? 'var(--text-secondary)' : 'var(--success-text)',
+                    border: `1px solid ${isTeacher ? 'rgba(161, 161, 170, 0.3)' : 'rgba(74, 222, 128, 0.3)'}`
                   }}>
                     Role: {isTeacher ? 'Teacher' : 'Admin'}
                   </span>
@@ -9887,9 +9805,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   borderRadius: 'var(--radius-btn)',
                   fontSize: '0.8rem',
                   fontWeight: 500,
-                  background: issueFeedbackToast.includes('successfully') ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-                  color: issueFeedbackToast.includes('successfully') ? '#34d399' : '#f87171',
-                  border: `1px solid ${issueFeedbackToast.includes('successfully') ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+                  background: issueFeedbackToast.includes('successfully') ? 'rgba(74, 222, 128, 0.12)' : 'rgba(225, 29, 72, 0.12)',
+                  color: issueFeedbackToast.includes('successfully') ? 'var(--success-text)' : 'var(--accent-text)',
+                  border: `1px solid ${issueFeedbackToast.includes('successfully') ? 'rgba(74, 222, 128, 0.3)' : 'rgba(225, 29, 72, 0.3)'}`
                 }}>
                   {issueFeedbackToast}
                 </div>
@@ -9929,7 +9847,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
               {/* Title */}
               <div className={styles.formGroup}>
-                <label className={styles.formLabel}>Issue Title / Short Summary <span style={{ color: '#f87171' }}>*</span></label>
+                <label className={styles.formLabel}>Issue Title / Short Summary <span style={{ color: 'var(--accent-text)' }}>*</span></label>
                 <input
                   type="text"
                   required
@@ -9942,7 +9860,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
               {/* Description */}
               <div className={styles.formGroup}>
-                <label className={styles.formLabel}>Detailed Description / Steps to Reproduce <span style={{ color: '#f87171' }}>*</span></label>
+                <label className={styles.formLabel}>Detailed Description / Steps to Reproduce <span style={{ color: 'var(--accent-text)' }}>*</span></label>
                 <textarea
                   required
                   rows={4}
@@ -10068,7 +9986,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     className={styles.btnPrimary}
                     disabled={isSubmittingIssue || !issueTitle.trim() || !issueDescription.trim()}
                     style={{
-                      background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                      background: 'linear-gradient(135deg, var(--accent-red) 0%, #dc2626 100%)',
                       borderColor: '#dc2626'
                     }}
                   >
@@ -10091,12 +10009,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   width: '34px',
                   height: '34px',
                   borderRadius: '8px',
-                  background: 'rgba(56, 189, 248, 0.15)',
-                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-strong)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: '#38bdf8'
+                  color: 'var(--text-primary)'
                 }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
@@ -10142,9 +10060,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   borderRadius: 'var(--radius-btn)',
                   fontSize: '0.8rem',
                   fontWeight: 500,
-                  background: reminderFeedbackToast.includes('successfully') ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-                  color: reminderFeedbackToast.includes('successfully') ? '#34d399' : '#f87171',
-                  border: `1px solid ${reminderFeedbackToast.includes('successfully') ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+                  background: reminderFeedbackToast.includes('successfully') ? 'rgba(74, 222, 128, 0.12)' : 'rgba(225, 29, 72, 0.12)',
+                  color: reminderFeedbackToast.includes('successfully') ? 'var(--success-text)' : 'var(--accent-text)',
+                  border: `1px solid ${reminderFeedbackToast.includes('successfully') ? 'rgba(74, 222, 128, 0.3)' : 'rgba(225, 29, 72, 0.3)'}`
                 }}>
                   {reminderFeedbackToast}
                 </div>
@@ -10170,7 +10088,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
               {/* Subject */}
               <div className={styles.formGroup}>
-                <label className={styles.formLabel}>Email Subject Line <span style={{ color: '#f87171' }}>*</span></label>
+                <label className={styles.formLabel}>Email Subject Line <span style={{ color: 'var(--accent-text)' }}>*</span></label>
                 <input
                   type="text"
                   required
@@ -10182,7 +10100,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
               {/* Message Content */}
               <div className={styles.formGroup}>
-                <label className={styles.formLabel}>Email Message Content <span style={{ color: '#f87171' }}>*</span></label>
+                <label className={styles.formLabel}>Email Message Content <span style={{ color: 'var(--accent-text)' }}>*</span></label>
                 <textarea
                   required
                   rows={6}
@@ -10252,8 +10170,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       width: '36px',
                       height: '36px',
                       borderRadius: '8px',
-                      background: 'rgba(56, 189, 248, 0.15)',
-                      border: '1px solid rgba(56, 189, 248, 0.3)',
+                      background: 'var(--bg-surface)',
+                      border: '1px solid var(--border-strong)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -10362,7 +10280,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     <span className={styles.inspectionKey}>System Timestamp</span>
                     <div className={styles.inspectionVal}>
                       <span className={styles.monoCell}>
-                        {rec.updatedAt ? new Date(rec.updatedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '—'}
+                        {rec.updatedAt ? new Date(rec.updatedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'N/A'}
                       </span>
                       <div className={styles.monoCell} style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                         Record ID: {rec.id}
@@ -10457,7 +10375,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       {realtimeLeadToast && (
         <div className={styles.realtimeLeadToast}>
           <div className={styles.toastIcon}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" strokeWidth="2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
             </svg>
           </div>
@@ -10466,7 +10384,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
             <div className={styles.toastBody}>
               <strong>{realtimeLeadToast.name}</strong> • {realtimeLeadToast.courseInterest}
               {realtimeLeadToast.source && (
-                <span style={{ marginLeft: '0.45rem', opacity: 0.85, fontSize: '0.72rem', background: 'rgba(255,255,255,0.15)', padding: '1px 6px', borderRadius: '4px' }}>
+                <span style={{ marginLeft: '0.45rem', opacity: 0.85, fontSize: '0.72rem', background: 'var(--bg-surface)', padding: '1px 6px', borderRadius: '4px' }}>
                   {realtimeLeadToast.source}
                 </span>
               )}
