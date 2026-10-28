@@ -3350,3 +3350,452 @@
 
 
 
+
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* LEAD ASSIGNMENT & ARCHIVE WORKFLOW                                          */
+/* ──────────────────────────────────────────────────────────────────────────── */
+
+.linkBtn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.75rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.linkBtn:hover {
+  color: var(--text-primary);
+}
+
+/* Toolbar: row 1 = view + search, row 2 = filters */
+.leadsToolbar {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.leadsToolbarTop {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.leadsToolbarFilters {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  flex-wrap: wrap;
+}
+
+.leadsToolbarFilters .leadFilterItem {
+  flex: 0 1 auto;
+}
+
+.leadsToolbarFilters .selectInput {
+  min-width: 140px;
+}
+
+.viewToggle {
+  display: flex;
+  background: #09090b;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  padding: 3px;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.viewToggleBtn {
+  background: transparent;
+  color: #71717a;
+  border: none;
+  border-radius: 6px;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.775rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: all 0.15s ease;
+}
+
+.viewToggleBtn:hover {
+  color: #d4d4d8;
+}
+
+.viewToggleBtnActive,
+.viewToggleBtnActive:hover {
+  background: #ffffff;
+  color: #000000;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.leadsSearch {
+  flex: 1 1 240px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 34px;
+  padding: 0 0.75rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-btn);
+  color: var(--text-muted);
+  transition: border-color 0.15s ease;
+}
+
+.leadsSearch:focus-within {
+  border-color: var(--border-strong);
+}
+
+.leadsSearch input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.leadsErrorBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 1rem;
+  font-size: 0.8rem;
+}
+
+.leadsErrorBanner button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+/* Pipeline column header */
+.pipelineColTitle {
+  font-weight: 600;
+  font-size: 0.78rem;
+  color: #ffffff;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pipelineColCount {
+  background: #18181b;
+  border: 1px solid #27272a;
+  color: #ffffff;
+  border-radius: 12px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.pipelineColMeta {
+  font-size: 0.62rem;
+  color: #71717a;
+  white-space: nowrap;
+}
+
+/* Lead card — name first, then context, owner, actions */
+.leadCardHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.leadCardHead:hover .leadCardName {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.leadCardAvatar {
+  background: #18181b;
+  border: 1px solid #27272a;
+  color: #ffffff;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.leadCardName {
+  display: block;
+  font-weight: 600;
+  font-size: 0.86rem;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.25;
+}
+
+.leadCardCourse {
+  display: block;
+  font-size: 0.72rem;
+  color: #a1a1aa;
+  margin-top: 0.15rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.leadCardTime {
+  font-size: 0.65rem;
+  color: #71717a;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.leadCardMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.leadCardChip {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #d4d4d8;
+  border-radius: 4px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.62rem;
+  font-weight: 500;
+}
+
+.leadCardPhone {
+  font-size: 0.66rem;
+  color: #71717a;
+  font-family: monospace;
+}
+
+/* Owner / archive-reason rows */
+.assigneeRow,
+.archiveReasonRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.assigneeRowCompact {
+  margin-top: 0;
+}
+
+.assigneeLabel {
+  display: block;
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #71717a;
+  min-width: 42px;
+}
+
+.assigneeSelectWrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 6px;
+  color: #d4d4d8;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.assigneeSelectWrap:hover {
+  background: #202024;
+  border-color: #52525b;
+}
+
+.assigneeSelectWrap::after {
+  content: '';
+  position: absolute;
+  right: 0.55rem;
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid #a1a1aa;
+  border-bottom: 1.5px solid #a1a1aa;
+  transform: translateY(-2px) rotate(45deg);
+  pointer-events: none;
+}
+
+.assigneeRow[data-unassigned] .assigneeSelectWrap {
+  border-style: dashed;
+  color: #a1a1aa;
+}
+
+.assigneeSelectWrap[data-missing] {
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.assigneeSelect {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.73rem;
+  font-weight: 500;
+  padding-right: 1rem;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  color-scheme: dark;
+}
+
+.assigneeSelect option {
+  background: #141417;
+  color: #ffffff;
+}
+
+.archiveNote {
+  flex-basis: 100%;
+  font-size: 0.68rem;
+  color: #a1a1aa;
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Stage dot colour per stage */
+.stageDropdownWrapper[data-stage='NEW'] .stageDot { background: #ffffff; }
+.stageDropdownWrapper[data-stage='CONTACTED'] .stageDot { background: #a1a1aa; }
+.stageDropdownWrapper[data-stage='ENROLLED'] .stageDot { background: #22c55e; }
+.stageDropdownWrapper[data-stage='ARCHIVED'] .stageDot { background: #52525b; }
+
+/* List view batch bar */
+.leadsBatchBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.85rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+
+.leadsBatchBar[data-active] {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--border-medium);
+}
+
+.leadsBatchActions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Archive modal & lead workflow section */
+.archiveModal {
+  max-width: 440px;
+}
+
+.leadWorkflowGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-top: 0.35rem;
+}
+
+.leadWorkflowGrid .assigneeLabel {
+  margin-bottom: 0.3rem;
+}
+
+@media (max-width: 768px) {
+  .leadsToolbarFilters .leadFilterItem {
+    flex: 1 1 calc(50% - 0.5rem);
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.25rem;
+  }
+
+  .leadsToolbarFilters .selectInput {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .leadWorkflowGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.btnPrimary:disabled,
+.btnSecondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.leadsTable th,
+.leadsTable td {
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+.leadsTable td .archiveReasonRow .assigneeLabel {
+  display: none;
+}
+
+/* Keep menus from sizing to their longest option */
+.leadsTable .assigneeSelectWrap,
+.leadsTable .stageDropdownWrapper {
+  max-width: 170px;
+}
+
+.leadsTable .assigneeSelect,
+.leadsTable .stageSelect {
+  width: 100%;
+}
+
+.leadsTable td:nth-child(3) div {
+  overflow-wrap: anywhere;
+}

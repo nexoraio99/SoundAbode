@@ -565,7 +565,30 @@ const inquirySchema = new mongoose.Schema({
   notes: { type: String, default: '' },
   // Optional: Meta Lead Ad ID (15–17 digit ID from Meta Lead Ads webhook)
   metaLeadId: { type: String, default: '' },
+  // Lead ownership — set by an admin; teachers only see leads assigned to them
+  assignedTo: { type: String, default: '', index: true },
+  assignedToName: { type: String, default: '' },
+  assignedBy: { type: String, default: '' },
+  assignedAt: { type: Date, default: null },
+  // Why a lead was archived (required when status is ARCHIVED)
+  archiveReason: { type: String, default: '' },
+  archiveNote: { type: String, default: '' },
+  statusUpdatedBy: { type: String, default: '' },
+  statusUpdatedAt: { type: Date, default: null },
 });
+
+const LEAD_STATUSES = ['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'];
+const ARCHIVE_REASONS = [
+  'Did not respond',
+  'Did not enquire',
+  'Not interested',
+  'Fees / budget too high',
+  'Joined another academy',
+  'Timing / location issue',
+  'Invalid contact details',
+  'Duplicate lead',
+  'Other',
+];
 
 const blogPostSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
@@ -1544,6 +1567,11 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
   return res.status(401).json({ error: 'Invalid credentials. Check your email address and passcode.' });
 });
 
+// Lets the CMS confirm its stored token is still valid (expired / re-keyed tokens get 401)
+app.get('/api/auth/session', requireAuth, (req, res) => {
+  res.json({ user: req.sessionUser });
+});
+
 // Change passcode — admin only
 app.post('/api/auth/change-passcode', requireAuth, requireAdmin, (req, res) => {
   // Note: changing ADMIN_PASSCODE dynamically in-process is supported.
@@ -1790,7 +1818,9 @@ app.get('/api/test-attendance-sheets', requireAuth, requireAdmin, async (req, re
 app.get('/api/inquiries', requireAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState === 1) {
-      const inquiries = await InquiryModel.find().sort({ submittedAt: -1 });
+      // Admins see every lead; everyone else only sees leads assigned to them
+      const filter = req.sessionUser.role === 'admin' ? {} : { assignedTo: req.sessionUser.email };
+      const inquiries = await InquiryModel.find(filter).sort({ submittedAt: -1 });
       return res.json(inquiries);
     }
     res.json([]);
@@ -1873,12 +1903,65 @@ app.post('/api/inquiries', publicFormLimiter, async (req, res) => {
   }
 });
 
+// Assignable team members (no passcodes) — used by the admin's "Assign to" menus
+app.get('/api/team', requireAuth, requireAdmin, (_req, res) => {
+  const team = Object.entries(PRESET_USERS)
+    .filter(([email]) => email !== 'admin@soundabode.com' && email !== 'devangdhakate22@gmail.com')
+    .map(([email, u]) => ({ email, name: u.name, role: u.role }));
+  res.json({ team, archiveReasons: ARCHIVE_REASONS });
+});
+
 app.patch('/api/inquiries/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    const body = req.body || {};
+    const user = req.sessionUser;
+    const isAdmin = user.role === 'admin';
+
+    // Only these fields can be changed from the CMS — never ids, attribution, etc.
+    const updates = {};
+    if (body.status !== undefined) {
+      if (!LEAD_STATUSES.includes(body.status)) {
+        return res.status(400).json({ error: 'Invalid lead status.' });
+      }
+      updates.status = body.status;
+      updates.statusUpdatedBy = user.email;
+      updates.statusUpdatedAt = new Date();
+      if (body.status === 'ARCHIVED') {
+        if (!ARCHIVE_REASONS.includes(body.archiveReason)) {
+          return res.status(400).json({ error: 'Choose a reason before archiving this lead.' });
+        }
+        updates.archiveReason = body.archiveReason;
+        updates.archiveNote = String(body.archiveNote || '').trim().slice(0, 500);
+      } else {
+        updates.archiveReason = '';
+        updates.archiveNote = '';
+      }
+    }
+    if (body.notes !== undefined) updates.notes = String(body.notes).slice(0, 5000);
+    if (body.assignedTo !== undefined) {
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'Only admins can assign leads.' });
+      }
+      const email = String(body.assignedTo || '').trim().toLowerCase();
+      if (email && !PRESET_USERS[email]) {
+        return res.status(400).json({ error: 'Unknown team member.' });
+      }
+      updates.assignedTo = email;
+      updates.assignedToName = email ? PRESET_USERS[email].name : '';
+      updates.assignedBy = email ? user.email : '';
+      updates.assignedAt = email ? new Date() : null;
+    }
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'Nothing to update.' });
+    }
+
     if (mongoose.connection.readyState === 1) {
-      const updated = await InquiryModel.findOneAndUpdate({ id }, updates, { new: true });
+      const filter = isAdmin ? { id } : { id, assignedTo: user.email };
+      const updated = await InquiryModel.findOneAndUpdate(filter, { $set: updates }, { new: true });
+      if (!updated) {
+        return res.status(404).json({ error: 'Lead not found or not assigned to you.' });
+      }
 
       // ─── Meta CAPI: Fire-and-forget event on status change ─────────────────
       // Runs AFTER res.json() — cannot block, delay, or break the CMS response.
@@ -1907,7 +1990,7 @@ app.patch('/api/inquiries/:id', requireAuth, async (req, res) => {
 
       return res.json(updated);
     }
-    res.json({ id, ...updates });
+    res.status(503).json({ error: 'Database unavailable. Changes were not saved.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2024,7 +2107,7 @@ function stripUnsafeKeys(body) {
   return out;
 }
 
-app.delete('/api/inquiries/:id', requireAuth, async (req, res) => {
+app.delete('/api/inquiries/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     if (mongoose.connection.readyState === 1) {

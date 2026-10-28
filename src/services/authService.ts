@@ -102,8 +102,26 @@ export class AuthService {
       localStorage.removeItem(SESSION_USER_KEY);
       sessionStorage.removeItem(SESSION_TOKEN_KEY);
       sessionStorage.removeItem(SESSION_USER_KEY);
+      // Cached lead data must not outlive the session on a shared device
+      localStorage.removeItem('soundabode_student_inquiries');
     } catch {
       // Ignore
+    }
+  }
+
+  /**
+   * Returns false only when the server explicitly rejects the stored token
+   * (expired or signed with an old secret). Network errors count as valid so
+   * an offline backend doesn't sign everyone out.
+   */
+  static async isSessionValid(): Promise<boolean> {
+    const token = this.getSessionToken();
+    if (!token) return false;
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/session`, { headers: this.getAuthHeaders() });
+      return res.status !== 401;
+    } catch {
+      return true;
     }
   }
 

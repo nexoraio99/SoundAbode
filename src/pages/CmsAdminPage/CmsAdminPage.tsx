@@ -3,7 +3,7 @@ import styles from './CmsAdminPage.module.css';
 import admissionStyles from '../AdmissionPage/AdmissionPage.module.css';
 import SEO from '../../components/common/SEO';
 import { BlogService } from '../../services/blogService';
-import { InquiryService, ContactInquiry } from '../../services/inquiryService';
+import { InquiryService, ContactInquiry, ARCHIVE_REASONS, LeadStatus, LeadUpdate, TeamMember } from '../../services/inquiryService';
 import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord, canonicalizeStudentId, sortStudentsById, getStudentCourses } from '../../services/attendanceService';
 import { AdmissionService, AdmissionSubmission } from '../../services/admissionService';
 import { AuthService, CmsUser } from '../../services/authService';
@@ -20,6 +20,22 @@ import { MetaAdsTab } from './components/MetaAdsTab';
 
 interface CmsAdminPageProps {
   onNavigate?: (page: string) => void;
+}
+
+const LEAD_STAGES: LeadStatus[] = ['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'];
+const LEAD_STAGE_LABELS: Record<LeadStatus, string> = {
+  NEW: 'New',
+  CONTACTED: 'Contacted',
+  ENROLLED: 'Enrolled',
+  ARCHIVED: 'Archived',
+};
+
+function formatLeadAge(iso: string): string {
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 type TabType = 'overview' | 'students' | 'classes' | 'blog' | 'inquiries' | 'meta-ads' | 'admissions' | 'attendance' | 'fees' | 'settings';
@@ -211,9 +227,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const [isSendingReminder, setIsSendingReminder] = useState(false);
   const [reminderFeedbackToast, setReminderFeedbackToast] = useState<string | null>(null);
 
-  // Automatically restrict teacher users to attendance
+  // Teachers can only use attendance and their assigned leads
   useEffect(() => {
-    if (isTeacher && activeTab !== 'attendance') {
+    if (isTeacher && activeTab !== 'attendance' && activeTab !== 'inquiries') {
       setActiveTab('attendance');
     }
   }, [isTeacher, activeTab]);
@@ -233,6 +249,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const [leadView, setLeadView] = useState<'pipeline' | 'list'>('pipeline');
   // Mobile pipeline stage filter: 'ALL' | 'NEW' | 'CONTACTED' | 'ENROLLED' | 'ARCHIVED'
   const [mobilePipelineStage, setMobilePipelineStage] = useState<'ALL' | 'NEW' | 'CONTACTED' | 'ENROLLED' | 'ARCHIVED'>('ALL');
+  // Lead assignment & archive workflow
+  const [team, setTeam] = useState<TeamMember[]>([]);
+  const [leadSearch, setLeadSearch] = useState('');
+  const [leadAssigneeFilter, setLeadAssigneeFilter] = useState<string>('ALL');
+  const [leadArchiveReasonFilter, setLeadArchiveReasonFilter] = useState<string>('ALL');
+  const [archivePrompt, setArchivePrompt] = useState<{ ids: string[]; reason: string; note: string } | null>(null);
+  const [leadActionError, setLeadActionError] = useState<string | null>(null);
   // Meta CAPI test state
   const [capiTestStatus, setCapiTestStatus] = useState<{ loading: boolean; result: string | null; isError: boolean }>({ loading: false, result: null, isError: false });
 
@@ -446,6 +469,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   }, []);
 
   useEffect(() => {
+    if (isAuthenticated && currentUser?.role === 'admin') {
+      InquiryService.fetchTeam().then(setTeam);
+    }
+  }, [isAuthenticated, currentUser?.role]);
+
+  useEffect(() => {
     if (isAuthenticated) {
       refreshData();
       IssueService.fetchIssues().then((issues) => setDeveloperIssues(issues));
@@ -504,6 +533,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     setIsAuthenticated(false);
     setCurrentUser(null);
   };
+
+  // Sign out when the server stops accepting the stored token, instead of
+  // silently showing stale cached data
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const verify = async () => {
+      if (!(await AuthService.isSessionValid())) {
+        handleLogout();
+        setAuthError('Your session has expired. Please sign in again.');
+      }
+    };
+    verify();
+    const interval = setInterval(verify, 60000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
 
   const navigateToPublic = (path: string) => {
     if (onNavigate) {
@@ -759,18 +803,47 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     }
   };
 
-  // INQUIRY STATUS CYCLE & DIRECT SELECT HANDLERS
-  const cycleInquiryStatus = (id: string, currentStatus: ContactInquiry['status']) => {
-    const sequence: ContactInquiry['status'][] = ['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'];
-    const currentIndex = sequence.indexOf(currentStatus);
-    const nextStatus = sequence[(currentIndex + 1) % sequence.length];
-    InquiryService.updateInquiryStatus(id, nextStatus);
+  // LEAD STAGE, ARCHIVE & ASSIGNMENT HANDLERS
+  const applyLeadUpdate = async (ids: string[], update: LeadUpdate) => {
+    setLeadActionError(null);
+    const results = await Promise.all(ids.map((id) => InquiryService.updateLead(id, update)));
+    const failed = results.filter((r) => !r.ok);
+    if (failed.length > 0) {
+      setLeadActionError(`${failed.length} of ${ids.length} lead(s) not updated: ${failed[0].error}`);
+    }
     refreshData();
   };
 
-  const handleInquiryStatusChange = (id: string, newStatus: ContactInquiry['status']) => {
-    InquiryService.updateInquiryStatus(id, newStatus);
-    refreshData();
+  // Archiving always asks for a reason first; other stages apply immediately
+  const requestStageChange = (ids: string[], status: LeadStatus, notes?: string) => {
+    if (ids.length === 0) return;
+    if (status === 'ARCHIVED') {
+      const existing = ids.length === 1 ? inquiries.find((i) => i.id === ids[0]) : undefined;
+      setArchivePrompt({ ids, reason: existing?.archiveReason || '', note: existing?.archiveNote || '' });
+      return;
+    }
+    applyLeadUpdate(ids, { status, ...(notes !== undefined ? { notes } : {}) });
+  };
+
+  const confirmArchive = async () => {
+    if (!archivePrompt || !archivePrompt.reason) return;
+    const { ids, reason, note } = archivePrompt;
+    setArchivePrompt(null);
+    setSelectedInquiryIds((prev) => prev.filter((id) => !ids.includes(id)));
+    await applyLeadUpdate(ids, { status: 'ARCHIVED', archiveReason: reason, archiveNote: note.trim() });
+  };
+
+  const handleArchiveReasonChange = (inq: ContactInquiry, reason: string) => {
+    if (reason === 'Other') {
+      setArchivePrompt({ ids: [inq.id], reason, note: inq.archiveNote || '' });
+      return;
+    }
+    applyLeadUpdate([inq.id], { status: 'ARCHIVED', archiveReason: reason, archiveNote: '' });
+  };
+
+  const handleAssignLeads = (ids: string[], assignedTo: string) => {
+    if (ids.length === 0) return;
+    applyLeadUpdate(ids, { assignedTo });
   };
 
   const handleDeleteInquiry = async (id: string) => {
@@ -812,11 +885,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     }
   };
 
-  const handleBatchUpdateInquiriesStatus = (status: ContactInquiry['status']) => {
+  const handleBatchUpdateInquiriesStatus = (status: LeadStatus) => {
     if (selectedInquiryIds.length === 0) return;
-    selectedInquiryIds.forEach((id) => InquiryService.updateInquiryStatus(id, status));
-    setSelectedInquiryIds([]);
-    refreshData();
+    requestStageChange([...selectedInquiryIds], status);
+    if (status !== 'ARCHIVED') setSelectedInquiryIds([]);
   };
 
   // ADMISSION SUBMISSIONS HANDLERS
@@ -1697,8 +1769,18 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     return { label: source || 'Direct', className: styles.badgeSourceDirect };
   };
 
-  const filteredInquiries = inquiries.filter((inq) => {
-    const matchesStatus = inquiryStatusFilter === 'ALL' || inq.status === inquiryStatusFilter;
+  // Filters shared by the pipeline and list views (stage is a column in the pipeline,
+  // so the status filter only applies to the list view)
+  const leadsMatchingFilters = inquiries.filter((inq) => {
+    const query = leadSearch.trim().toLowerCase();
+    if (query) {
+      const haystack = `${inq.name} ${inq.email} ${inq.phone} ${inq.courseInterest}`.toLowerCase();
+      if (!haystack.includes(query)) return false;
+    }
+    if (leadAssigneeFilter === 'UNASSIGNED' && inq.assignedTo) return false;
+    if (leadAssigneeFilter !== 'ALL' && leadAssigneeFilter !== 'UNASSIGNED' && inq.assignedTo !== leadAssigneeFilter) return false;
+    if (leadArchiveReasonFilter !== 'ALL' && inq.status === 'ARCHIVED' && inq.archiveReason !== leadArchiveReasonFilter) return false;
+
     const resolvedSource = inq.attribution?.source || (inq.source && !['Contact Form', 'Pop-up Quick Enquiry Form'].includes(inq.source) ? inq.source : 'Direct');
     
     let matchesSource = true;
@@ -1709,8 +1791,89 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         matchesSource = resolvedSource === inquirySourceFilter;
       }
     }
-    return matchesStatus && matchesSource;
+    return matchesSource;
   });
+
+  const filteredInquiries = leadView === 'list'
+    ? leadsMatchingFilters.filter((inq) => inquiryStatusFilter === 'ALL' || inq.status === inquiryStatusFilter)
+    : leadsMatchingFilters;
+
+  const unassignedLeadCount = inquiries.filter((i) => !i.assignedTo && i.status !== 'ARCHIVED').length;
+  const hasActiveLeadFilters =
+    Boolean(leadSearch.trim()) || inquirySourceFilter !== 'ALL' || leadAssigneeFilter !== 'ALL' ||
+    leadArchiveReasonFilter !== 'ALL' || (leadView === 'list' && inquiryStatusFilter !== 'ALL');
+  const clearLeadFilters = () => {
+    setLeadSearch('');
+    setInquirySourceFilter('ALL');
+    setLeadAssigneeFilter('ALL');
+    setLeadArchiveReasonFilter('ALL');
+    setInquiryStatusFilter('ALL');
+  };
+
+  const renderStageSelect = (inq: ContactInquiry) => (
+    <div className={styles.stageDropdownWrapper} data-stage={inq.status} title="Move lead to another stage">
+      <span className={styles.stageDot} />
+      <select
+        id={`pipeline-stage-select-${inq.id}`}
+        value={inq.status}
+        onChange={(e) => requestStageChange([inq.id], e.target.value as LeadStatus)}
+        className={styles.stageSelect}
+        aria-label={`Stage for ${inq.name}`}
+      >
+        {LEAD_STAGES.map((st) => (
+          <option key={st} value={st} className={styles.stageOption}>{LEAD_STAGE_LABELS[st]}</option>
+        ))}
+      </select>
+      <svg className={styles.stageChevron} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
+    </div>
+  );
+
+  // Admins get an inline "assign" menu; teachers only see who owns the lead
+  const renderAssignee = (inq: ContactInquiry, compact = false) => {
+    if (isTeacher) return null;
+    return (
+      <label className={`${styles.assigneeRow} ${compact ? styles.assigneeRowCompact : ''}`} data-unassigned={!inq.assignedTo || undefined}>
+        {!compact && <span className={styles.assigneeLabel}>Owner</span>}
+        <span className={styles.assigneeSelectWrap}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+          <select
+            value={inq.assignedTo || ''}
+            onChange={(e) => handleAssignLeads([inq.id], e.target.value)}
+            className={styles.assigneeSelect}
+            aria-label={`Assign ${inq.name}`}
+          >
+            <option value="">Unassigned</option>
+            {team.map((m) => (
+              <option key={m.email} value={m.email}>{m.name}{m.role === 'admin' ? ' (admin)' : ''}</option>
+            ))}
+            {inq.assignedTo && !team.some((m) => m.email === inq.assignedTo) && (
+              <option value={inq.assignedTo}>{inq.assignedToName || inq.assignedTo}</option>
+            )}
+          </select>
+        </span>
+      </label>
+    );
+  };
+
+  const renderArchiveReason = (inq: ContactInquiry) => (
+    <div className={styles.archiveReasonRow}>
+      <span className={styles.assigneeLabel}>Reason</span>
+      <span className={styles.assigneeSelectWrap} data-missing={!inq.archiveReason || undefined}>
+        <select
+          value={inq.archiveReason || ''}
+          onChange={(e) => e.target.value && handleArchiveReasonChange(inq, e.target.value)}
+          className={styles.assigneeSelect}
+          aria-label={`Archive reason for ${inq.name}`}
+        >
+          {!inq.archiveReason && <option value="">Choose a reason…</option>}
+          {ARCHIVE_REASONS.map((r) => (
+            <option key={r} value={r}>{r}</option>
+          ))}
+        </select>
+      </span>
+      {inq.archiveNote && <span className={styles.archiveNote} title={inq.archiveNote}>“{inq.archiveNote}”</span>}
+    </div>
+  );
 
   const filteredAdmissions = admissions.filter((adm) => {
     const matchesType = admissionTypeFilter === 'ALL' || adm.formType === admissionTypeFilter;
@@ -3640,6 +3803,17 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 <span className={styles.badgeCount}>{students.length}</span>
               </button>
 
+              {isTeacher && (
+                <button
+                  onClick={() => { setActiveTab('inquiries'); setIsMobileMenuOpen(false); }}
+                  className={`${styles.sidebarBtn} ${activeTab === 'inquiries' ? styles.sidebarBtnActive : ''}`}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
+                  My Leads
+                  {newInquiryCount > 0 && <span className={`${styles.badgeCount} ${styles.badgeCountNew}`}>{newInquiryCount}</span>}
+                </button>
+              )}
+
               {!isTeacher && (
                 <>
                   <button
@@ -3806,6 +3980,20 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
             Attendance
             <span className={styles.badgeCount}>{students.length}</span>
           </button>
+
+          {isTeacher && (
+            <button
+              onClick={() => setActiveTab('inquiries')}
+              className={`${styles.sidebarBtn} ${activeTab === 'inquiries' ? styles.sidebarBtnActive : ''}`}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+                <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+              </svg>
+              My Leads
+              {newInquiryCount > 0 && <span className={`${styles.badgeCount} ${styles.badgeCountNew}`}>{newInquiryCount}</span>}
+            </button>
+          )}
 
           {!isTeacher && (
             <>
@@ -4262,7 +4450,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                               </td>
                               <td>
                                 <button
-                                  onClick={() => cycleInquiryStatus(inq.id, inq.status)}
+                                  onClick={() => setActiveTab('inquiries')}
                                   className={`${styles.badge} ${inq.status === 'NEW'
                                       ? styles.badgeNew
                                       : inq.status === 'CONTACTED'
@@ -4272,7 +4460,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                           : styles.badgeArchived
                                     }`}
                                   style={{ cursor: 'pointer' }}
-                                  title="Click to cycle status"
+                                  title="Open in Leads"
                                 >
                                   <span className={styles.statusDot} />
                                   {inq.status}
@@ -6649,663 +6837,438 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           )}
 
           {/* TAB 4: STUDENT LEADS CRM */}
-          {!isTeacher && activeTab === 'inquiries' && (
+          {activeTab === 'inquiries' && (
             <div>
-              {/* CENTERED PAGE HEADER */}
+              {/* PAGE HEADER */}
               <div style={{ textAlign: 'center', marginBottom: '1.25rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                <h1 className={styles.pageTitle} style={{ textAlign: 'center', margin: 0 }}>Lead Management</h1>
-                <div className={styles.pageMetaBadge} style={{ marginTop: '0.45rem', display: 'inline-flex', justifyContent: 'center' }}>
-                  <span>{inquiries.length} total prospect inquiries</span>
+                <h1 className={styles.pageTitle} style={{ textAlign: 'center', margin: 0 }}>{isTeacher ? 'My Leads' : 'Lead Management'}</h1>
+                <div className={styles.pageMetaBadge} style={{ marginTop: '0.45rem', display: 'inline-flex', justifyContent: 'center', gap: '0.5rem' }}>
+                  <span>{inquiries.length} {isTeacher ? 'leads assigned to you' : 'total leads'}</span>
+                  {!isTeacher && unassignedLeadCount > 0 && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <button type="button" className={styles.linkBtn} onClick={() => setLeadAssigneeFilter('UNASSIGNED')}>
+                        {unassignedLeadCount} unassigned
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* VIEW TOGGLE — Pipeline vs List (Black & White Minimalist) */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                <div style={{ display: 'flex', background: '#09090b', border: '1px solid #27272a', borderRadius: '8px', padding: '3px', gap: '3px' }}>
-                  <button
-                    id="lead-view-pipeline"
-                    onClick={() => setLeadView('pipeline')}
-                    style={{
-                      background: leadView === 'pipeline' ? '#ffffff' : 'transparent',
-                      color: leadView === 'pipeline' ? '#000000' : '#71717a',
-                      border: 'none', borderRadius: '6px', padding: '0.35rem 0.85rem',
-                      fontSize: '0.775rem', fontWeight: 600, cursor: 'pointer',
-                      boxShadow: leadView === 'pipeline' ? '0 1px 3px rgba(0,0,0,0.5)' : 'none', transition: 'all 0.15s ease',
-                      display: 'flex', alignItems: 'center', gap: '0.4rem',
-                    }}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="3" y="3" width="5" height="18" rx="1"/><rect x="10" y="3" width="5" height="18" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/>
-                    </svg>
-                    Pipeline
-                  </button>
-                  <button
-                    id="lead-view-list"
-                    onClick={() => setLeadView('list')}
-                    style={{
-                      background: leadView === 'list' ? '#ffffff' : 'transparent',
-                      color: leadView === 'list' ? '#000000' : '#71717a',
-                      border: 'none', borderRadius: '6px', padding: '0.35rem 0.85rem',
-                      fontSize: '0.775rem', fontWeight: 600, cursor: 'pointer',
-                      boxShadow: leadView === 'list' ? '0 1px 3px rgba(0,0,0,0.5)' : 'none', transition: 'all 0.15s ease',
-                      display: 'flex', alignItems: 'center', gap: '0.4rem',
-                    }}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
-                      <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-                    </svg>
-                    List
-                  </button>
-                </div>
-                <div style={{ fontSize: '0.72rem', color: '#71717a', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
-                  Status changes auto-sync to Meta Ads
-                </div>
-              </div>
-
-              {/* KANBAN PIPELINE VIEW */}
-              {leadView === 'pipeline' && (
-                <>
-                  {/* MOBILE QUICK STAGE SWITCHER (Visible only on mobile) */}
-                  <div className={styles.mobileStagePills}>
-                    {(['ALL', 'NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'] as const).map((st) => (
+              {/* TOOLBAR — view toggle, search, filters */}
+              <div className={styles.leadsToolbar}>
+                <div className={styles.leadsToolbarTop}>
+                  <div className={styles.viewToggle} role="tablist" aria-label="Lead view">
+                    {(['pipeline', 'list'] as const).map((view) => (
                       <button
-                        key={st}
-                        onClick={() => setMobilePipelineStage(st)}
-                        className={`${styles.mobileStagePillBtn} ${mobilePipelineStage === st ? styles.mobileStagePillBtnActive : ''}`}
+                        key={view}
+                        id={`lead-view-${view}`}
+                        role="tab"
+                        aria-selected={leadView === view}
+                        onClick={() => setLeadView(view)}
+                        className={`${styles.viewToggleBtn} ${leadView === view ? styles.viewToggleBtnActive : ''}`}
                       >
-                        {st === 'ALL' ? 'All' : st.charAt(0) + st.slice(1).toLowerCase()}
-                        <span className={styles.mobileStageCount}>
-                          {st === 'ALL' ? inquiries.length : inquiries.filter((inq) => inq.status === st).length}
-                        </span>
+                        {view === 'pipeline' ? (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="5" height="18" rx="1"/><rect x="10" y="3" width="5" height="18" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/></svg>
+                        ) : (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                        )}
+                        {view === 'pipeline' ? 'Pipeline' : 'List'}
                       </button>
                     ))}
                   </div>
 
-                  <div className={styles.pipelineBoard}>
-                    {((mobilePipelineStage === 'ALL'
-                      ? ['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED']
-                      : [mobilePipelineStage]) as ('NEW' | 'CONTACTED' | 'ENROLLED' | 'ARCHIVED')[]).map((stage) => {
-                    const stageLeads = inquiries.filter((inq) => inq.status === stage);
-                    const capiEvent = getCapiEventNameForStatus(stage);
-                    const stageLabels: Record<string, string> = {
-                      NEW: 'New Leads',
-                      CONTACTED: 'Contacted',
-                      ENROLLED: 'Enrolled',
-                      ARCHIVED: 'Archived',
-                    };
-                    return (
-                      <div key={stage} className={styles.pipelineColumn}>
-                        {/* Column Header */}
-                        <div className={styles.pipelineColHeader}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                            <span style={{ fontWeight: 600, fontSize: '0.78rem', color: '#ffffff', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                              {stageLabels[stage] || stage}
-                            </span>
-                            <span
-                              style={{
-                                background: '#18181b',
-                                border: '1px solid #27272a',
-                                color: '#ffffff',
-                                borderRadius: '12px',
-                                padding: '0.1rem 0.45rem',
-                                fontSize: '0.68rem',
-                                fontWeight: 600,
-                                fontFamily: 'monospace',
-                              }}
-                            >
-                              {stageLeads.length}
-                            </span>
-                          </div>
-                          {capiEvent ? (
-                            <span style={{ fontSize: '0.62rem', color: '#a1a1aa', background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '4px', padding: '0.12rem 0.4rem', display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }}>
-                              <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" strokeWidth="3"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
-                              Meta: {capiEvent}
-                            </span>
-                          ) : (
-                            <span style={{ fontSize: '0.62rem', color: '#52525b', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: '4px', padding: '0.12rem 0.4rem', whiteSpace: 'nowrap' }}>No event</span>
-                          )}
-                        </div>
-
-                        {/* Lead Cards */}
-                        <div className={styles.pipelineCards}>
-                          {stageLeads.length === 0 ? (
-                            <div style={{ textAlign: 'center', padding: '2.5rem 0.5rem', color: '#64748b', fontSize: '0.74rem' }}>No leads in this stage</div>
-                          ) : stageLeads.map((inq) => {
-                            const av = getAvatarDetails(inq.name);
-                            const sourceBadge = getSourceBadgeDetails(inq);
-                            const isMetaLead = (inq.attribution?.source || '').includes('Meta') || !!(inq.attribution?.fbclid);
-                            const timeAgo = (() => {
-                              const diff = Date.now() - new Date(inq.submittedAt).getTime();
-                              const mins = Math.floor(diff / 60000);
-                              if (mins < 60) return `${mins}m ago`;
-                              const hrs = Math.floor(mins / 60);
-                              if (hrs < 24) return `${hrs}h ago`;
-                              return `${Math.floor(hrs / 24)}d ago`;
-                            })();
-                            return (
-                              <div key={inq.id} className={styles.pipelineCard}>
-                                {/* Card top: avatar + name + time */}
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', marginBottom: '0.55rem' }}>
-                                  <div
-                                    style={{
-                                      background: '#18181b',
-                                      border: '1px solid #27272a',
-                                      color: '#ffffff',
-                                      width: '32px',
-                                      height: '32px',
-                                      borderRadius: '50%',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      fontSize: '0.72rem',
-                                      fontWeight: 600,
-                                      flexShrink: 0,
-                                      letterSpacing: '0.5px',
-                                    }}
-                                  >
-                                    {av.initials}
-                                  </div>
-                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div
-                                      style={{
-                                        fontWeight: 600,
-                                        fontSize: '0.84rem',
-                                        color: '#ffffff',
-                                        whiteSpace: 'nowrap',
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        lineHeight: '1.25',
-                                      }}
-                                      title={inq.name}
-                                    >
-                                      {inq.name}
-                                    </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.68rem', color: '#71717a', marginTop: '0.15rem' }}>
-                                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <circle cx="12" cy="12" r="10" />
-                                        <polyline points="12 6 12 12 16 14" />
-                                      </svg>
-                                      <span>{timeAgo}</span>
-                                    </div>
-                                  </div>
-                                  {isMetaLead && (
-                                    <div
-                                      style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '0.25rem',
-                                        background: 'rgba(255, 255, 255, 0.04)',
-                                        border: '1px solid rgba(255, 255, 255, 0.1)',
-                                        borderRadius: '4px',
-                                        padding: '0.15rem 0.35rem',
-                                        flexShrink: 0,
-                                      }}
-                                      title="Meta Ads Lead"
-                                    >
-                                      <svg width="10" height="10" viewBox="0 0 24 24" fill="#ffffff">
-                                        <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069z"/>
-                                      </svg>
-                                      <span style={{ fontSize: '0.62rem', fontWeight: 500, color: '#d4d4d8' }}>Meta</span>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Course Info */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.73rem', color: '#a1a1aa', marginBottom: '0.45rem' }}>
-                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#71717a" strokeWidth="2" style={{ flexShrink: 0 }}>
-                                    <path d="M9 18V5l12-2v13" />
-                                    <circle cx="6" cy="18" r="3" />
-                                    <circle cx="18" cy="16" r="3" />
-                                  </svg>
-                                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={inq.courseInterest}>
-                                    {inq.courseInterest || 'General Inquiry'}
-                                  </span>
-                                </div>
-
-                                {/* Source Badge & Phone preview */}
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.4rem', marginBottom: '0.1rem', flexWrap: 'wrap' }}>
-                                  <span
-                                    style={{
-                                      background: 'rgba(255, 255, 255, 0.04)',
-                                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                                      color: '#d4d4d8',
-                                      borderRadius: '4px',
-                                      padding: '0.12rem 0.45rem',
-                                      fontSize: '0.62rem',
-                                      fontWeight: 500,
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '0.3rem',
-                                    }}
-                                  >
-                                    <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#ffffff' }} />
-                                    {sourceBadge.label}
-                                  </span>
-                                  {inq.phone && (
-                                    <span style={{ fontSize: '0.65rem', color: '#71717a', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontFamily: 'monospace' }}>
-                                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                                      {inq.phone}
-                                    </span>
-                                  )}
-                                </div>
-
-                                {/* Action row with stage dropdown selector and quick actions */}
-                                <div className={styles.pipelineActionRow}>
-                                  <div
-                                    className={styles.stageDropdownWrapper}
-                                    title="Change lead stage"
-                                  >
-                                    <span className={styles.stageDot} />
-                                    <select
-                                      id={`pipeline-stage-select-${inq.id}`}
-                                      value={inq.status}
-                                      onChange={(e) => handleInquiryStatusChange(inq.id, e.target.value as ContactInquiry['status'])}
-                                      className={styles.stageSelect}
-                                      aria-label="Lead status stage"
-                                    >
-                                      <option value="NEW" className={styles.stageOption}>New</option>
-                                      <option value="CONTACTED" className={styles.stageOption}>Contacted</option>
-                                      <option value="ENROLLED" className={styles.stageOption}>Enrolled</option>
-                                      <option value="ARCHIVED" className={styles.stageOption}>Archived</option>
-                                    </select>
-                                    <svg className={styles.stageChevron} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" strokeWidth="2">
-                                      <polyline points="6 9 12 15 18 9" />
-                                    </svg>
-                                  </div>
-
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}>
-                                    {inq.phone && (
-                                      <a
-                                        href={`https://wa.me/${inq.phone.replace(/\D/g, '')}?text=${encodeURIComponent('Hi ' + inq.name + ', this is Soundabode Studios. We saw your inquiry about ' + inq.courseInterest + '. Can we connect?')}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className={styles.pipelineWaBtn}
-                                        title={`WhatsApp ${inq.phone}`}
-                                        aria-label={`WhatsApp ${inq.name}`}
-                                      >
-                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-                                          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
-                                          <path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.556 4.116 1.528 5.843L.057 23.943l6.304-1.654A11.954 11.954 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0z"/>
-                                        </svg>
-                                        <span>WA</span>
-                                      </a>
-                                    )}
-                                    <button
-                                      id={`pipeline-delete-${inq.id}`}
-                                      onClick={() => handleDeleteInquiry(inq.id)}
-                                      className={styles.pipelineDelBtn}
-                                      title="Delete lead"
-                                      aria-label="Delete inquiry"
-                                    >
-                                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <polyline points="3 6 5 6 21 6"/>
-                                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                                        <path d="M10 11v6"/>
-                                        <path d="M14 11v6"/>
-                                      </svg>
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {/* Meta Attribution strip (for Meta Ads leads) */}
-                                {isMetaLead && inq.attribution?.fbclid && (
-                                  <div style={{ marginTop: '0.55rem', paddingTop: '0.45rem', borderTop: '1px solid #1f1f23', fontSize: '0.62rem', color: '#71717a', display: 'flex', alignItems: 'center', gap: '0.3rem', overflow: 'hidden' }}>
-                                    <svg width="8" height="8" viewBox="0 0 24 24" fill="#a1a1aa"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
-                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={inq.attribution.fbclid}>fbclid: {inq.attribution.fbclid.slice(0, 18)}…</span>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
+                  <div className={styles.leadsSearch}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input
+                      type="search"
+                      value={leadSearch}
+                      onChange={(e) => setLeadSearch(e.target.value)}
+                      placeholder="Search name, phone, email or course"
+                      aria-label="Search leads"
+                    />
+                  </div>
                 </div>
-              </>
-            )}
 
-              {/* FILTERS & SELECTION CONTROLS CONTAINER */}
-              <div className={styles.leadsControlPanel}>
-                {/* 1. SIDE-BY-SIDE SOURCE & STATUS FILTERS */}
-                <div className={styles.leadsFiltersRow}>
-                  <div className={styles.leadFilterItem}>
-                    <div className={styles.leadFilterLabel}>Source:</div>
-                    <select
-                      value={inquirySourceFilter}
-                      onChange={(e) => setInquirySourceFilter(e.target.value)}
-                      className={styles.selectInput}
-                      style={{ width: '100%' }}
-                    >
-                      <option value="ALL">All Sources</option>
+                <div className={styles.leadsToolbarFilters}>
+                  {!isTeacher && (
+                    <label className={styles.leadFilterItem}>
+                      <span className={styles.leadFilterLabel}>Assigned to</span>
+                      <select value={leadAssigneeFilter} onChange={(e) => setLeadAssigneeFilter(e.target.value)} className={styles.selectInput}>
+                        <option value="ALL">Everyone</option>
+                        <option value="UNASSIGNED">Unassigned</option>
+                        {team.map((m) => (
+                          <option key={m.email} value={m.email}>{m.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <label className={styles.leadFilterItem}>
+                    <span className={styles.leadFilterLabel}>Source</span>
+                    <select value={inquirySourceFilter} onChange={(e) => setInquirySourceFilter(e.target.value)} className={styles.selectInput}>
+                      <option value="ALL">All sources</option>
                       <option value="Meta Ads">Meta Ads</option>
                       <option value="Google Ads">Google Ads</option>
                       <option value="Organic/Referral">Organic / Referral</option>
                       <option value="Direct">Direct</option>
                       <option value="Campaign">Campaigns</option>
                     </select>
-                  </div>
-
-                  <div className={styles.leadFilterItem}>
-                    <div className={styles.leadFilterLabel}>Status:</div>
-                    <select
-                      value={inquiryStatusFilter}
-                      onChange={(e) => setInquiryStatusFilter(e.target.value)}
-                      className={styles.selectInput}
-                      style={{ width: '100%' }}
-                    >
-                      <option value="ALL">All Prospects ({inquiries.length})</option>
-                      <option value="NEW">New Leads</option>
-                      <option value="CONTACTED">Contacted</option>
-                      <option value="ENROLLED">Enrolled</option>
-                      <option value="ARCHIVED">Archived</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* 2. SELECT ALL LEADS (BELOW SOURCE AND STATUS) */}
-                <div className={styles.leadsSelectAllRow}>
-                  <label className={styles.selectAllPill}>
-                    <input
-                      type="checkbox"
-                      checked={
-                        filteredInquiries.length > 0 &&
-                        filteredInquiries.every((inq) => selectedInquiryIds.includes(inq.id))
-                      }
-                      onChange={handleToggleSelectAllInquiries}
-                      style={{ cursor: 'pointer', width: '15px', height: '15px', accentColor: 'var(--accent-red)' }}
-                    />
-                    <span>Select All Leads ({filteredInquiries.length})</span>
                   </label>
+                  {leadView === 'list' && (
+                    <label className={styles.leadFilterItem}>
+                      <span className={styles.leadFilterLabel}>Stage</span>
+                      <select value={inquiryStatusFilter} onChange={(e) => setInquiryStatusFilter(e.target.value)} className={styles.selectInput}>
+                        <option value="ALL">All stages</option>
+                        {LEAD_STAGES.map((st) => (
+                          <option key={st} value={st}>{LEAD_STAGE_LABELS[st]}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <label className={styles.leadFilterItem}>
+                    <span className={styles.leadFilterLabel}>Archive reason</span>
+                    <select value={leadArchiveReasonFilter} onChange={(e) => setLeadArchiveReasonFilter(e.target.value)} className={styles.selectInput}>
+                      <option value="ALL">All reasons</option>
+                      {ARCHIVE_REASONS.map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {hasActiveLeadFilters && (
+                    <button type="button" className={styles.linkBtn} onClick={clearLeadFilters}>Clear filters</button>
+                  )}
                 </div>
               </div>
 
-              {/* BATCH ACTION BAR FOR SELECTED LEADS */}
-              {selectedInquiryIds.length > 0 && (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    flexWrap: 'wrap',
-                    gap: '0.75rem',
-                    background: 'rgba(239, 68, 68, 0.08)',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                    borderRadius: '10px',
-                    padding: '0.65rem 1rem',
-                    marginBottom: '1rem',
-                    marginTop: '0.5rem',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: '#f1f5f9', fontWeight: 600 }}>
-                    <span>{selectedInquiryIds.length} lead(s) selected</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Mark status:</span>
-                    <button
-                      onClick={() => handleBatchUpdateInquiriesStatus('CONTACTED')}
-                      className={styles.btnSecondary}
-                      style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
-                    >
-                      Contacted
-                    </button>
-                    <button
-                      onClick={() => handleBatchUpdateInquiriesStatus('ENROLLED')}
-                      className={styles.btnSecondary}
-                      style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
-                    >
-                      Enrolled
-                    </button>
-                    <button
-                      onClick={() => handleBatchUpdateInquiriesStatus('ARCHIVED')}
-                      className={styles.btnSecondary}
-                      style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
-                    >
-                      Archived
-                    </button>
-                    <button
-                      onClick={handleBatchDeleteInquiries}
-                      className={styles.btnDestructive}
-                      style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
-                    >
-                      Delete Selected ({selectedInquiryIds.length})
-                    </button>
-                    <button
-                      onClick={() => setSelectedInquiryIds([])}
-                      style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '0.75rem', cursor: 'pointer', textDecoration: 'underline' }}
-                    >
-                      Deselect All
-                    </button>
-                  </div>
+              {leadActionError && (
+                <div className={styles.leadsErrorBanner} role="alert">
+                  <span>{leadActionError}</span>
+                  <button type="button" onClick={() => setLeadActionError(null)} aria-label="Dismiss">✕</button>
                 </div>
               )}
 
-              {/* INQUIRIES TABLE / EMPTY STATE */}
-              {filteredInquiries.length === 0 ? (
-                <div className={styles.tableCard}>
-                  <div className={styles.emptyStateCard}>
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
-                      <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-                    </svg>
-                    <div className={styles.emptyStateTitle}>No prospect leads found</div>
-                    <div className={styles.emptyStateDesc}>There are no inquiries matching your selected filter criteria.</div>
-                    <button
-                      onClick={() => {
-                        setInquiryStatusFilter('ALL');
-                        setInquirySourceFilter('ALL');
-                      }}
-                      className={styles.btnSecondary}
-                      style={{ marginTop: '0.5rem' }}
-                    >
-                      Show All Prospects
-                    </button>
-                  </div>
-                </div>
-              ) : (
+              {/* KANBAN PIPELINE VIEW */}
+              {leadView === 'pipeline' && (
                 <>
-                  {/* DESKTOP TABLE VIEW */}
-                  <div className={styles.desktopTableContainer}>
-                    <div className={styles.tableCard}>
-                      <table className={styles.dataTable}>
-                        <thead>
-                          <tr>
-                            <th style={{ width: '40px', textAlign: 'center' }}>
-                              <input
-                                type="checkbox"
-                                checked={
-                                  filteredInquiries.length > 0 &&
-                                  filteredInquiries.every((inq) => selectedInquiryIds.includes(inq.id))
-                                }
-                                onChange={handleToggleSelectAllInquiries}
-                                title="Select All Visible Leads"
-                                style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: 'var(--accent-red)' }}
-                              />
-                            </th>
-                            <th>Prospect</th>
-                            <th>Interested Program</th>
-                            <th>Contact Details</th>
-                            <th>Source</th>
-                            <th>Message</th>
-                            <th>Status</th>
-                            <th style={{ textAlign: 'right' }}>Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredInquiries.map((inq) => {
-                            const avatar = getAvatarDetails(inq.name);
-                            const isSelected = selectedInquiryIds.includes(inq.id);
-                            const sourceBadge = getSourceBadgeDetails(inq);
-                            return (
-                              <tr key={inq.id} style={isSelected ? { backgroundColor: 'rgba(239, 68, 68, 0.05)' } : {}}>
-                                <td style={{ textAlign: 'center' }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={() => handleToggleSelectInquiry(inq.id)}
-                                    style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: 'var(--accent-red)' }}
-                                  />
-                                </td>
-                                <td>
-                                  <div className={styles.studentCell}>
-                                    <div
-                                      className={styles.avatarCircle}
-                                      style={{ background: avatar.bg, border: `1px solid ${avatar.border}` }}
-                                    >
-                                      {avatar.initials}
-                                    </div>
-                                    <div className={styles.studentName}>{inq.name}</div>
-                                  </div>
-                                </td>
-                                <td>
-                                  <span style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>{inq.courseInterest}</span>
-                                </td>
-                                <td>
-                                  <a href={`mailto:${inq.email}`} style={{ color: 'var(--text-secondary)', textDecoration: 'none', display: 'block', fontSize: '0.775rem' }}>
-                                    {inq.email}
-                                  </a>
-                                  <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>{inq.phone}</div>
-                                </td>
-                                <td>
-                                  <span className={`${styles.badge} ${sourceBadge.className}`} title={`Lead Source: ${sourceBadge.label}`}>
-                                    <span className={styles.statusDot} />
-                                    {sourceBadge.label}
-                                  </span>
-                                </td>
-                                <td style={{ maxWidth: '240px' }}>
-                                  <div style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.775rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-                                    {inq.message}
-                                  </div>
-                                  <button
-                                    onClick={() => setExpandedLeadMessage(inq)}
-                                    style={{ background: 'none', border: 'none', color: 'var(--accent-red)', fontSize: '0.7rem', padding: 0, cursor: 'pointer', marginTop: '2px', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
-                                  >
-                                    View Full
-                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
-                                  </button>
-                                </td>
-                                <td>
-                                  <button
-                                    onClick={() => cycleInquiryStatus(inq.id, inq.status)}
-                                    className={`${styles.badge} ${inq.status === 'NEW'
-                                        ? styles.badgeNew
-                                        : inq.status === 'CONTACTED'
-                                          ? styles.badgeContacted
-                                          : inq.status === 'ENROLLED'
-                                            ? styles.badgeEnrolled
-                                            : styles.badgeArchived
-                                      }`}
-                                    style={{ cursor: 'pointer' }}
-                                    title="Click to cycle status"
-                                  >
-                                    <span className={styles.statusDot} />
-                                    {inq.status}
-                                  </button>
-                                </td>
-                                <td style={{ textAlign: 'right' }}>
-                                  <button
-                                    onClick={() => handleDeleteInquiry(inq.id)}
-                                    className={styles.btnDestructive}
-                                    title="Delete inquiry"
-                                  >
-                                    Delete
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                  {/* MOBILE QUICK STAGE SWITCHER (Visible only on mobile) */}
+                  <div className={styles.mobileStagePills}>
+                    {(['ALL', ...LEAD_STAGES] as const).map((st) => (
+                      <button
+                        key={st}
+                        onClick={() => setMobilePipelineStage(st)}
+                        className={`${styles.mobileStagePillBtn} ${mobilePipelineStage === st ? styles.mobileStagePillBtnActive : ''}`}
+                      >
+                        {st === 'ALL' ? 'All' : LEAD_STAGE_LABELS[st]}
+                        <span className={styles.mobileStageCount}>
+                          {st === 'ALL' ? leadsMatchingFilters.length : leadsMatchingFilters.filter((inq) => inq.status === st).length}
+                        </span>
+                      </button>
+                    ))}
                   </div>
 
-                  {/* MOBILE CARDS VIEW */}
-                  <div className={styles.mobileCardList}>
-                    {filteredInquiries.map((inq) => {
-                      const avatar = getAvatarDetails(inq.name);
-                      const isSelected = selectedInquiryIds.includes(inq.id);
-                      const sourceBadge = getSourceBadgeDetails(inq);
+                  <div className={styles.pipelineBoard}>
+                    {(mobilePipelineStage === 'ALL' ? LEAD_STAGES : [mobilePipelineStage]).map((stage) => {
+                      const stageLeads = leadsMatchingFilters.filter((inq) => inq.status === stage);
+                      const capiEvent = getCapiEventNameForStatus(stage);
                       return (
-                        <div key={inq.id} className={styles.mobileDataCard} style={isSelected ? { border: '1px solid rgba(239, 68, 68, 0.4)', background: 'rgba(239, 68, 68, 0.03)' } : {}}>
-                          <div className={styles.mobileCardHeader}>
-                            <div className={styles.mobileCardTitleBox}>
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => handleToggleSelectInquiry(inq.id)}
-                                style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: 'var(--accent-red)', marginRight: '0.3rem' }}
-                              />
-                              <div
-                                className={styles.avatarCircle}
-                                style={{ background: avatar.bg, border: `1px solid ${avatar.border}`, width: '34px', height: '34px' }}
-                              >
-                                {avatar.initials}
-                              </div>
-                              <div>
-                                <div className={styles.mobileCardTitle}>{inq.name}</div>
-                                <div className={styles.mobileCardSubText}>{inq.email}</div>
-                              </div>
+                        <div key={stage} className={styles.pipelineColumn}>
+                          <div className={styles.pipelineColHeader}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                              <span className={styles.pipelineColTitle}>{LEAD_STAGE_LABELS[stage]}</span>
+                              <span className={styles.pipelineColCount}>{stageLeads.length}</span>
                             </div>
-                            <button
-                              onClick={() => cycleInquiryStatus(inq.id, inq.status)}
-                              className={`${styles.badge} ${inq.status === 'NEW'
-                                  ? styles.badgeNew
-                                  : inq.status === 'CONTACTED'
-                                    ? styles.badgeContacted
-                                    : inq.status === 'ENROLLED'
-                                      ? styles.badgeEnrolled
-                                      : styles.badgeArchived
-                                }`}
-                              style={{ cursor: 'pointer', fontSize: '0.65rem' }}
-                            >
-                              <span className={styles.statusDot} />
-                              {inq.status}
-                            </button>
-                          </div>
-
-                          <div className={styles.mobileCardBody}>
-                            <div className={styles.mobileCardRow}>
-                              <span className={styles.mobileCardLabel}>Program</span>
-                              <span className={styles.mobileCardValue}>{inq.courseInterest}</span>
-                            </div>
-                            <div className={styles.mobileCardRow}>
-                              <span className={styles.mobileCardLabel}>Source</span>
-                              <span className={`${styles.badge} ${sourceBadge.className}`} style={{ fontSize: '0.65rem' }}>
-                                <span className={styles.statusDot} />
-                                {sourceBadge.label}
+                            {!isTeacher && (
+                              <span className={styles.pipelineColMeta} title="Meta Conversions API event sent when a lead enters this stage">
+                                {capiEvent ? `Meta: ${capiEvent}` : 'No Meta event'}
                               </span>
-                            </div>
-                            <div className={styles.mobileCardRow}>
-                              <span className={styles.mobileCardLabel}>Phone</span>
-                              <span className={styles.mobileCardValue}>{inq.phone || 'N/A'}</span>
-                            </div>
-                            <div style={{ marginTop: '0.2rem', fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '1.3' }}>
-                              "{(inq.message || '').slice(0, 90)}..."
-                            </div>
+                            )}
                           </div>
 
-                          <div className={styles.mobileCardActions}>
-                            <button
-                              onClick={() => setExpandedLeadMessage(inq)}
-                              className={styles.btnSecondary}
-                              style={{ height: '34px', fontSize: '0.775rem' }}
-                            >
-                              View Full Details
-                            </button>
-                            <button
-                              onClick={() => handleDeleteInquiry(inq.id)}
-                              className={styles.btnDestructive}
-                              style={{ height: '34px', padding: '0 0.6rem' }}
-                            >
-                              Delete
-                            </button>
+                          <div className={styles.pipelineCards}>
+                            {stageLeads.length === 0 ? (
+                              <div style={{ textAlign: 'center', padding: '2.5rem 0.5rem', color: '#64748b', fontSize: '0.74rem' }}>No leads in this stage</div>
+                            ) : stageLeads.map((inq) => {
+                              const av = getAvatarDetails(inq.name);
+                              const sourceBadge = getSourceBadgeDetails(inq);
+                              return (
+                                <div key={inq.id} className={styles.pipelineCard}>
+                                  {/* 1. Who */}
+                                  <button type="button" className={styles.leadCardHead} onClick={() => setExpandedLeadMessage(inq)} title="Open lead details">
+                                    <span className={styles.leadCardAvatar}>{av.initials}</span>
+                                    <span style={{ flex: 1, minWidth: 0 }}>
+                                      <span className={styles.leadCardName}>{inq.name}</span>
+                                      <span className={styles.leadCardCourse}>{inq.courseInterest || 'General Inquiry'}</span>
+                                    </span>
+                                    <span className={styles.leadCardTime}>{formatLeadAge(inq.submittedAt)}</span>
+                                  </button>
+
+                                  {/* 2. Context */}
+                                  <div className={styles.leadCardMeta}>
+                                    <span className={styles.leadCardChip}>{sourceBadge.label}</span>
+                                    {inq.phone && <span className={styles.leadCardPhone}>{inq.phone}</span>}
+                                  </div>
+
+                                  {inq.status === 'ARCHIVED' && renderArchiveReason(inq)}
+
+                                  {/* 3. Owner */}
+                                  {renderAssignee(inq)}
+
+                                  {/* 4. Actions */}
+                                  <div className={styles.pipelineActionRow}>
+                                    {renderStageSelect(inq)}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}>
+                                      {inq.phone && (
+                                        <a
+                                          href={`https://wa.me/${inq.phone.replace(/\D/g, '')}?text=${encodeURIComponent('Hi ' + inq.name + ', this is Soundabode Studios. We saw your inquiry about ' + inq.courseInterest + '. Can we connect?')}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className={styles.pipelineWaBtn}
+                                          title={`WhatsApp ${inq.phone}`}
+                                          aria-label={`WhatsApp ${inq.name}`}
+                                        >
+                                          WA
+                                        </a>
+                                      )}
+                                      {!isTeacher && (
+                                        <button
+                                          id={`pipeline-delete-${inq.id}`}
+                                          onClick={() => handleDeleteInquiry(inq.id)}
+                                          className={styles.pipelineDelBtn}
+                                          title="Delete lead"
+                                          aria-label={`Delete ${inq.name}`}
+                                        >
+                                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       );
                     })}
                   </div>
+                </>
+              )}
+
+              {/* LIST VIEW */}
+              {leadView === 'list' && (
+                <>
+                  {/* SELECTION + BATCH ACTIONS */}
+                  <div className={styles.leadsBatchBar} data-active={selectedInquiryIds.length > 0 || undefined}>
+                    <label className={styles.selectAllPill}>
+                      <input
+                        type="checkbox"
+                        checked={filteredInquiries.length > 0 && filteredInquiries.every((inq) => selectedInquiryIds.includes(inq.id))}
+                        onChange={handleToggleSelectAllInquiries}
+                        style={{ cursor: 'pointer', width: '15px', height: '15px', accentColor: 'var(--accent-red)' }}
+                      />
+                      <span>
+                        {selectedInquiryIds.length > 0 ? `${selectedInquiryIds.length} selected` : `Select all (${filteredInquiries.length})`}
+                      </span>
+                    </label>
+
+                    {selectedInquiryIds.length > 0 && (
+                      <div className={styles.leadsBatchActions}>
+                        {!isTeacher && (
+                          <select
+                            className={styles.selectInput}
+                            value=""
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (!value) return;
+                              handleAssignLeads([...selectedInquiryIds], value === '__none__' ? '' : value);
+                              setSelectedInquiryIds([]);
+                            }}
+                            aria-label="Assign selected leads"
+                          >
+                            <option value="">Assign to…</option>
+                            {team.map((m) => (
+                              <option key={m.email} value={m.email}>{m.name}</option>
+                            ))}
+                            <option value="__none__">Unassign</option>
+                          </select>
+                        )}
+                        <select
+                          className={styles.selectInput}
+                          value=""
+                          onChange={(e) => e.target.value && handleBatchUpdateInquiriesStatus(e.target.value as LeadStatus)}
+                          aria-label="Move selected leads to stage"
+                        >
+                          <option value="">Move to stage…</option>
+                          {LEAD_STAGES.map((st) => (
+                            <option key={st} value={st}>{LEAD_STAGE_LABELS[st]}</option>
+                          ))}
+                        </select>
+                        {!isTeacher && (
+                          <button onClick={handleBatchDeleteInquiries} className={styles.btnDestructive} style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}>
+                            Delete
+                          </button>
+                        )}
+                        <button type="button" className={styles.linkBtn} onClick={() => setSelectedInquiryIds([])}>Clear</button>
+                      </div>
+                    )}
+                  </div>
+
+                  {filteredInquiries.length === 0 ? (
+                    <div className={styles.tableCard}>
+                      <div className={styles.emptyStateCard}>
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+                          <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+                        </svg>
+                        <div className={styles.emptyStateTitle}>{isTeacher && inquiries.length === 0 ? 'No leads assigned to you yet' : 'No leads match these filters'}</div>
+                        <div className={styles.emptyStateDesc}>
+                          {isTeacher && inquiries.length === 0 ? 'Leads an admin assigns to you will appear here.' : 'Try a different search or clear the filters.'}
+                        </div>
+                        {hasActiveLeadFilters && (
+                          <button onClick={clearLeadFilters} className={styles.btnSecondary} style={{ marginTop: '0.5rem' }}>Clear filters</button>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* DESKTOP TABLE VIEW */}
+                      <div className={styles.desktopTableContainer}>
+                        <div className={styles.tableCard}>
+                          <table className={`${styles.dataTable} ${styles.leadsTable}`}>
+                            <thead>
+                              <tr>
+                                <th style={{ width: '40px' }} aria-label="Select" />
+                                <th>Lead</th>
+                                <th>Contact</th>
+                                <th>Source</th>
+                                {!isTeacher && <th>Assigned to</th>}
+                                <th>Stage</th>
+                                <th style={{ textAlign: 'right' }}>Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filteredInquiries.map((inq) => {
+                                const avatar = getAvatarDetails(inq.name);
+                                const isSelected = selectedInquiryIds.includes(inq.id);
+                                const sourceBadge = getSourceBadgeDetails(inq);
+                                return (
+                                  <tr key={inq.id} style={isSelected ? { backgroundColor: 'rgba(239, 68, 68, 0.05)' } : {}}>
+                                    <td style={{ textAlign: 'center' }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => handleToggleSelectInquiry(inq.id)}
+                                        aria-label={`Select ${inq.name}`}
+                                        style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: 'var(--accent-red)' }}
+                                      />
+                                    </td>
+                                    <td>
+                                      <div className={styles.studentCell}>
+                                        <div className={styles.avatarCircle} style={{ background: avatar.bg, border: `1px solid ${avatar.border}` }}>{avatar.initials}</div>
+                                        <div>
+                                          <div className={styles.studentName}>{inq.name}</div>
+                                          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{inq.courseInterest} · {formatLeadAge(inq.submittedAt)}</div>
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <div style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>{inq.phone || '—'}</div>
+                                      <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>{inq.email}</div>
+                                    </td>
+                                    <td>
+                                      <span className={`${styles.badge} ${sourceBadge.className}`}>
+                                        <span className={styles.statusDot} />
+                                        {sourceBadge.label}
+                                      </span>
+                                    </td>
+                                    {!isTeacher && <td style={{ minWidth: '130px' }}>{renderAssignee(inq, true)}</td>}
+                                    <td style={{ minWidth: '140px' }}>
+                                      {renderStageSelect(inq)}
+                                      {inq.status === 'ARCHIVED' && renderArchiveReason(inq)}
+                                    </td>
+                                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                      <button onClick={() => setExpandedLeadMessage(inq)} className={styles.btnSecondary} style={{ padding: '0.3rem 0.6rem', fontSize: '0.72rem' }}>
+                                        View
+                                      </button>
+                                      {!isTeacher && (
+                                        <button onClick={() => handleDeleteInquiry(inq.id)} className={styles.btnDestructive} style={{ marginLeft: '0.35rem', padding: '0.3rem 0.6rem', fontSize: '0.72rem' }}>
+                                          Delete
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* MOBILE CARDS VIEW */}
+                      <div className={styles.mobileCardList}>
+                        {filteredInquiries.map((inq) => {
+                          const avatar = getAvatarDetails(inq.name);
+                          const isSelected = selectedInquiryIds.includes(inq.id);
+                          const sourceBadge = getSourceBadgeDetails(inq);
+                          return (
+                            <div key={inq.id} className={styles.mobileDataCard} style={isSelected ? { border: '1px solid rgba(239, 68, 68, 0.4)', background: 'rgba(239, 68, 68, 0.03)' } : {}}>
+                              <div className={styles.mobileCardHeader}>
+                                <div className={styles.mobileCardTitleBox}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => handleToggleSelectInquiry(inq.id)}
+                                    aria-label={`Select ${inq.name}`}
+                                    style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: 'var(--accent-red)', marginRight: '0.3rem' }}
+                                  />
+                                  <div className={styles.avatarCircle} style={{ background: avatar.bg, border: `1px solid ${avatar.border}`, width: '34px', height: '34px' }}>{avatar.initials}</div>
+                                  <div>
+                                    <div className={styles.mobileCardTitle}>{inq.name}</div>
+                                    <div className={styles.mobileCardSubText}>{inq.courseInterest}</div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className={styles.mobileCardBody}>
+                                <div className={styles.mobileCardRow}>
+                                  <span className={styles.mobileCardLabel}>Phone</span>
+                                  <span className={styles.mobileCardValue}>{inq.phone || 'N/A'}</span>
+                                </div>
+                                <div className={styles.mobileCardRow}>
+                                  <span className={styles.mobileCardLabel}>Source</span>
+                                  <span className={`${styles.badge} ${sourceBadge.className}`} style={{ fontSize: '0.65rem' }}>
+                                    <span className={styles.statusDot} />
+                                    {sourceBadge.label}
+                                  </span>
+                                </div>
+                                {!isTeacher && (
+                                  <div className={styles.mobileCardRow}>
+                                    <span className={styles.mobileCardLabel}>Assigned</span>
+                                    <span style={{ flex: '0 1 180px' }}>{renderAssignee(inq, true)}</span>
+                                  </div>
+                                )}
+                                <div className={styles.mobileCardRow}>
+                                  <span className={styles.mobileCardLabel}>Stage</span>
+                                  <span style={{ flex: '0 1 180px' }}>{renderStageSelect(inq)}</span>
+                                </div>
+                                {inq.status === 'ARCHIVED' && renderArchiveReason(inq)}
+                              </div>
+
+                              <div className={styles.mobileCardActions}>
+                                <button onClick={() => setExpandedLeadMessage(inq)} className={styles.btnSecondary} style={{ height: '34px', fontSize: '0.775rem' }}>
+                                  View details
+                                </button>
+                                {!isTeacher && (
+                                  <button onClick={() => handleDeleteInquiry(inq.id)} className={styles.btnDestructive} style={{ height: '34px', padding: '0 0.6rem' }}>
+                                    Delete
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -7315,10 +7278,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           {!isTeacher && activeTab === 'meta-ads' && (
             <MetaAdsTab
               inquiries={inquiries}
-              onUpdateStatus={(id, status, notes) => {
-                InquiryService.updateInquiryStatus(id, status, notes);
-                refreshData();
-              }}
+              onUpdateStatus={(id, status, notes) => requestStageChange([id], status, notes)}
               onDeleteInquiry={(id) => {
                 handleDeleteInquiry(id);
               }}
@@ -8461,6 +8421,56 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       )}
 
       {/* FULL LEAD MESSAGE MODAL */}
+      {archivePrompt && (
+        <div className={styles.modalOverlay} onClick={() => setArchivePrompt(null)}>
+          <div className={`${styles.modalCard} ${styles.archiveModal}`} role="dialog" aria-modal="true" aria-labelledby="archive-lead-title" onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <h2 id="archive-lead-title" className={styles.modalTitle}>
+                Archive {archivePrompt.ids.length === 1 ? (inquiries.find((i) => i.id === archivePrompt.ids[0])?.name || 'lead') : `${archivePrompt.ids.length} leads`}
+              </h2>
+              <button onClick={() => setArchivePrompt(null)} className={styles.closeModalBtn} aria-label="Cancel">✕</button>
+            </div>
+            <div className={styles.modalBody}>
+              <label className={styles.formGroup}>
+                <span className={styles.formLabel}>Why is this lead being archived?</span>
+                <select
+                  autoFocus
+                  className={styles.formSelect}
+                  value={archivePrompt.reason}
+                  onChange={(e) => setArchivePrompt({ ...archivePrompt, reason: e.target.value })}
+                >
+                  <option value="" disabled>Choose a reason…</option>
+                  {ARCHIVE_REASONS.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.formGroup}>
+                <span className={styles.formLabel}>Note {archivePrompt.reason === 'Other' ? '(required)' : '(optional)'}</span>
+                <textarea
+                  className={styles.formTextarea}
+                  style={{ minHeight: '80px' }}
+                  maxLength={500}
+                  value={archivePrompt.note}
+                  onChange={(e) => setArchivePrompt({ ...archivePrompt, note: e.target.value })}
+                  placeholder={archivePrompt.reason === 'Other' ? 'Describe the reason' : 'Anything the team should know'}
+                />
+              </label>
+            </div>
+            <div className={styles.modalFooter}>
+              <button className={styles.btnSecondary} onClick={() => setArchivePrompt(null)}>Cancel</button>
+              <button
+                className={styles.btnPrimary}
+                onClick={confirmArchive}
+                disabled={!archivePrompt.reason || (archivePrompt.reason === 'Other' && !archivePrompt.note.trim())}
+              >
+                Archive
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {expandedLeadMessage && (
         <div className={styles.modalOverlay}>
           <div className={`${styles.modalCard} ${styles.leadDetailModal}`} role="dialog" aria-modal="true" aria-labelledby="lead-detail-title">
@@ -8506,6 +8516,35 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   Received {new Date(expandedLeadMessage.submittedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
                 </span>
               </section>
+
+              {(() => {
+                // Read the live record so changes made here show immediately
+                const live = inquiries.find((i) => i.id === expandedLeadMessage.id) || expandedLeadMessage;
+                return (
+                  <section className={styles.leadProgramCard} aria-label="Lead workflow">
+                    <span className={styles.leadSectionLabel}>Workflow</span>
+                    <div className={styles.leadWorkflowGrid}>
+                      <div>
+                        <span className={styles.assigneeLabel}>Stage</span>
+                        {renderStageSelect(live)}
+                      </div>
+                      {!isTeacher && (
+                        <div>
+                          <span className={styles.assigneeLabel}>Owner</span>
+                          {renderAssignee(live, true)}
+                        </div>
+                      )}
+                    </div>
+                    {live.status === 'ARCHIVED' && renderArchiveReason(live)}
+                    {live.assignedTo && live.assignedAt && (
+                      <span className={styles.leadSubmittedAt}>
+                        Assigned to {live.assignedToName || live.assignedTo}
+                        {live.assignedBy ? ` by ${live.assignedBy}` : ''} on {new Date(live.assignedAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}
+                      </span>
+                    )}
+                  </section>
+                );
+              })()}
 
               <section className={styles.leadAttributionCard}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -10470,16 +10509,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           </button>
         )}
 
-        {!isTeacher && (
-          <button
-            onClick={() => setActiveTab('inquiries')}
-            className={`${styles.mobileBottomNavBtn} ${activeTab === 'inquiries' ? styles.mobileBottomNavBtnActive : ''}`}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
-            {newInquiryCount > 0 && <span className={styles.mobileBottomNavBadge}>{newInquiryCount}</span>}
-            <span>Leads</span>
-          </button>
-        )}
+        <button
+          onClick={() => setActiveTab('inquiries')}
+          className={`${styles.mobileBottomNavBtn} ${activeTab === 'inquiries' ? styles.mobileBottomNavBtnActive : ''}`}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
+          {newInquiryCount > 0 && <span className={styles.mobileBottomNavBadge}>{newInquiryCount}</span>}
+          <span>{isTeacher ? 'My Leads' : 'Leads'}</span>
+        </button>
 
         {!isTeacher ? (
           <button

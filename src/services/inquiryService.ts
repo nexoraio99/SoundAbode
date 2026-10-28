@@ -20,6 +20,43 @@ export interface ContactInquiry {
   adName?: string;
   campaignName?: string;
   formName?: string;
+  assignedTo?: string;
+  assignedToName?: string;
+  assignedBy?: string;
+  assignedAt?: string | null;
+  archiveReason?: string;
+  archiveNote?: string;
+  statusUpdatedBy?: string;
+  statusUpdatedAt?: string | null;
+}
+
+export type LeadStatus = ContactInquiry['status'];
+
+export interface TeamMember {
+  email: string;
+  name: string;
+  role: 'admin' | 'teacher';
+}
+
+/** Must match ARCHIVE_REASONS in server/index.js */
+export const ARCHIVE_REASONS = [
+  'Did not respond',
+  'Did not enquire',
+  'Not interested',
+  'Fees / budget too high',
+  'Joined another academy',
+  'Timing / location issue',
+  'Invalid contact details',
+  'Duplicate lead',
+  'Other',
+] as const;
+
+export interface LeadUpdate {
+  status?: LeadStatus;
+  archiveReason?: string;
+  archiveNote?: string;
+  notes?: string;
+  assignedTo?: string;
 }
 
 const INITIAL_INQUIRIES: ContactInquiry[] = [];
@@ -63,6 +100,13 @@ export class InquiryService {
       const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
       if (stored) {
         const parsed: ContactInquiry[] = JSON.parse(stored);
+        // A cache written during an admin session may still be on this device —
+        // non-admins only ever see leads assigned to them.
+        const user = AuthService.getCurrentUser();
+        if (user && user.role !== 'admin') {
+          const email = user.email.toLowerCase();
+          return parsed.filter((i) => !this.isInvalidInquiry(i) && (i.assignedTo || '').toLowerCase() === email);
+        }
         const realInquiries = parsed.filter((i) => !this.isInvalidInquiry(i));
         if (realInquiries.length !== parsed.length) {
           localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(realInquiries));
@@ -227,32 +271,66 @@ export class InquiryService {
     return newInquiry;
   }
 
+  /**
+   * Apply a CMS change (stage, archive reason, notes, assignment) optimistically,
+   * then persist it. If the server rejects it, local data is re-synced from the
+   * server and the error message is returned.
+   */
+  public static async updateLead(id: string, update: LeadUpdate): Promise<{ ok: boolean; error?: string }> {
+    const inquiries = this.getStoredInquiries();
+    const index = inquiries.findIndex((i) => i.id === id);
+    if (index !== -1) {
+      const next: ContactInquiry = { ...inquiries[index], ...update };
+      if (update.status && update.status !== 'ARCHIVED') {
+        next.archiveReason = '';
+        next.archiveNote = '';
+      }
+      if (update.assignedTo !== undefined && !update.assignedTo) next.assignedToName = '';
+      inquiries[index] = next;
+      this.saveInquiries(inquiries);
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/inquiries/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: AuthService.getAuthHeaders(),
+        body: JSON.stringify(update),
+      });
+      if (res.ok) {
+        const saved: ContactInquiry = await res.json();
+        const latest = this.getStoredInquiries().map((i) => (i.id === id ? { ...i, ...saved } : i));
+        this.saveInquiries(latest);
+        return { ok: true };
+      }
+      const data = await res.json().catch(() => ({}));
+      this.getAllInquiries();
+      return { ok: false, error: data.error || `Could not save (HTTP ${res.status}).` };
+    } catch {
+      this.getAllInquiries();
+      return { ok: false, error: 'Network error — change was not saved.' };
+    }
+  }
+
   public static updateInquiryStatus(
     id: string,
     status: ContactInquiry['status'],
     notes?: string
-  ): ContactInquiry | null {
-    const inquiries = this.getStoredInquiries();
-    const index = inquiries.findIndex((i) => i.id === id);
-    if (index === -1) return null;
+  ): Promise<{ ok: boolean; error?: string }> {
+    return this.updateLead(id, { status, ...(notes !== undefined ? { notes } : {}) });
+  }
 
-    inquiries[index] = {
-      ...inquiries[index],
-      status,
-      ...(notes !== undefined ? { notes } : {}),
-    };
-    this.saveInquiries(inquiries);
-
-    // Sync to MongoDB Atlas backend
-    if (typeof window !== 'undefined') {
-      fetch(`${API_BASE_URL}/inquiries/${id}`, {
-        method: 'PATCH',
-        headers: AuthService.getAuthHeaders(),
-        body: JSON.stringify({ status, ...(notes !== undefined ? { notes } : {}) }),
-      }).catch((err) => console.warn('Atlas update notice:', err));
+  /** Team members an admin can assign leads to. */
+  public static async fetchTeam(): Promise<TeamMember[]> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/team`, { headers: AuthService.getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.team)) return data.team;
+      }
+    } catch {
+      // Offline — assignment menus stay empty
     }
-
-    return inquiries[index];
+    return [];
   }
 
   public static async deleteInquiry(id: string): Promise<boolean> {
