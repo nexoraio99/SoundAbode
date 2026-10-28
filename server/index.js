@@ -906,38 +906,29 @@ async function syncAndMigrateStudentSequence() {
       '6a9a8b8cc1a9dab4350c0472': 'std-019',
     };
 
-    // 1. Upsert all 19 canonical students in StudentModel
+    // 1. Create any of the 19 original students that are missing. Existing records are
+    //    never overwritten: admins edit courses, batches and contact details in the CMS,
+    //    and re-applying the seed on every restart used to revert those edits.
     for (const cStd of INITIAL_STUDENT_SEED) {
-      const existing = await StudentModel.findOne({
-        $or: [
-          { id: cStd.id },
-          { name: new RegExp('^' + cStd.name.trim() + '$', 'i') },
-          cStd.email ? { email: new RegExp('^' + cStd.email.trim() + '$', 'i') } : null,
-        ].filter(Boolean),
-      });
+      // Prefer the exact id; fall back to email, then name, only to recognise a legacy record
+      const existing =
+        (await StudentModel.findOne({ id: cStd.id })) ||
+        (cStd.email ? await StudentModel.findOne({ email: new RegExp('^' + escapeRegex(cStd.email.trim()) + '$', 'i') }) : null) ||
+        (await StudentModel.findOne({ name: new RegExp('^' + escapeRegex(cStd.name.trim()) + '$', 'i') }));
 
       if (existing) {
+        // Only legacy ObjectId-style ids are migrated; a std-NNN id is a real, separate student
         const oldId = existing.id;
-        if (oldId && oldId !== cStd.id) {
+        if (oldId && oldId !== cStd.id && !/^std-\d+$/i.test(oldId)) {
           migrationMap[oldId] = cStd.id;
         }
-        await StudentModel.updateOne({ _id: existing._id }, { $set: { ...cStd } });
       } else {
         await StudentModel.create(cStd);
       }
     }
 
-    // 2. Clean up any redundant duplicate/stray student records
-    const allStudents = await StudentModel.find();
-    for (const s of allStudents) {
-      const match = INITIAL_STUDENT_SEED.find(
-        (c) => c.id === s.id || c.name.toLowerCase() === (s.name || '').trim().toLowerCase()
-      );
-      if (match && s.id !== match.id) {
-        migrationMap[s.id] = match.id;
-        await StudentModel.deleteOne({ _id: s._id });
-      }
-    }
+    // (Removed: deleting students that share a name with a seed student. Two real
+    //  students can share a name, and the delete also moved their attendance.)
 
     // 3. Migrate all AttendanceRecord documents to reference the clean sequential IDs
     for (const [oldId, newId] of Object.entries(migrationMap)) {
@@ -952,19 +943,7 @@ async function syncAndMigrateStudentSequence() {
       }
     }
 
-    // 4. Name-based reconciliation for any attendance records
-    for (const cStd of INITIAL_STUDENT_SEED) {
-      const res = await AttendanceRecordModel.updateMany(
-        {
-          studentName: new RegExp('^' + cStd.name.trim() + '$', 'i'),
-          studentId: { $ne: cStd.id },
-        },
-        { $set: { studentId: cStd.id } }
-      );
-      if (res.modifiedCount > 0) {
-        console.log(`[MIGRATION] Updated ${res.modifiedCount} records for ${cStd.name} to canonical studentId ${cStd.id}`);
-      }
-    }
+    // (Removed: re-pointing attendance to seed students by name match, for the same reason.)
 
     // 5. Ensure any additional enrolled students (beyond seed 1..19) follow the clean sequence std-020, std-021...
     const nonSeedStudents = await StudentModel.find({
@@ -2636,6 +2615,11 @@ app.post('/api/attendance', requireAuth, async (req, res) => {
       if (!recordData.markedByRole) recordData.markedByRole = user.role || 'admin';
     }
 
+    // Sent for a multi-course student's course entry: the same student can have two
+    // courses in one slot, so the course is part of what identifies the record.
+    const courseScoped = recordData.courseScoped === true && typeof recordData.course === 'string' && recordData.course.trim();
+    delete recordData.courseScoped;
+
     if (!recordData.id) {
       recordData.id = `att-${Date.now()}-${Math.random().toString(36).substring(2, 8)}-${recordData.studentId}`;
     }
@@ -2652,6 +2636,7 @@ app.post('/api/attendance', requireAuth, async (req, res) => {
             date: recordData.date,
             timeSlot: recordData.timeSlot,
             markedBy: recordData.markedBy,
+            ...(courseScoped ? { course: recordData.course } : {}),
           },
         ],
       };

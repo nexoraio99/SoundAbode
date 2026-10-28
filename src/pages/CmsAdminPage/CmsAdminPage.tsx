@@ -4,7 +4,7 @@ import admissionStyles from '../AdmissionPage/AdmissionPage.module.css';
 import SEO from '../../components/common/SEO';
 import { BlogService } from '../../services/blogService';
 import { InquiryService, ContactInquiry, ARCHIVE_REASONS, LeadStatus, LeadUpdate, TeamMember } from '../../services/inquiryService';
-import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord, canonicalizeStudentId, sortStudentsById, getStudentCourses } from '../../services/attendanceService';
+import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord, canonicalizeStudentId, sortStudentsById, getStudentCourses, getStudentEntries, entryKeyForRecord, matchRecordCourse, StudentEntry } from '../../services/attendanceService';
 import { AdmissionService, AdmissionSubmission } from '../../services/admissionService';
 import { AuthService, CmsUser } from '../../services/authService';
 import { getApiBaseUrl } from '../../services/apiConfig';
@@ -1277,12 +1277,16 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   };
 
   const handleToggleSelectAllGroupStudents = () => {
-    if (selectedGroupStudentIds.length === students.length) {
+    if (selectedGroupStudentIds.length === markableEntries.length) {
       setSelectedGroupStudentIds([]);
     } else {
-      setSelectedGroupStudentIds(students.map((s) => canonicalizeStudentId(s.id)));
+      setSelectedGroupStudentIds(markableEntries.map((e) => e.key));
     }
   };
+
+  // Entry key a stored record shows under (course entry for multi-course students)
+  const keyForRecord = (r: AttendanceRecord) =>
+    entryKeyForRecord(r, students.find((s) => s.id === canonicalizeStudentId(r.studentId)));
 
   const handleSaveGroupAttendance = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1321,7 +1325,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       const isSlotOrDateChanged = editingGroupSessionKey.date !== groupSessionDate || editingGroupSessionKey.timeSlot !== timeSlotStr;
 
       for (const oldRec of oldRecords) {
-        if (isSlotOrDateChanged || !newSelectedSet.has(oldRec.studentId)) {
+        if (isSlotOrDateChanged || !newSelectedSet.has(keyForRecord(oldRec))) {
           await AttendanceService.deleteAttendanceRecord(oldRec.id);
         }
       }
@@ -1347,15 +1351,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     setTimeout(() => setGroupSessionSuccessBanner(null), 5000);
   };
 
-  const filteredGroupStudents = students.filter((s) => {
-    if (!groupStudentSearchQuery.trim()) return true;
-    const q = groupStudentSearchQuery.toLowerCase();
-    return s.name.toLowerCase().includes(q) || s.course.toLowerCase().includes(q) || s.batch.toLowerCase().includes(q);
-  });
 
   const handleSaveAttendance = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedStudentId) return;
+
 
     const formatTime = (timeStr: string) => {
       if (!timeStr) return '';
@@ -1368,6 +1368,18 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     const finalSlot = customTimeStart && customTimeEnd
       ? `${formatTime(customTimeStart)} - ${formatTime(customTimeEnd)}`
       : '11:00 AM - 01:00 PM';
+
+    // A new session for a multi-course student must say which course it was for;
+    // updating one of their existing sessions (same date and time) is fine
+    const entry = AttendanceService.getEntry(selectedStudentId);
+    const courseUnknown = !!entry && entry.kind !== 'course' && getStudentCourses(entry.student).length > 1;
+    const saveDate = attendanceFormDate || selectedDateStr;
+    const updatesExisting = AttendanceService.getAttendanceForStudent(selectedStudentId, currentUser || undefined)
+      .some((r) => r.date === saveDate && r.timeSlot === finalSlot);
+    if (courseUnknown && !updatesExisting) {
+      alert(`${entry!.student.name} is enrolled in more than one course. Choose the course entry this session was for.`);
+      return;
+    }
 
     const user = currentUser || AuthService.getCurrentUser();
     const markerEmail = user?.email || (isTeacher ? 'teacher@soundabode.com' : 'abhinav@soundabode.com');
@@ -1440,6 +1452,23 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     }
 
     setIsStudentModalOpen(false);
+    refreshData();
+  };
+
+  // Takes one course off a multi-course student. Their past sessions for it are kept and
+  // then show under "Earlier sessions (course not recorded)".
+  const handleRemoveStudentCourse = (student: EnrolledStudent, course: string) => {
+    const courses = getStudentCourses(student);
+    const idx = courses.findIndex((c) => c.toLowerCase() === course.toLowerCase());
+    if (idx === -1 || courses.length <= 1) return;
+    if (!window.confirm(`Remove "${course}" from ${student.name}? Their other courses and all past attendance are kept.`)) return;
+    const batches = student.batches && student.batches.length === courses.length
+      ? student.batches.filter((_, i) => i !== idx)
+      : undefined;
+    AttendanceService.updateStudent(student.id, {
+      courses: courses.filter((_, i) => i !== idx),
+      ...(batches ? { batches } : {}),
+    });
     refreshData();
   };
 
@@ -1955,6 +1984,15 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     );
   }, [students, studentSearch, studentCourseFilter]);
 
+  // Students tab rows: one per course for multi-course students. With a course filter
+  // set, only the matching course rows are shown.
+  const filteredStudentEntries = useMemo(() => {
+    const filter = studentCourseFilter.toLowerCase();
+    return filteredStudents
+      .flatMap((s) => getStudentEntries(s))
+      .filter((e) => e.kind !== 'course' || studentCourseFilter === 'ALL' || e.course.toLowerCase().includes(filter));
+  }, [filteredStudents, studentCourseFilter]);
+
   const newInquiryCount = inquiries.filter((i) => i.status === 'NEW').length;
   const metaLeadsCount = useMemo(() => {
     return inquiries.filter((inq) => {
@@ -2042,7 +2080,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   }, [inquiries, admissions]);
 
   // Active Selected Student details & records for Attendance
-  const activeStudent = selectedStudentId ? AttendanceService.getStudentById(selectedStudentId) : undefined;
+  // For a course entry this is a display copy scoped to that one course
+  const activeEntry = selectedStudentId ? AttendanceService.getEntry(selectedStudentId) : undefined;
+  const activeStudent = activeEntry?.student;
+  // New attendance needs a known course: true for course entries and single-course students,
+  // false for the "earlier sessions" row or a multi-course student opened as a whole
+  const canMarkActiveEntry = !!activeEntry && (
+    activeEntry.kind === 'course' || (activeEntry.kind === 'single' && getStudentCourses(activeEntry.student).length <= 1)
+  );
   const activeAttendanceRecords = (selectedStudentId && attendanceVersion >= 0)
     ? AttendanceService.getAttendanceForStudent(selectedStudentId, currentUser || undefined)
     : [];
@@ -2050,7 +2095,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const getOrFallbackStudent = (studentId: string, record?: AttendanceRecord): EnrolledStudent => {
     const canonicalId = canonicalizeStudentId(studentId);
     const existing = students.find((s) => s.id === canonicalId || s.id === studentId);
-    if (existing) return existing;
+    if (existing) {
+      const courses = getStudentCourses(existing);
+      const course = record && courses.length > 1 ? matchRecordCourse(record, courses) : null;
+      return course ? { ...existing, course, courses: [course] } : existing;
+    }
     return {
       id: canonicalId || studentId,
       name: (record as any)?.studentName || `Student (${studentId})`,
@@ -2080,6 +2129,25 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     }
     return all;
   }, [attendanceVersion, isTeacher, currentUser]);
+
+  // Roster rows: one per course for multi-course students, plus an "earlier sessions" row
+  // when some of their records name none of their current courses
+  const attendanceEntries = useMemo(
+    () => students.flatMap((s) => getStudentEntries(s, allAttendanceRecords)),
+    [students, allAttendanceRecords]
+  );
+  // Entries attendance can be marked against (the "earlier sessions" row is view/edit only)
+  const markableEntries = useMemo(() => attendanceEntries.filter((e) => e.kind !== 'unmatched'), [attendanceEntries]);
+  const entryLabel = (e: StudentEntry) => (e.kind === 'single' ? e.student.name : `${e.student.name} · ${e.course}`);
+
+  // Group picker: one checkbox per course entry. An "earlier sessions" entry only appears
+  // when editing a session that already includes it, so it can still be unticked.
+  const filteredGroupEntries = attendanceEntries.filter((e) => {
+    if (e.kind === 'unmatched' && !selectedGroupStudentIds.includes(e.key)) return false;
+    if (!groupStudentSearchQuery.trim()) return true;
+    const q = groupStudentSearchQuery.toLowerCase();
+    return e.student.name.toLowerCase().includes(q) || e.course.toLowerCase().includes(q) || e.batch.toLowerCase().includes(q);
+  });
 
   const getGroupSessionDetails = (dateStr: string, slotStr?: string) => {
     const matchingRecords = allAttendanceRecords.filter((r) => {
@@ -2211,8 +2279,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     const parsedTime = parseTimeSlotToInputs(session.timeSlot);
     setGroupCustomTimeStart(parsedTime.start);
     setGroupCustomTimeEnd(parsedTime.end);
-    const canonicalIds = (session.studentIds || []).map((id) => canonicalizeStudentId(id));
-    setSelectedGroupStudentIds(canonicalIds);
+    const sessionRecords = allAttendanceRecords.filter(
+      (r) => r.date === session.date && r.timeSlot === session.timeSlot && r.status === 'GROUP_SESSION'
+    );
+    setSelectedGroupStudentIds(Array.from(new Set(sessionRecords.map(keyForRecord))));
     setGroupSessionStatus('GROUP_SESSION');
     setGroupSessionComment(session.comment || '');
     setIsGroupAttendanceModalOpen(true);
@@ -2275,7 +2345,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       }
       if (classesCourseFilter !== 'ALL') {
         const st = getOrFallbackStudent(r.studentId, r);
-        if (st.course !== classesCourseFilter) return false;
+        if (!getStudentCourses(st).includes(classesCourseFilter)) return false;
       }
       if (classesSearch.trim()) {
         const q = classesSearch.toLowerCase().trim();
@@ -2369,15 +2439,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   }, [contextFilteredRecords]);
 
 
+  // One option per course (a multi-course student contributes each of their courses)
   const distinctCourses = useMemo(() => {
     const courses = new Set<string>();
-    students.forEach((s) => s.course && courses.add(s.course));
-    allAttendanceRecords.forEach((r) => {
-      const st = students.find((s) => s.id === r.studentId);
-      if (st?.course) courses.add(st.course);
-    });
+    students.forEach((s) => getStudentCourses(s).forEach((c) => courses.add(c)));
     return Array.from(courses);
-  }, [students, allAttendanceRecords]);
+  }, [students]);
 
   const allClassesLogEntries = useMemo<ClassLogEntry[]>(() => {
     const entries: ClassLogEntry[] = [];
@@ -2488,9 +2555,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       // 4. Course Filter
       if (classesCourseFilter !== 'ALL') {
         if (entry.type === 'INDIVIDUAL') {
-          if (!entry.student || entry.student.course !== classesCourseFilter) return false;
+          if (!entry.student || !getStudentCourses(entry.student).includes(classesCourseFilter)) return false;
         } else {
-          if (!entry.students.some((s) => s.course === classesCourseFilter)) return false;
+          if (!entry.students.some((s) => getStudentCourses(s).includes(classesCourseFilter))) return false;
         }
       }
 
@@ -4548,10 +4615,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           </tr>
                         </thead>
                         <tbody>
-                          {filteredStudents.map((std) => {
+                          {filteredStudentEntries.map((entry) => {
+                            const std = entry.student;
                             const avatar = getAvatarDetails(std.name);
+                            const rowCourses = entry.kind === 'course' ? [entry.course] : getStudentCourses(std);
                             return (
-                              <tr key={std.id}>
+                              <tr key={entry.key}>
                                 <td>
                                   <div className={styles.studentCell}>
                                     <div
@@ -4568,7 +4637,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 </td>
                                 <td>
                                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
-                                    {getStudentCourses(std).map((courseName, idx) => (
+                                    {rowCourses.map((courseName, idx) => (
                                       <span
                                         key={idx}
                                         style={{
@@ -4589,7 +4658,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   </div>
                                 </td>
                                 <td>
-                                  <div style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>{std.batch}</div>
+                                  <div style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>{entry.batch}</div>
+                                  {entry.kind === 'course' && (
+                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                      1 of {getStudentCourses(std).length} courses
+                                    </div>
+                                  )}
                                 </td>
                                 <td>
                                   <a href={safeMailto(std.email)} style={{ color: 'var(--text-secondary)', textDecoration: 'none', display: 'block', fontSize: '0.775rem' }}>
@@ -4616,7 +4690,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                     </button>
                                     <button
                                       onClick={() => {
-                                        setSelectedStudentId(std.id);
+                                        setSelectedStudentId(entry.key);
                                         setActiveTab('attendance');
                                       }}
                                       className={styles.btnSecondary}
@@ -4633,14 +4707,25 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                     >
                                       Edit
                                     </button>
-                                    <button
-                                      onClick={() => handleDeleteStudent(std.id, std.name)}
-                                      className={styles.btnDestructive}
-                                      style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem', whiteSpace: 'nowrap' }}
-                                      title="Permanently delete student from roster & MongoDB"
-                                    >
-                                      Delete
-                                    </button>
+                                    {entry.kind === 'course' ? (
+                                      <button
+                                        onClick={() => handleRemoveStudentCourse(std, entry.course)}
+                                        className={styles.btnDestructive}
+                                        style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem', whiteSpace: 'nowrap' }}
+                                        title="Remove this course from the student (keeps the student and their attendance)"
+                                      >
+                                        Remove course
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleDeleteStudent(std.id, std.name)}
+                                        className={styles.btnDestructive}
+                                        style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem', whiteSpace: 'nowrap' }}
+                                        title="Permanently delete student from roster & MongoDB"
+                                      >
+                                        Delete
+                                      </button>
+                                    )}
                                   </div>
                                 </td>
                               </tr>
@@ -4653,10 +4738,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                   {/* MOBILE CARDS VIEW */}
                   <div className={styles.mobileCardList}>
-                    {filteredStudents.map((std) => {
+                    {filteredStudentEntries.map((entry) => {
+                      const std = entry.student;
                       const avatar = getAvatarDetails(std.name);
+                      const rowCourses = entry.kind === 'course' ? [entry.course] : getStudentCourses(std);
                       return (
-                        <div key={std.id} className={styles.mobileDataCard}>
+                        <div key={entry.key} className={styles.mobileDataCard}>
                           <div className={styles.mobileCardHeader}>
                             <div className={styles.mobileCardTitleBox}>
                               <div
@@ -4672,18 +4759,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             </div>
                           </div>
 
-                          {getStudentCourses(std).length > 0 && (
+                          {rowCourses.length > 0 && (
                             <div className={styles.mobileCourseChips}>
-                              {getStudentCourses(std).map((courseName, idx) => (
+                              {rowCourses.map((courseName, idx) => (
                                 <span key={idx} className={styles.mobileCourseChip}>{courseName}</span>
                               ))}
+                              {entry.kind === 'course' && (
+                                <span className={styles.mobileCardSubText}>1 of {getStudentCourses(std).length} courses</span>
+                              )}
                             </div>
                           )}
 
                           <div className={styles.mobileCardBody}>
                             <div className={styles.mobileCardRow}>
                               <span className={styles.mobileCardLabel}>Batch</span>
-                              <span className={styles.mobileCardValue}>{std.batch}</span>
+                              <span className={styles.mobileCardValue}>{entry.batch}</span>
                             </div>
                             <div className={styles.mobileCardRow}>
                               <span className={styles.mobileCardLabel}>Phone</span>
@@ -4698,7 +4788,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           <div className={styles.mobileCardActions}>
                             <button
                               onClick={() => {
-                                setSelectedStudentId(std.id);
+                                setSelectedStudentId(entry.key);
                                 setActiveTab('attendance');
                               }}
                               className={styles.btnSecondary}
@@ -4713,13 +4803,23 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             >
                               Edit
                             </button>
-                            <button
-                              onClick={() => handleDeleteStudent(std.id, std.name)}
-                              className={styles.btnDestructive}
-                              style={{ height: '34px', padding: '0 0.6rem' }}
-                            >
-                              Delete
-                            </button>
+                            {entry.kind === 'course' ? (
+                              <button
+                                onClick={() => handleRemoveStudentCourse(std, entry.course)}
+                                className={styles.btnDestructive}
+                                style={{ height: '34px', padding: '0 0.6rem' }}
+                              >
+                                Remove course
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleDeleteStudent(std.id, std.name)}
+                                className={styles.btnDestructive}
+                                style={{ height: '34px', padding: '0 0.6rem' }}
+                              >
+                                Delete
+                              </button>
+                            )}
                           </div>
                         </div>
                       );
@@ -5469,7 +5569,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          setSelectedStudentId(rec.studentId!);
+                                          setSelectedStudentId(rec.records?.[0] ? keyForRecord(rec.records[0]) : rec.studentId!);
                                           setActiveTab('attendance');
                                         }}
                                         className={styles.btnSecondary}
@@ -5580,7 +5680,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setSelectedStudentId(rec.studentId!);
+                                  setSelectedStudentId(rec.records?.[0] ? keyForRecord(rec.records[0]) : rec.studentId!);
                                   setActiveTab('attendance');
                                 }}
                                 className={styles.btnSecondary}
@@ -5968,8 +6068,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       <h1 className={styles.pageTitle}>Attendance</h1>
                       <div className={styles.pageMetaBadge}>
                         <span>{students.length} enrolled students</span>
-                        <span>•</span>
-                        <span>Pune Studio Roster</span>
+                        {attendanceEntries.length !== students.length && (
+                          <>
+                            <span>•</span>
+                            <span>{attendanceEntries.length} course entries</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -5988,15 +6092,16 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           </tr>
                         </thead>
                         <tbody>
-                          {students.map((student) => {
+                          {attendanceEntries.map((entry) => {
+                            const student = entry.student;
                             const avatar = getAvatarDetails(student.name, student.avatarUrl);
-                            const studentRecords = AttendanceService.getAttendanceForStudent(student.id, currentUser || undefined);
+                            const studentRecords = AttendanceService.getAttendanceForStudent(entry.key, currentUser || undefined);
                             const attendedCount = studentRecords.filter((r) => r.status !== 'ABSENT').length;
                             const totalCount = studentRecords.length;
                             const pct = totalCount > 0 ? Math.round((attendedCount / totalCount) * 100) : 0;
 
                             return (
-                              <tr key={student.id}>
+                              <tr key={entry.key}>
                                 <td>
                                   <div className={styles.studentCell}>
                                     {avatar.avatarUrl ? (
@@ -6020,8 +6125,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   </div>
                                 </td>
                                 <td>
-                                  <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 500 }}>{student.course}</div>
-                                  <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>{student.batch}</div>
+                                  <div style={{ fontSize: '0.8rem', color: entry.kind === 'unmatched' ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: 500, fontStyle: entry.kind === 'unmatched' ? 'italic' : 'normal' }}>{entry.course}</div>
+                                  <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>{entry.kind === 'unmatched' ? 'Older records saved before courses were tracked' : entry.batch}</div>
                                 </td>
                                 <td>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
@@ -6042,17 +6147,19 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 </td>
                                 <td style={{ textAlign: 'right' }}>
                                   <div style={{ display: 'inline-flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
+                                    {entry.kind !== 'unmatched' && (
                                     <button
                                       onClick={() => {
-                                        handleOpenAttendanceModal(undefined, getTodayDateStr(), student.id);
+                                        handleOpenAttendanceModal(undefined, getTodayDateStr(), entry.key);
                                       }}
                                       className={styles.btnPrimary}
                                       style={{ height: '28px', fontSize: '0.75rem', padding: '0 0.6rem' }}
                                     >
                                       Mark
                                     </button>
+                                    )}
                                     <button
-                                      onClick={() => handleOpenStudentCalendar(student.id)}
+                                      onClick={() => handleOpenStudentCalendar(entry.key)}
                                       className={styles.btnSecondary}
                                       style={{ height: '28px', fontSize: '0.75rem', gap: '0.35rem' }}
                                     >
@@ -6071,15 +6178,16 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                   {/* STUDENTS ROSTER MOBILE CARD LIST */}
                   <div className={styles.mobileCardList}>
-                    {students.map((student) => {
+                    {attendanceEntries.map((entry) => {
+                      const student = entry.student;
                       const avatar = getAvatarDetails(student.name, student.avatarUrl);
-                      const studentRecords = AttendanceService.getAttendanceForStudent(student.id, currentUser || undefined);
+                      const studentRecords = AttendanceService.getAttendanceForStudent(entry.key, currentUser || undefined);
                       const attendedCount = studentRecords.filter((r) => r.status !== 'ABSENT').length;
                       const totalCount = studentRecords.length;
                       const pct = totalCount > 0 ? Math.round((attendedCount / totalCount) * 100) : 0;
 
                       return (
-                        <div key={student.id} className={styles.mobileDataCard}>
+                        <div key={entry.key} className={styles.mobileDataCard}>
                           <div className={styles.mobileCardHeader}>
                             <div className={styles.mobileCardTitleBox}>
                               {avatar.avatarUrl ? (
@@ -6109,7 +6217,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           <div className={styles.mobileCardBody}>
                             <div className={styles.mobileCardRow}>
                               <span className={styles.mobileCardLabel}>Course &amp; Batch</span>
-                              <span className={styles.mobileCardValue}>{student.course} ({student.batch})</span>
+                              <span className={styles.mobileCardValue}>{entry.kind === 'unmatched' ? entry.course : `${entry.course} (${entry.batch})`}</span>
                             </div>
                             <div className={styles.mobileCardRow}>
                               <span className={styles.mobileCardLabel}>Attendance Sessions</span>
@@ -6129,17 +6237,19 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           </div>
 
                           <div className={styles.mobileCardActions}>
+                            {entry.kind !== 'unmatched' && (
                             <button
                               onClick={() => {
-                                handleOpenAttendanceModal(undefined, getTodayDateStr(), student.id);
+                                handleOpenAttendanceModal(undefined, getTodayDateStr(), entry.key);
                               }}
                               className={styles.btnPrimary}
                               style={{ height: '34px', fontSize: '0.775rem' }}
                             >
                               Mark Attendance
                             </button>
+                            )}
                             <button
-                              onClick={() => handleOpenStudentCalendar(student.id)}
+                              onClick={() => handleOpenStudentCalendar(entry.key)}
                               className={styles.btnSecondary}
                               style={{ height: '34px', fontSize: '0.775rem' }}
                             >
@@ -6163,9 +6273,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       <div>
                         <h1 className={styles.pageTitle}>{activeStudent?.name}'s Attendance</h1>
                         <div className={styles.pageMetaBadge}>
-                          <span>{getStudentCourses(activeStudent).join(' & ') || activeStudent?.course}</span>
+                          <span>{activeEntry?.kind === 'unmatched' ? activeEntry.course : (getStudentCourses(activeStudent).join(' & ') || activeStudent?.course)}</span>
                           <span>•</span>
-                          <span>{activeStudent?.batch}</span>
+                          <span>{activeEntry?.kind === 'unmatched' ? 'View and edit only' : activeStudent?.batch}</span>
                         </div>
                       </div>
                     </div>
@@ -6185,12 +6295,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         </svg>
                         Group Session
                       </button>
+                      {canMarkActiveEntry && (
                       <button onClick={() => handleOpenAttendanceModal(undefined, selectedDateStr, selectedStudentId || activeStudent?.id)} className={styles.btnSecondary} style={{ gap: '0.4rem' }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                           <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
                         </svg>
                         Mark Individual
                       </button>
+                      )}
                       <button onClick={() => setIsReportModalOpen(true)} className={styles.btnSecondary} style={{ gap: '0.4rem' }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -6338,6 +6450,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             : 'No attendance marked for this date yet'}
                         </div>
                       </div>
+                      {canMarkActiveEntry && (
                       <button
                         onClick={() => handleOpenAttendanceModal(undefined, selectedDateStr, selectedStudentId || activeStudent?.id)}
                         className={styles.btnPrimary}
@@ -6348,6 +6461,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         </svg>
                         Mark Attendance for {selectedDateStr}
                       </button>
+                      )}
                     </div>
 
                     {/* DETAILED CLASS LOG CARDS FOR SELECTED DATE */}
@@ -6414,7 +6528,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   </div>
 
                                   <button
-                                    onClick={() => handleOpenAttendanceModal(r.timeSlot, r.date, r.studentId || selectedStudentId || activeStudent?.id)}
+                                    onClick={() => handleOpenAttendanceModal(r.timeSlot, r.date, selectedStudentId || r.studentId || activeStudent?.id)}
                                     className={styles.btnSecondary}
                                     style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', gap: '0.3rem', height: '26px' }}
                                     title="Edit this attendance record"
@@ -6480,7 +6594,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         return (
                           <div
                             key={slot}
-                            onClick={() => handleOpenAttendanceModal(slot, selectedDateStr, selectedStudentId || activeStudent?.id)}
+                            onClick={() => (canMarkActiveEntry || slotRecords.length > 0) && handleOpenAttendanceModal(slot, selectedDateStr, selectedStudentId || activeStudent?.id)}
                             className={styles.timeSlotBox}
                           >
                             <div style={{ width: '100%' }}>
@@ -8586,11 +8700,16 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     className={styles.selectInput}
                     style={{ width: '100%' }}
                   >
-                    {students.map((std) => (
-                      <option key={std.id} value={std.id}>
-                        {std.name} ({getStudentCourses(std).join(' & ') || std.course || 'General'})
+                    {markableEntries.map((e) => (
+                      <option key={e.key} value={e.key}>
+                        {e.kind === 'course' ? entryLabel(e) : `${e.student.name} (${getStudentCourses(e.student).join(' & ') || e.student.course || 'General'})`}
                       </option>
                     ))}
+                    {activeEntry && !markableEntries.some((e) => e.key === activeEntry.key) && (
+                      <option value={selectedStudentId || ''}>
+                        {activeEntry.kind === 'unmatched' ? entryLabel(activeEntry) : `${activeEntry.student.name} (all courses)`}
+                      </option>
+                    )}
                   </select>
                 </div>
 
@@ -8960,7 +9079,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 <div className={styles.formGroup} style={{ marginBottom: '0.75rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                     <label className={styles.formLabel} style={{ margin: 0 }}>
-                      Select Present Students ({selectedGroupStudentIds.length} of {students.length} selected)
+                      Select Present Students ({selectedGroupStudentIds.length} of {markableEntries.length} selected)
                     </label>
                     <button
                       type="button"
@@ -8974,7 +9093,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                         cursor: 'pointer'
                       }}
                     >
-                      {selectedGroupStudentIds.length === students.length ? 'Deselect All' : 'Select All'}
+                      {selectedGroupStudentIds.length === markableEntries.length ? 'Deselect All' : 'Select All'}
                     </button>
                   </div>
 
@@ -8998,13 +9117,14 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       padding: '0.4rem'
                     }}
                   >
-                    {filteredGroupStudents.map((std) => {
-                      const isChecked = selectedGroupStudentIds.some((id) => canonicalizeStudentId(id) === canonicalizeStudentId(std.id));
+                    {filteredGroupEntries.map((entry) => {
+                      const std = entry.student;
+                      const isChecked = selectedGroupStudentIds.some((id) => canonicalizeStudentId(id) === canonicalizeStudentId(entry.key));
                       const avatar = getAvatarDetails(std.name, std.avatarUrl);
 
                       return (
                         <label
-                          key={std.id}
+                          key={entry.key}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -9021,7 +9141,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           <input
                             type="checkbox"
                             checked={isChecked}
-                            onChange={() => handleToggleSelectGroupStudent(std.id)}
+                            onChange={() => handleToggleSelectGroupStudent(entry.key)}
                             style={{ width: '16px', height: '16px', accentColor: 'var(--accent-red)', cursor: 'pointer' }}
                           />
 
@@ -9035,13 +9155,13 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>{std.name}</div>
-                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{getStudentCourses(std).join(' & ') || std.course} • {std.batch}</div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{entry.kind === 'single' ? (getStudentCourses(std).join(' & ') || std.course) : entry.course} • {entry.batch}</div>
                           </div>
                         </label>
                       );
                     })}
 
-                    {filteredGroupStudents.length === 0 && (
+                    {filteredGroupEntries.length === 0 && (
                       <div style={{ padding: '1rem', textAlign: 'center', fontSize: '0.775rem', color: 'var(--text-muted)' }}>
                         No students found matching "{groupStudentSearchQuery}".
                       </div>
@@ -10331,7 +10451,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     <button
                       type="button"
                       onClick={() => {
-                        setSelectedStudentId((rec as any).studentId);
+                        setSelectedStudentId((rec as any).records?.[0] ? keyForRecord((rec as any).records[0]) : (rec as any).studentId);
                         setActiveTab('attendance');
                         setSelectedRecordForInspection(null);
                       }}

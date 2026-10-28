@@ -85,6 +85,9 @@ export interface AttendanceRecord {
   markedByName: string; // e.g. "Ashu", "Vaibhav", "Vrishan", "Soundabode Admin"
   markedByRole: 'admin' | 'teacher';
   updatedAt: string;
+  /** Course this session was for. Older records may hold several courses joined, or nothing. */
+  course?: string;
+  batch?: string;
 }
 
 export const LEGACY_STUDENT_ID_MAP: Record<string, string> = {
@@ -113,6 +116,102 @@ export const LEGACY_STUDENT_ID_MAP: Record<string, string> = {
 export function canonicalizeStudentId(id: string): string {
   if (!id) return id;
   return LEGACY_STUDENT_ID_MAP[id] || id;
+}
+
+// ─── Course entries ───────────────────────────────────────────────────────────
+// A student enrolled in several courses is shown and tracked as one entry per course.
+// Nothing is stored per entry: the key is derived, and attendance marked from an entry
+// is saved against the real student id with that single course in `course`.
+//   single-course student : key = student id (unchanged behaviour)
+//   multi-course student  : key = `${id}::${course}`
+//   older records that name none of the student's current courses: key = `${id}::` + UNMATCHED
+const ENTRY_SEP = '::';
+const UNMATCHED_COURSE = '__unmatched__';
+
+export type EntryKind = 'single' | 'course' | 'unmatched';
+
+export interface StudentEntry {
+  key: string;
+  studentId: string;
+  student: EnrolledStudent;
+  kind: EntryKind;
+  /** The one course for 'course' entries; the student's full course text otherwise. */
+  course: string;
+  batch: string;
+}
+
+const normCourse = (c?: string) => (c || '').trim().toLowerCase();
+
+export function parseEntryKey(key: string): { studentId: string; course: string | null; unmatched: boolean } {
+  const i = (key || '').indexOf(ENTRY_SEP);
+  if (i === -1) return { studentId: canonicalizeStudentId(key), course: null, unmatched: false };
+  const studentId = canonicalizeStudentId(key.slice(0, i));
+  const rest = key.slice(i + ENTRY_SEP.length);
+  return rest === UNMATCHED_COURSE
+    ? { studentId, course: null, unmatched: true }
+    : { studentId, course: rest, unmatched: false };
+}
+
+export function courseEntryKey(studentId: string, course: string): string {
+  return `${studentId}${ENTRY_SEP}${course}`;
+}
+
+/** Which of the student's courses a record belongs to, or null if it names none of them exactly. */
+export function matchRecordCourse(record: { course?: string }, courses: string[]): string | null {
+  const rc = normCourse(record.course);
+  if (!rc) return null;
+  return courses.find((c) => normCourse(c) === rc) || null;
+}
+
+function courseBatch(student: EnrolledStudent, course: string): string {
+  const courses = getStudentCourses(student);
+  const batches = getStudentBatches(student);
+  const idx = courses.findIndex((c) => normCourse(c) === normCourse(course));
+  if (batches.length === courses.length && idx >= 0) return batches[idx];
+  return batches.length === 1 ? batches[0] : student.batch;
+}
+
+/**
+ * One entry per course for multi-course students (plus an "earlier sessions" entry when some
+ * of their records can't be tied to a current course); a single entry for everyone else.
+ */
+export function getStudentEntries(student: EnrolledStudent, records: AttendanceRecord[] = []): StudentEntry[] {
+  const courses = getStudentCourses(student);
+  if (courses.length <= 1) {
+    return [{ key: student.id, studentId: student.id, student, kind: 'single', course: student.course, batch: student.batch }];
+  }
+  const entries: StudentEntry[] = courses.map((course) => ({
+    key: courseEntryKey(student.id, course),
+    studentId: student.id,
+    student,
+    kind: 'course',
+    course,
+    batch: courseBatch(student, course),
+  }));
+  const hasUnmatched = records.some(
+    (r) => canonicalizeStudentId(r.studentId) === student.id && !matchRecordCourse(r, courses)
+  );
+  if (hasUnmatched) {
+    entries.push({
+      key: `${student.id}${ENTRY_SEP}${UNMATCHED_COURSE}`,
+      studentId: student.id,
+      student,
+      kind: 'unmatched',
+      course: 'Earlier sessions (course not recorded)',
+      batch: student.batch,
+    });
+  }
+  return entries;
+}
+
+/** The entry key a stored record shows under. */
+export function entryKeyForRecord(record: AttendanceRecord, student?: EnrolledStudent): string {
+  const studentId = canonicalizeStudentId(record.studentId);
+  if (!student) return studentId;
+  const courses = getStudentCourses(student);
+  if (courses.length <= 1) return studentId;
+  const course = matchRecordCourse(record, courses);
+  return course ? courseEntryKey(studentId, course) : `${studentId}${ENTRY_SEP}${UNMATCHED_COURSE}`;
 }
 
 export function sortStudentsById(students: EnrolledStudent[]): EnrolledStudent[] {
@@ -395,13 +494,17 @@ export class AttendanceService {
   private static async syncAttendanceToRemote(record: AttendanceRecord): Promise<void> {
     if (typeof window !== 'undefined') {
       const student = this.getStudentById(record.studentId);
+      // A multi-course student's record keeps the one course it was marked for; only a
+      // single-course student's record takes the student's current course text.
+      const isMultiCourse = getStudentCourses(student).length > 1;
       const payload = {
         ...record,
         studentName: student?.name || (record as any).studentName || '',
         studentEmail: student?.email || (record as any).studentEmail || '',
         studentPhone: student?.phone || (record as any).studentPhone || '',
-        course: student?.course || (record as any).course || '',
-        batch: student?.batch || (record as any).batch || '',
+        course: (isMultiCourse ? record.course : student?.course) || record.course || '',
+        batch: (isMultiCourse ? record.batch : student?.batch) || record.batch || '',
+        ...(isMultiCourse && record.course ? { courseScoped: true } : {}),
       };
       try {
         const res = await fetch(`${API_BASE_URL}/attendance`, {
@@ -668,8 +771,39 @@ export class AttendanceService {
   }
 
   public static getStudentById(id: string): EnrolledStudent | undefined {
-    const canonicalId = canonicalizeStudentId(id);
-    return this.getStoredStudents().find((s) => s.id === canonicalId || s.id === id);
+    const { studentId } = parseEntryKey(id);
+    return this.getStoredStudents().find((s) => s.id === studentId || s.id === id);
+  }
+
+  /**
+   * The entry behind a key, for display. For a course entry the student copy carries only
+   * that course and batch. Never pass this copy to updateStudent: it is not the full record.
+   */
+  public static getEntry(key: string): StudentEntry | undefined {
+    const { studentId, course, unmatched } = parseEntryKey(key);
+    const student = this.getStoredStudents().find((s) => s.id === studentId);
+    if (!student) return undefined;
+    const courses = getStudentCourses(student);
+    if (courses.length <= 1 || (!course && !unmatched)) {
+      return { key: student.id, studentId, student, kind: 'single', course: student.course, batch: student.batch };
+    }
+    if (unmatched) {
+      return { key, studentId, student, kind: 'unmatched', course: 'Earlier sessions (course not recorded)', batch: student.batch };
+    }
+    const real = courses.find((c) => normCourse(c) === normCourse(course || ''));
+    if (!real) {
+      // Course was removed from the student since the key was created: fall back to the whole student
+      return { key: student.id, studentId, student, kind: 'single', course: student.course, batch: student.batch };
+    }
+    const batch = courseBatch(student, real);
+    return {
+      key: courseEntryKey(studentId, real),
+      studentId,
+      student: { ...student, course: real, courses: [real], batch, batches: [batch] },
+      kind: 'course',
+      course: real,
+      batch,
+    };
   }
 
   public static addStudent(payload: Omit<EnrolledStudent, 'id'>): EnrolledStudent {
@@ -822,8 +956,25 @@ export class AttendanceService {
   ): AttendanceRecord[] {
     const activeUser = (user || AuthService.getCurrentUser()) as CmsUser | null;
     const records = this.getStoredAttendance(activeUser);
-    const targetId = canonicalizeStudentId(studentId);
-    const studentRecords = records.filter((r) => r.studentId === studentId || canonicalizeStudentId(r.studentId) === targetId);
+    const entry = parseEntryKey(studentId);
+    const targetId = entry.studentId;
+    let studentRecords = records.filter((r) => r.studentId === targetId || canonicalizeStudentId(r.studentId) === targetId);
+
+    // Course entries only see sessions for that course; the "earlier sessions" entry sees
+    // the ones that match none of the student's current courses.
+    if (entry.course || entry.unmatched) {
+      const student = this.getStoredStudents().find((s) => s.id === targetId);
+      const courses = getStudentCourses(student);
+      // A key for a course the student no longer has falls back to the whole student,
+      // matching getEntry()
+      const courseStillListed = entry.unmatched || courses.some((c) => normCourse(c) === normCourse(entry.course || ''));
+      if (courses.length > 1 && courseStillListed) {
+        studentRecords = studentRecords.filter((r) => {
+          const matched = matchRecordCourse(r, courses);
+          return entry.unmatched ? !matched : !!matched && normCourse(matched) === normCourse(entry.course || '');
+        });
+      }
+    }
 
     // If no user context or role === 'admin', return ALL records
     if (!activeUser || activeUser.role === 'admin') {
@@ -858,12 +1009,24 @@ export class AttendanceService {
     const currentUser = AuthService.getCurrentUser();
     let records = this.getStoredAttendance(currentUser);
 
+    // A course entry key saves against the real student, scoped to that one course
+    const entry = this.getEntry(payload.studentId);
+    const studentId = entry ? entry.studentId : canonicalizeStudentId(payload.studentId);
+    const scopedCourse = entry?.kind === 'course' ? entry.course : undefined;
+    const scopedBatch = entry?.kind === 'course' ? entry.batch : undefined;
+
     const mBy = payload.markedBy.toLowerCase();
     const mName = payload.markedByName.toLowerCase();
 
-    // Check if record exists for student, date, timeSlot AND markedBy/markedByName
+    // Check if record exists for student, date, timeSlot (and course, for course entries) AND markedBy/markedByName
     const existingIndex = records.findIndex((r) => {
-      if (r.studentId !== payload.studentId || r.date !== payload.date || r.timeSlot !== payload.timeSlot) {
+      if (r.studentId !== studentId || r.date !== payload.date || r.timeSlot !== payload.timeSlot) {
+        return false;
+      }
+      if (scopedCourse && normCourse(r.course) !== normCourse(scopedCourse)) {
+        return false;
+      }
+      if (entry?.kind === 'unmatched' && matchRecordCourse(r, getStudentCourses(entry.student))) {
         return false;
       }
       const rBy = (r.markedBy || '').toLowerCase();
@@ -893,8 +1056,9 @@ export class AttendanceService {
       return records[existingIndex];
     } else {
       const newRecord: AttendanceRecord = {
-        id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 8)}-${payload.studentId}`,
-        studentId: payload.studentId,
+        id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 8)}-${studentId}`,
+        studentId,
+        ...(scopedCourse ? { course: scopedCourse, batch: scopedBatch } : {}),
         date: payload.date,
         timeSlot: payload.timeSlot,
         status: payload.status,
