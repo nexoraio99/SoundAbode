@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import dns from 'dns';
-import { randomBytes, createHmac } from 'crypto';
+import { randomBytes, createHmac, timingSafeEqual } from 'crypto';
 import nodemailer from 'nodemailer';
 import fs from 'fs';
 import path from 'path';
@@ -183,19 +183,25 @@ app.use(
       // Allow requests with no origin (server-to-server, health checks, curl)
       if (!origin) return callback(null, true);
 
+      // Exact-match the configured list, plus the Cloudflare Pages previews for this
+      // project and local dev hosts. Substring checks (e.g. includes('soundabode.com'))
+      // would also match attacker domains like soundabode.com.evil.net.
+      let hostname = '';
+      try {
+        hostname = new URL(origin).hostname;
+      } catch {
+        return callback(null, false);
+      }
       const isAllowed =
         ALLOWED_ORIGINS.includes(origin) ||
-        ALLOWED_ORIGINS.includes('*') ||
-        origin.endsWith('.pages.dev') ||
-        origin.endsWith('.cloudflare.com') ||
-        origin.includes('soundabode.com') ||
-        origin.includes('localhost') ||
-        origin.includes('127.0.0.1');
+        hostname === 'soundabode.pages.dev' ||
+        hostname.endsWith('.soundabode.pages.dev') ||
+        (process.env.NODE_ENV !== 'production' && (hostname === 'localhost' || hostname === '127.0.0.1'));
 
       if (isAllowed) {
         callback(null, true);
       } else {
-        callback(new Error(`CORS policy: origin '${origin}' is not allowed.`));
+        callback(null, false);
       }
     },
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -215,6 +221,39 @@ app.use(
   })
 );
 app.use(express.urlencoded({ limit: '15mb', extended: true }));
+
+// Strip MongoDB operator keys ($gt, $ne, $where…) and dotted paths from client input
+// so request data can never be interpreted as a query/update operator.
+function stripMongoOperators(value) {
+  if (Array.isArray(value)) return value.map(stripMongoOperators);
+  if (value && typeof value === 'object' && !Buffer.isBuffer(value)) {
+    for (const key of Object.keys(value)) {
+      if (key.startsWith('$') || key.includes('.') || key === '__proto__' || key === 'constructor') {
+        delete value[key];
+      } else {
+        value[key] = stripMongoOperators(value[key]);
+      }
+    }
+  }
+  return value;
+}
+app.use((req, _res, next) => {
+  if (req.body) stripMongoOperators(req.body);
+  if (req.params) stripMongoOperators(req.params);
+  if (req.query) stripMongoOperators(req.query);
+  next();
+});
+
+// Rate limit for public, unauthenticated form submissions (contact / admission)
+const publicFormLimiter = rateLimit
+  ? rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 30,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'Too many submissions. Please try again later.' },
+    })
+  : (_req, _res, next) => next();
 
 // Anti-caching headers on all API routes to ensure real-time fresh data
 app.use('/api', (_req, res, next) => {
@@ -281,20 +320,49 @@ app.get('/api/live-stream', (req, res) => {
   });
 });
 
-// Rate limit on the auth endpoint — max 200 attempts per IP per 15 minutes
+// Rate limit on the auth endpoint — max 20 attempts per IP per 15 minutes
 const authLimiter = rateLimit
   ? rateLimit({
       windowMs: 15 * 60 * 1000,
-      max: 200,
+      max: 20,
       standardHeaders: true,
       legacyHeaders: false,
       message: { error: 'Too many login attempts. Please try again after a moment.' },
     })
   : (_req, _res, next) => next(); // no-op fallback
 
+const PRESET_USERS = {
+  'abhinav@soundabode.com': { name: 'Abhinav', role: 'admin', passEnv: 'ADMIN_PASSCODE' },
+  'admin@soundabode.com': { name: 'Soundabode Admin', role: 'admin', passEnv: 'ADMIN_PASSCODE' },
+  'services@soundabode.com': { name: 'Soundabode Services', role: 'admin', passEnv: 'ADMIN_PASSCODE' },
+  'soundabode@soundabode.com': { name: 'Soundabode', role: 'admin', passEnv: 'ADMIN_PASSCODE' },
+  'devangdhakate22@gmail.com': { name: 'Developer Admin', role: 'admin', passEnv: 'ADMIN_PASSCODE' },
+  'ashu@soundabode.com': { name: 'Ashu', role: 'teacher', passEnv: 'ASHU_PASSCODE' },
+  'vaibhav@soundabode.com': { name: 'Vaibhav', role: 'teacher', passEnv: 'VAIBHAV_PASSCODE' },
+  'vrishan@soundabode.com': { name: 'Vrishan', role: 'teacher', passEnv: 'VRISHAN_PASSCODE' },
+};
+
 // ─── Cryptographic Session & Token Management ───────────────────────────────────
-const SESSION_SECRET = process.env.SESSION_SECRET || process.env.ADMIN_PASSCODE || 'soundabode_production_secret_2026';
-const activeSessions = new Map();
+// Tokens are HMAC-signed and expire; there is no hard-coded fallback secret.
+const SESSION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+const SESSION_SECRET = process.env.SESSION_SECRET || process.env.ADMIN_PASSCODE;
+if (!SESSION_SECRET) {
+  console.error('[FATAL] SESSION_SECRET (or ADMIN_PASSCODE) must be set in server/.env.');
+  process.exit(1);
+}
+if (!process.env.SESSION_SECRET) {
+  console.warn('[WARN] SESSION_SECRET is not set — falling back to ADMIN_PASSCODE for token signing. Set a long random SESSION_SECRET.');
+}
+
+function safeEqual(a, b) {
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
+
+function signPayload(payload) {
+  return createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+}
 
 function createSession(user) {
   const payload = Buffer.from(
@@ -305,44 +373,25 @@ function createSession(user) {
       t: Date.now(),
     })
   ).toString('base64url');
-
-  const hmac = createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
-  const token = `${payload}.${hmac}`;
-  activeSessions.set(token, user);
-  return token;
+  return `${payload}.${signPayload(payload)}`;
 }
 
 function verifyToken(token) {
-  if (!token) return null;
+  if (!token || typeof token !== 'string') return null;
+  const [payload, sig, extra] = token.split('.');
+  if (!payload || !sig || extra !== undefined) return null;
+  if (!safeEqual(sig, signPayload(payload))) return null;
 
-  // 1. Direct in-memory lookup
-  if (activeSessions.has(token)) {
-    return activeSessions.get(token);
+  try {
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!data || typeof data.t !== 'number' || Date.now() - data.t > SESSION_TTL_MS) return null;
+    // Role and name always come from the server-side user table, not the token
+    const preset = PRESET_USERS[String(data.email || '').toLowerCase()];
+    if (!preset) return null;
+    return { email: data.email, name: preset.name, role: preset.role };
+  } catch {
+    return null;
   }
-
-  // 2. Cryptographically signed token verification (persists across server restarts & scaling instances)
-  if (token.includes('.')) {
-    const [payload, sig] = token.split('.');
-    if (payload && sig) {
-      const expectedSig = createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
-      if (sig === expectedSig) {
-        try {
-          const user = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-          activeSessions.set(token, user);
-          return user;
-        } catch {}
-      }
-    }
-  }
-
-  // 3. Fallback for active client authenticated sessions
-  if (token.startsWith('local_session_') || token.startsWith('admin_session_') || token.startsWith('soundabode_')) {
-    const fallbackUser = { email: 'admin@soundabode.com', name: 'Abhinav', role: 'admin' };
-    activeSessions.set(token, fallbackUser);
-    return fallbackUser;
-  }
-
-  return null;
 }
 
 // Auth middleware — validates Bearer token on protected routes
@@ -368,26 +417,15 @@ function requireAdmin(req, res, next) {
 // ─── MongoDB Connection ────────────────────────────────────────────────────────
 let isConnected = false;
 
-function buildStandardFallbackUri(srvUri) {
-  try {
-    const match = srvUri.match(/mongodb\+srv:\/\/([^:]+):([^@]+)@([^/?]+)\/([^?]*)/);
-    if (!match) return null;
-    const [, user, pass, host, db] = match;
-    const dbName = db || 'soundabode';
-    const parts = host.split('.');
-    const clusterPrefix = parts[0];
-    const clusterHash = parts[1];
-    const baseDomain = parts.slice(1).join('.');
+// Public resolvers used when the local network's DNS cannot answer SRV lookups
+// (common with ISP / home-router DNS: "querySrv EBADRESP / ECONNREFUSED / ETIMEOUT").
+const PUBLIC_DNS_SERVERS = ['1.1.1.1', '8.8.8.8', '1.0.0.1', '8.8.4.4'];
+const DB_RETRY_MS = 30000;
+let usingPublicDns = false;
 
-    const node0 = `${clusterPrefix}-shard-00-00.${baseDomain}:27017`;
-    const node1 = `${clusterPrefix}-shard-00-01.${baseDomain}:27017`;
-    const node2 = `${clusterPrefix}-shard-00-02.${baseDomain}:27017`;
-    const replicaSetName = `atlas-${clusterHash || clusterPrefix}-shard-0`;
-
-    return `mongodb://${user}:${pass}@${node0},${node1},${node2}/${dbName}?ssl=true&replicaSet=${replicaSetName}&authSource=admin&retryWrites=true&w=majority`;
-  } catch {
-    return null;
-  }
+function isDnsError(err) {
+  const msg = String(err?.message || '');
+  return /querySrv|queryTxt|ENOTFOUND|EBADRESP|ECONNREFUSED|ETIMEOUT|ESERVFAIL/i.test(msg);
 }
 
 async function connectDB() {
@@ -402,51 +440,34 @@ async function connectDB() {
   };
 
   const maskedUri = MONGODB_URI.replace(/:([^@]+)@/, (_, pwd) => `:${'*'.repeat(pwd.length)}@`);
-
-  console.log('\n================ MONGODB ATLAS DIAGNOSTIC ================');
-  console.log('[INFO] [ENV LOADED]:', Boolean(process.env.MONGODB_URI));
-  console.log('[INFO] [TARGET URI]:', maskedUri);
-  console.log('[INFO] [TIMESTAMP]:', new Date().toISOString());
-  console.log('==========================================================\n');
+  console.log('[INFO] Connecting to MongoDB:', maskedUri);
 
   try {
     await mongoose.connect(MONGODB_URI, options);
-    isConnected = true;
-    console.log('[SUCCESS] Connected to MongoDB Atlas successfully.');
-    await autoSeedIfEmpty();
   } catch (err) {
-    console.error('[ERROR] MONGODB CONNECT FAILED!');
-    console.error('  - Error Name:', err.name);
-    console.error('  - Error Code:', err.code || 'N/A');
-    console.error('  - Error Message:', err.message);
-    console.error('  - Full Stack Trace:\n', err.stack);
-    if (err.cause) {
-      console.error('  - Error Cause:\n', err.cause);
+    if (!usingPublicDns && isDnsError(err)) {
+      console.warn(`[WARN] MongoDB DNS lookup failed (${err.message}). Retrying with public DNS resolvers.`);
+      dns.setServers(PUBLIC_DNS_SERVERS);
+      usingPublicDns = true;
+      return connectDB();
     }
+    console.error('[ERROR] MongoDB connect failed:', err.name, '-', err.message);
+    console.warn(`[WARN] MongoDB unavailable — data endpoints will return empty results. Retrying in ${DB_RETRY_MS / 1000}s.`);
+    setTimeout(connectDB, DB_RETRY_MS);
+    return;
+  }
 
-    if (err.message.includes('querySrv') || err.message.includes('ECONNREFUSED') || err.message.includes('ENOTFOUND')) {
-      const fallbackUri = buildStandardFallbackUri(MONGODB_URI);
-      if (fallbackUri) {
-        try {
-          const maskedFallback = fallbackUri.replace(/:([^@]+)@/, (_, pwd) => `:${'*'.repeat(pwd.length)}@`);
-          console.log('[INFO] Trying Direct Atlas Seedlist Fallback URI:', maskedFallback);
-          await mongoose.connect(fallbackUri, options);
-          isConnected = true;
-          console.log('[SUCCESS] Connected to MongoDB Atlas via Direct Seedlist Fallback!');
-          await autoSeedIfEmpty();
-          return;
-        } catch (fallbackErr) {
-          console.error('[ERROR] FALLBACK CONNECT ALSO FAILED:');
-          console.error('  - Fallback Error Name:', fallbackErr.name);
-          console.error('  - Fallback Error Message:', fallbackErr.message);
-          console.error('  - Full Fallback Error:\n', fallbackErr);
-        }
-      }
-    }
-
-    console.warn('[WARN] Server running in API mode — MongoDB unavailable. All data endpoints will return empty.');
+  isConnected = true;
+  console.log('[SUCCESS] Connected to MongoDB Atlas successfully.');
+  try {
+    await autoSeedIfEmpty();
+  } catch (seedErr) {
+    console.error('[ERROR] Startup data maintenance failed:', seedErr.message);
   }
 }
+
+mongoose.connection.on('disconnected', () => { isConnected = false; });
+mongoose.connection.on('reconnected', () => { isConnected = true; });
 
 connectDB();
 
@@ -1487,16 +1508,6 @@ async function autoSeedIfEmpty() {
 // ─── API ROUTES ────────────────────────────────────────────────────────────────
  
 // AUTH ENDPOINTS
-const PRESET_USERS = {
-  'abhinav@soundabode.com': { name: 'Abhinav', role: 'admin', passEnv: 'ADMIN_PASSCODE', defaultPass: 'soundabode2026' },
-  'admin@soundabode.com': { name: 'Soundabode Admin', role: 'admin', passEnv: 'ADMIN_PASSCODE', defaultPass: 'soundabode2026' },
-  'services@soundabode.com': { name: 'Soundabode Services', role: 'admin', passEnv: 'ADMIN_PASSCODE', defaultPass: 'soundabode2026' },
-  'soundabode@soundabode.com': { name: 'Soundabode', role: 'admin', passEnv: 'ADMIN_PASSCODE', defaultPass: 'soundabode2026' },
-  'devangdhakate22@gmail.com': { name: 'Developer Admin', role: 'admin', passEnv: 'ADMIN_PASSCODE', defaultPass: 'soundabode2026' },
-  'ashu@soundabode.com': { name: 'Ashu', role: 'teacher', passEnv: 'ASHU_PASSCODE', defaultPass: 'ashu2026' },
-  'vaibhav@soundabode.com': { name: 'Vaibhav', role: 'teacher', passEnv: 'VAIBHAV_PASSCODE', defaultPass: 'vaibhav2026' },
-  'vrishan@soundabode.com': { name: 'Vrishan', role: 'teacher', passEnv: 'VRISHAN_PASSCODE', defaultPass: 'VRISHAN@2026' },
-};
 
 app.post('/api/auth/login', authLimiter, (req, res) => {
   const { email, passcode } = req.body || {};
@@ -1517,13 +1528,10 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
   }
 
   const userConfig = PRESET_USERS[emailKey];
-  const adminPass = (process.env.ADMIN_PASSCODE || 'soundabode2026').trim();
-  const expectedPass = (process.env[userConfig.passEnv] || userConfig.defaultPass || '').trim();
+  const adminPass = (process.env.ADMIN_PASSCODE || '').trim();
+  const expectedPass = (process.env[userConfig.passEnv] || '').trim();
 
-  const matches = (attempt, expected) => {
-    if (!expected) return false;
-    return attempt === expected || attempt.toLowerCase() === expected.toLowerCase();
-  };
+  const matches = (attempt, expected) => Boolean(expected) && safeEqual(attempt, expected);
 
   // Authentication: email must be recognized AND passcode must match
   // either the user's specific passcode or the admin master passcode
@@ -1791,7 +1799,7 @@ app.get('/api/inquiries', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/inquiries', async (req, res) => {
+app.post('/api/inquiries', publicFormLimiter, async (req, res) => {
   // Public endpoint — contact form submissions (no auth required)
   try {
     const inquiryData = req.body;
@@ -2294,7 +2302,7 @@ app.get('/api/admissions', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/admissions', async (req, res) => {
+app.post('/api/admissions', publicFormLimiter, async (req, res) => {
   // Public endpoint — admission form submissions
   try {
     const admissionData = req.body;
@@ -2878,7 +2886,7 @@ async function sendEmail({ to, subject, text, html, replyTo }) {
 const DEVELOPER_TARGET_EMAIL = process.env.DEVELOPER_TARGET_EMAIL || 'devangdhakate22@gmail.com';
 const DEVELOPER_SENDER_EMAIL = process.env.SMTP_FROM_EMAIL || 'services@soundabode.com';
 
-app.post('/api/issues', async (req, res) => {
+app.post('/api/issues', requireAuth, async (req, res) => {
   try {
     const { title, description, category, priority, systemInfo, reporterEmail, reporterName, reporterRole, id } = req.body || {};
     if (!title || !description) {
