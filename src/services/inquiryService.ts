@@ -28,6 +28,16 @@ export interface ContactInquiry {
   archiveNote?: string;
   statusUpdatedBy?: string;
   statusUpdatedAt?: string | null;
+  comments?: LeadComment[];
+}
+
+/** A call note on a lead, e.g. what the lead said when contacted. */
+export interface LeadComment {
+  id: string;
+  text: string;
+  authorEmail: string;
+  authorName: string;
+  createdAt: string;
 }
 
 export type LeadStatus = ContactInquiry['status'];
@@ -317,6 +327,44 @@ export class InquiryService {
     notes?: string
   ): Promise<{ ok: boolean; error?: string }> {
     return this.updateLead(id, { status, ...(notes !== undefined ? { notes } : {}) });
+  }
+
+  /** Save a lead from the server into the local cache after a note change. */
+  private static storeLead(saved: ContactInquiry): void {
+    const latest = this.getStoredInquiries().map((i) => (i.id === saved.id ? { ...i, ...saved } : i));
+    this.saveInquiries(latest);
+  }
+
+  /** Add a call note. Saved on the server first; the cache updates only on success. */
+  public static async addLeadComment(id: string, text: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/inquiries/${encodeURIComponent(id)}/comments`, {
+        method: 'POST',
+        headers: AuthService.getAuthHeaders(),
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: data.error || `Could not save the note (HTTP ${res.status}).` };
+      this.storeLead(data);
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Network error. The note was not saved.' };
+    }
+  }
+
+  public static async deleteLeadComment(id: string, commentId: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/inquiries/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}`, {
+        method: 'DELETE',
+        headers: AuthService.getAuthHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: data.error || `Could not remove the note (HTTP ${res.status}).` };
+      this.storeLead(data);
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Network error. The note was not removed.' };
+    }
   }
 
   /** Team members an admin can assign leads to. */

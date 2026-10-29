@@ -575,6 +575,21 @@ const inquirySchema = new mongoose.Schema({
   archiveNote: { type: String, default: '' },
   statusUpdatedBy: { type: String, default: '' },
   statusUpdatedAt: { type: Date, default: null },
+  // Call notes from whoever contacted the lead (newest last). Separate from `notes`,
+  // which Meta sync overwrites.
+  comments: {
+    type: [
+      {
+        _id: false,
+        id: { type: String, required: true },
+        text: { type: String, required: true },
+        authorEmail: { type: String, default: '' },
+        authorName: { type: String, default: '' },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    default: [],
+  },
 });
 
 const LEAD_STATUSES = ['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'];
@@ -1970,6 +1985,56 @@ app.patch('/api/inquiries/:id', requireAuth, async (req, res) => {
       return res.json(updated);
     }
     res.status(503).json({ error: 'Database unavailable. Changes were not saved.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── LEAD NOTES ───────────────────────────────────────────────────────────────
+// Admins can note any lead; everyone else only leads assigned to them.
+app.post('/api/inquiries/:id/comments', requireAuth, async (req, res) => {
+  try {
+    const user = req.sessionUser;
+    const text = String((req.body || {}).text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Write a note first.' });
+    if (text.length > 1000) return res.status(400).json({ error: 'Notes can be up to 1000 characters.' });
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: 'Database unavailable. The note was not saved.' });
+    }
+    const filter = user.role === 'admin' ? { id: req.params.id } : { id: req.params.id, assignedTo: user.email };
+    const comment = {
+      id: `note-${Date.now()}-${randomBytes(3).toString('hex')}`,
+      text,
+      authorEmail: user.email,
+      authorName: user.name,
+      createdAt: new Date(),
+    };
+    const updated = await InquiryModel.findOneAndUpdate(filter, { $push: { comments: comment } }, { new: true });
+    if (!updated) return res.status(404).json({ error: 'Lead not found or not assigned to you.' });
+    res.status(201).json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// A note can be removed by the person who wrote it, or by an admin.
+app.delete('/api/inquiries/:id/comments/:commentId', requireAuth, async (req, res) => {
+  try {
+    const user = req.sessionUser;
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: 'Database unavailable. The note was not removed.' });
+    }
+    const leadFilter = user.role === 'admin' ? { id: req.params.id } : { id: req.params.id, assignedTo: user.email };
+    const pull = user.role === 'admin'
+      ? { id: req.params.commentId }
+      : { id: req.params.commentId, authorEmail: user.email };
+    const updated = await InquiryModel.findOneAndUpdate(
+      { ...leadFilter, comments: { $elemMatch: pull } },
+      { $pull: { comments: pull } },
+      { new: true }
+    );
+    if (!updated) return res.status(404).json({ error: 'Note not found, or you can only remove your own notes.' });
+    res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

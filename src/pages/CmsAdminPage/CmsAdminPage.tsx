@@ -3,7 +3,7 @@ import styles from './CmsAdminPage.module.css';
 import admissionStyles from '../AdmissionPage/AdmissionPage.module.css';
 import SEO from '../../components/common/SEO';
 import { BlogService } from '../../services/blogService';
-import { InquiryService, ContactInquiry, ARCHIVE_REASONS, LeadStatus, LeadUpdate, TeamMember } from '../../services/inquiryService';
+import { InquiryService, ContactInquiry, ARCHIVE_REASONS, LeadStatus, LeadUpdate, TeamMember, LeadComment } from '../../services/inquiryService';
 import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord, canonicalizeStudentId, sortStudentsById, getStudentCourses, getStudentEntries, entryKeyForRecord, matchRecordCourse, StudentEntry } from '../../services/attendanceService';
 import { AdmissionService, AdmissionSubmission } from '../../services/admissionService';
 import { AuthService, CmsUser } from '../../services/authService';
@@ -256,6 +256,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const [leadArchiveReasonFilter, setLeadArchiveReasonFilter] = useState<string>('ALL');
   const [archivePrompt, setArchivePrompt] = useState<{ ids: string[]; reason: string; note: string } | null>(null);
   const [leadActionError, setLeadActionError] = useState<string | null>(null);
+  // Call notes panel
+  const [notesLeadId, setNotesLeadId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
   // Meta CAPI test state
   const [capiTestStatus, setCapiTestStatus] = useState<{ loading: boolean; result: string | null; isError: boolean }>({ loading: false, result: null, isError: false });
 
@@ -547,11 +552,18 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
+  // Each lead-details view starts with an empty note box
+  useEffect(() => {
+    setNoteDraft('');
+    setNoteError(null);
+  }, [expandedLeadMessage?.id]);
+
   // Escape closes the top-most open dialog (checked from the most nested outward)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (archivePrompt) return setArchivePrompt(null);
+      if (notesLeadId) return setNotesLeadId(null);
       if (isReportModalOpen) return setIsReportModalOpen(false);
       if (isIssueModalOpen) return setIsIssueModalOpen(false);
       if (isReminderModalOpen) return setIsReminderModalOpen(false);
@@ -566,7 +578,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
-    archivePrompt, isReportModalOpen, isIssueModalOpen, isReminderModalOpen, isFeeModalOpen, isAttendanceModalOpen,
+    archivePrompt, notesLeadId, isReportModalOpen, isIssueModalOpen, isReminderModalOpen, isFeeModalOpen, isAttendanceModalOpen,
     isGroupAttendanceModalOpen, isStudentModalOpen, selectedAdmissionForModal, expandedLeadMessage, isMobileMenuOpen,
   ]);
 
@@ -1946,6 +1958,86 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       {inq.archiveNote && <span className={styles.archiveNote} title={inq.archiveNote}>“{inq.archiveNote}”</span>}
     </div>
   );
+
+  const openLeadNotes = (id: string) => {
+    setNotesLeadId(id);
+    setNoteDraft('');
+    setNoteError(null);
+  };
+
+  const handleSaveNote = async (leadId: string) => {
+    const text = noteDraft.trim();
+    if (!text || noteSaving) return;
+    setNoteSaving(true);
+    setNoteError(null);
+    const result = await InquiryService.addLeadComment(leadId, text);
+    setNoteSaving(false);
+    if (!result.ok) return setNoteError(result.error || 'The note was not saved.');
+    setNoteDraft('');
+    refreshData();
+  };
+
+  const handleDeleteNote = async (leadId: string, note: LeadComment) => {
+    if (!window.confirm('Remove this note?')) return;
+    const result = await InquiryService.deleteLeadComment(leadId, note.id);
+    if (!result.ok) return setNoteError(result.error || 'The note was not removed.');
+    refreshData();
+  };
+
+  const formatNoteTime = (iso: string) => {
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? '' : d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  };
+
+  // Newest first. A note can be removed by its author or an admin.
+  const renderLeadNotes = (lead: ContactInquiry) => {
+    const notes = [...(lead.comments || [])].reverse();
+    const myEmail = (currentUser?.email || '').toLowerCase();
+    return (
+      <div className={styles.leadNotes}>
+        <form
+          className={styles.leadNoteForm}
+          onSubmit={(e) => { e.preventDefault(); handleSaveNote(lead.id); }}
+        >
+          <textarea
+            className={styles.formTextarea}
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value)}
+            maxLength={1000}
+            placeholder="What did the lead say? e.g. Interested in the weekend batch, will visit Saturday."
+            aria-label={`Note for ${lead.name}`}
+          />
+          {noteError && <div className={styles.leadNoteError} role="alert">{noteError}</div>}
+          <div className={styles.leadNoteFormRow}>
+            <span className={styles.leadNoteHint}>{noteDraft.length}/1000</span>
+            <button type="submit" className={styles.btnPrimary} disabled={!noteDraft.trim() || noteSaving}>
+              {noteSaving ? 'Saving…' : 'Save note'}
+            </button>
+          </div>
+        </form>
+
+        {notes.length === 0 ? (
+          <p className={styles.leadNoteEmpty}>No notes yet. Add what the lead said after each call.</p>
+        ) : (
+          <ul className={styles.leadNoteList}>
+            {notes.map((n) => (
+              <li key={n.id} className={styles.leadNoteItem}>
+                <p className={styles.leadNoteText}>{n.text}</p>
+                <div className={styles.leadNoteMeta}>
+                  <span>{n.authorName || n.authorEmail} · {formatNoteTime(n.createdAt)}</span>
+                  {(!isTeacher || (n.authorEmail || '').toLowerCase() === myEmail) && (
+                    <button type="button" className={styles.linkBtn} onClick={() => handleDeleteNote(lead.id, n)}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  };
 
   const filteredAdmissions = admissions.filter((adm) => {
     const matchesType = admissionTypeFilter === 'ALL' || adm.formType === admissionTypeFilter;
@@ -6514,7 +6606,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                         fontWeight: 700,
                                         padding: '2px 8px',
                                         borderRadius: '4px',
-                                        background: 'var(--bg-card)',
+                                        background: 'var(--bg-panel)',
                                         color: 'var(--text-primary)',
                                         border: '1px solid var(--border-medium)',
                                       }}
@@ -6542,7 +6634,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 </div>
 
                                 {r.comment && (
-                                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', background: 'var(--bg-card)', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', background: 'var(--bg-panel)', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
                                     <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Topic / Notes:</span> {r.comment}
                                   </div>
                                 )}
@@ -6622,7 +6714,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                         <span
                                           style={{
                                             fontSize: '0.675rem',
-                                            background: 'var(--bg-card)',
+                                            background: 'var(--bg-panel)',
                                             color: 'var(--text-secondary)',
                                             border: '1px solid var(--border-subtle)',
                                             padding: '1px 5px',
@@ -7130,7 +7222,26 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   {/* 3. Owner */}
                                   {renderAssignee(inq)}
 
-                                  {/* 4. Actions */}
+                                  {/* 4. Call notes: latest one shown on Contacted cards */}
+                                  {stage === 'CONTACTED' && (inq.comments?.length || 0) > 0 && (() => {
+                                    const last = inq.comments![inq.comments!.length - 1];
+                                    return (
+                                      <button type="button" className={styles.leadNotePreview} onClick={() => openLeadNotes(inq.id)} title="Open notes">
+                                        <span className={styles.leadNotePreviewText}>“{last.text}”</span>
+                                        <span className={styles.leadNotePreviewMeta}>{last.authorName || last.authorEmail} · {formatLeadAge(last.createdAt)}</span>
+                                      </button>
+                                    );
+                                  })()}
+                                  <button
+                                    type="button"
+                                    className={styles.leadNoteBtn}
+                                    data-emphasis={stage === 'CONTACTED' || undefined}
+                                    onClick={() => openLeadNotes(inq.id)}
+                                  >
+                                    {(inq.comments?.length || 0) > 0 ? `Notes (${inq.comments!.length})` : stage === 'CONTACTED' ? '+ Add what they said' : '+ Add note'}
+                                  </button>
+
+                                  {/* 5. Actions */}
                                   <div className={styles.pipelineActionRow}>
                                     {renderStageSelect(inq)}
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}>
@@ -8456,6 +8567,27 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       )}
 
       {/* FULL LEAD MESSAGE MODAL */}
+      {notesLeadId && (() => {
+        const lead = inquiries.find((i) => i.id === notesLeadId);
+        if (!lead) return null;
+        return (
+          <div className={styles.modalOverlay} onClick={() => setNotesLeadId(null)}>
+            <div className={`${styles.modalCard} ${styles.notesModal}`} role="dialog" aria-modal="true" aria-labelledby="lead-notes-title" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div>
+                  <h2 id="lead-notes-title" className={styles.modalTitle}>Notes · {lead.name}</h2>
+                  <div className={styles.leadNoteHint}>
+                    {lead.phone || lead.email} · {LEAD_STAGE_LABELS[lead.status]}{lead.courseInterest ? ` · ${lead.courseInterest}` : ''}
+                  </div>
+                </div>
+                <button onClick={() => setNotesLeadId(null)} className={styles.closeModalBtn} aria-label="Close notes">✕</button>
+              </div>
+              <div className={styles.modalBody}>{renderLeadNotes(lead)}</div>
+            </div>
+          </div>
+        );
+      })()}
+
       {archivePrompt && (
         <div className={styles.modalOverlay} onClick={() => setArchivePrompt(null)}>
           <div className={`${styles.modalCard} ${styles.archiveModal}`} role="dialog" aria-modal="true" aria-labelledby="archive-lead-title" onClick={(e) => e.stopPropagation()}>
@@ -8570,6 +8702,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       )}
                     </div>
                     {live.status === 'ARCHIVED' && renderArchiveReason(live)}
+                    <span className={styles.leadSectionLabel} style={{ marginTop: '0.85rem' }}>
+                      Call notes{(live.comments?.length || 0) > 0 ? ` (${live.comments!.length})` : ''}
+                    </span>
+                    {renderLeadNotes(live)}
                     {live.assignedTo && live.assignedAt && (
                       <span className={styles.leadSubmittedAt}>
                         Assigned to {live.assignedToName || live.assignedTo}
