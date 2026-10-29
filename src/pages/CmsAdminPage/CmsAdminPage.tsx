@@ -266,6 +266,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
   // Students tab states
   const [studentSearch, setStudentSearch] = useState('');
+  const [attendanceSearch, setAttendanceSearch] = useState('');
+  const [attendancePickerSearch, setAttendancePickerSearch] = useState('');
   const [studentCourseFilter, setStudentCourseFilter] = useState('ALL');
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
@@ -1133,6 +1135,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     const targetSlot = slot || selectedTimeSlot || '11:00 AM - 01:00 PM';
 
     setAttendanceFormDate(targetDate);
+    setAttendancePickerSearch('');
 
     const convert12to24 = (time12: string, default24: string) => {
       const match = time12.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
@@ -2230,6 +2233,18 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   );
   // Entries attendance can be marked against (the "earlier sessions" row is view/edit only)
   const markableEntries = useMemo(() => attendanceEntries.filter((e) => e.kind !== 'unmatched'), [attendanceEntries]);
+  // Search across name, email, phone, course and batch
+  const entryMatches = (e: StudentEntry, query: string) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return [e.student.name, e.student.email, e.student.phone, e.course, e.batch, ...getStudentCourses(e.student)]
+      .some((v) => (v || '').toLowerCase().includes(q));
+  };
+  const visibleAttendanceEntries = useMemo(
+    () => attendanceEntries.filter((e) => entryMatches(e, attendanceSearch)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [attendanceEntries, attendanceSearch]
+  );
   const entryLabel = (e: StudentEntry) => (e.kind === 'single' ? e.student.name : `${e.student.name} · ${e.course}`);
 
   // Group picker: one checkbox per course entry. An "earlier sessions" entry only appears
@@ -2978,6 +2993,20 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   const totalMarked = activeAttendanceRecords.length;
   const attendancePercentage = totalMarked > 0 ? Math.round(((totalPresent + totalPractice + totalGroup) / totalMarked) * 100) : 0;
 
+  // PDF export only (the CMS keeps its full view). Every session counts; group and practice
+  // sessions count as present, so Present + Absent = Total. The report never labels a
+  // session as "group": those rows read "Present".
+  const getAttendanceReportSummary = (records: AttendanceRecord[]) => {
+    const classes = records;
+    const absent = classes.filter((r) => r.status === 'ABSENT').length;
+    const total = classes.length;
+    const present = total - absent;
+    return { classes, total, present, absent, rate: total > 0 ? Math.round((present / total) * 100) : 0 };
+  };
+  const reportStatusLabel = (status: AttendanceRecord['status']) =>
+    status === 'PRACTICE_SESSION' || status === 'NA' ? 'PRACTICE' : status === 'GROUP_SESSION' ? 'PRESENT' : status;
+  const reportSummary = getAttendanceReportSummary(activeAttendanceRecords);
+
   const handleExportStudentAttendanceCSV = (student?: EnrolledStudent) => {
     const targetStudent = student || activeStudent;
     if (!targetStudent) return;
@@ -3043,20 +3072,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       return;
     }
 
-    const sortedRecords = [...activeAttendanceRecords].sort((a, b) => {
+    const summary = getAttendanceReportSummary(activeAttendanceRecords);
+    const sortedRecords = [...summary.classes].sort((a, b) => {
       const dateDiff = (b.date || '').localeCompare(a.date || '');
       if (dateDiff !== 0) return dateDiff;
       return (b.timeSlot || '').localeCompare(a.timeSlot || '');
     });
-
-    const totalMarkedCount = sortedRecords.length;
-    const presentCount = sortedRecords.filter((r) => r.status === 'PRESENT').length;
-    const absentCount = sortedRecords.filter((r) => r.status === 'ABSENT').length;
-    const groupCount = sortedRecords.filter((r) => r.status === 'GROUP_SESSION').length;
-    const practiceCount = sortedRecords.filter((r) => r.status === 'PRACTICE_SESSION' || r.status === 'NA').length;
-    const ratePercentage = totalMarkedCount > 0
-      ? Math.round(((presentCount + practiceCount + groupCount) / totalMarkedCount) * 100)
-      : 0;
 
     const sName = escapeHtml(targetStudent.name || 'Student');
     const sEmail = escapeHtml(targetStudent.email || 'N/A');
@@ -3076,19 +3097,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
     const rowsHtml = sortedRecords
       .map((r, idx) => {
-        const isPresent = r.status === 'PRESENT';
+        const isPresent = r.status === 'PRESENT' || r.status === 'GROUP_SESSION';
         const isAbsent = r.status === 'ABSENT';
-        const isGroup = r.status === 'GROUP_SESSION';
-        const isPractice = r.status === 'PRACTICE_SESSION' || r.status === 'NA';
 
-        const statusLabel = isPractice ? 'PRACTICE' : isGroup ? 'GROUP SESSION' : r.status;
-        const badgeClass = isPresent
-          ? 'badge-present'
-          : isAbsent
-            ? 'badge-absent'
-            : isGroup
-              ? 'badge-group'
-              : 'badge-practice';
+        const statusLabel = reportStatusLabel(r.status);
+        const badgeClass = isPresent ? 'badge-present' : isAbsent ? 'badge-absent' : 'badge-practice';
 
         return `
           <tr>
@@ -3338,7 +3351,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
             /* KPI Summary Grid */
             .kpi-grid {
               display: grid;
-              grid-template-columns: repeat(5, 1fr);
+              grid-template-columns: repeat(4, 1fr);
               gap: 8px;
               margin-bottom: 18px;
             }
@@ -3532,7 +3545,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               <img src="${window.location.origin}/favicon-192x192.png" style="width: 26px; height: 26px; border-radius: 4px;" alt="Logo" />
               <div>
                 <div class="toolbar-title">SoundAbode Academy • Official Attendance Report</div>
-                <div class="toolbar-subtitle">Trainee: ${sName} • ${totalMarkedCount} Recorded Sessions</div>
+                <div class="toolbar-subtitle">Trainee: ${sName} • ${summary.total} Classes</div>
               </div>
             </div>
             <div class="toolbar-actions">
@@ -3581,24 +3594,20 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
             <!-- STATS SUMMARY -->
             <div class="kpi-grid">
               <div class="kpi-card">
-                <div class="kpi-label">Total Sessions</div>
-                <div class="kpi-val">${totalMarkedCount}</div>
+                <div class="kpi-label">Total Classes</div>
+                <div class="kpi-val">${summary.total}</div>
               </div>
               <div class="kpi-card kpi-present">
                 <div class="kpi-label">Present</div>
-                <div class="kpi-val">${presentCount}</div>
+                <div class="kpi-val">${summary.present}</div>
               </div>
               <div class="kpi-card kpi-absent">
                 <div class="kpi-label">Absent</div>
-                <div class="kpi-val">${absentCount}</div>
-              </div>
-              <div class="kpi-card kpi-group">
-                <div class="kpi-label">Group / Practice</div>
-                <div class="kpi-val">${groupCount + practiceCount}</div>
+                <div class="kpi-val">${summary.absent}</div>
               </div>
               <div class="kpi-card kpi-rate">
                 <div class="kpi-label">Attendance Rate</div>
-                <div class="kpi-val">${ratePercentage}%</div>
+                <div class="kpi-val">${summary.rate}%</div>
               </div>
             </div>
 
@@ -6170,7 +6179,37 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </div>
                   </div>
 
+                  {/* ROSTER SEARCH */}
+                  <div className={styles.filterBar}>
+                    <input
+                      type="search"
+                      placeholder="Search by name, email, phone, course or batch..."
+                      value={attendanceSearch}
+                      onChange={(e) => setAttendanceSearch(e.target.value)}
+                      className={styles.searchInput}
+                      aria-label="Search attendance roster"
+                    />
+                    {attendanceSearch.trim() && (
+                      <span className={styles.leadNoteHint}>
+                        {visibleAttendanceEntries.length} of {attendanceEntries.length} shown
+                      </span>
+                    )}
+                  </div>
+
+                  {visibleAttendanceEntries.length === 0 && (
+                    <div className={styles.tableCard}>
+                      <div className={styles.emptyStateCard}>
+                        <div className={styles.emptyStateTitle}>No students match "{attendanceSearch.trim()}"</div>
+                        <div className={styles.emptyStateDesc}>Try a different name, phone number or course.</div>
+                        <button onClick={() => setAttendanceSearch('')} className={styles.btnSecondary} style={{ marginTop: '0.5rem' }}>
+                          Clear search
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* STUDENTS ROSTER DESKTOP TABLE */}
+                  {visibleAttendanceEntries.length > 0 && (
                   <div className={styles.desktopTableContainer}>
                     <div className={styles.tableCard}>
                       <table className={styles.dataTable}>
@@ -6184,7 +6223,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           </tr>
                         </thead>
                         <tbody>
-                          {attendanceEntries.map((entry) => {
+                          {visibleAttendanceEntries.map((entry) => {
                             const student = entry.student;
                             const avatar = getAvatarDetails(student.name, student.avatarUrl);
                             const studentRecords = AttendanceService.getAttendanceForStudent(entry.key, currentUser || undefined);
@@ -6268,9 +6307,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </div>
                   </div>
 
+                  )}
+
                   {/* STUDENTS ROSTER MOBILE CARD LIST */}
                   <div className={styles.mobileCardList}>
-                    {attendanceEntries.map((entry) => {
+                    {visibleAttendanceEntries.map((entry) => {
                       const student = entry.student;
                       const avatar = getAvatarDetails(student.name, student.avatarUrl);
                       const studentRecords = AttendanceService.getAttendanceForStudent(entry.key, currentUser || undefined);
@@ -8813,6 +8854,15 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                 {/* STUDENT SELECTION */}
                 <div className={styles.formGroup}>
                   <label className={styles.formLabel}>Select Enrolled Student</label>
+                  <input
+                    type="search"
+                    placeholder="Type to filter students..."
+                    value={attendancePickerSearch}
+                    onChange={(e) => setAttendancePickerSearch(e.target.value)}
+                    className={styles.searchInput}
+                    style={{ width: '100%', maxWidth: 'none', marginBottom: '0.4rem' }}
+                    aria-label="Filter student list"
+                  />
                   <select
                     value={selectedStudentId || ''}
                     onChange={(e) => {
@@ -8836,7 +8886,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     className={styles.selectInput}
                     style={{ width: '100%' }}
                   >
-                    {markableEntries.map((e) => (
+                    {markableEntries
+                      .filter((e) => e.key === selectedStudentId || entryMatches(e, attendancePickerSearch))
+                      .map((e) => (
                       <option key={e.key} value={e.key}>
                         {e.kind === 'course' ? entryLabel(e) : `${e.student.name} (${getStudentCourses(e.student).join(' & ') || e.student.course || 'General'})`}
                       </option>
@@ -9585,24 +9637,20 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               {/* STATS SUMMARY */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: '0.65rem', marginBottom: '1.25rem' }}>
                 <div style={{ background: '#f1f5f9', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)', fontWeight: 700 }}>TOTAL SESSIONS</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0f172a', marginTop: '2px' }}>{totalMarked}</div>
+                  <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)', fontWeight: 700 }}>TOTAL CLASSES</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0f172a', marginTop: '2px' }}>{reportSummary.total}</div>
                 </div>
                 <div style={{ background: '#ecfdf5', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #a7f3d0' }}>
                   <div style={{ fontSize: '0.66rem', color: 'var(--success-text)', fontWeight: 700 }}>PRESENT</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--success-text)', marginTop: '2px' }}>{totalPresent}</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--success-text)', marginTop: '2px' }}>{reportSummary.present}</div>
                 </div>
                 <div style={{ background: '#fef2f2', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #fecaca' }}>
                   <div style={{ fontSize: '0.66rem', color: 'var(--accent-text)', fontWeight: 700 }}>ABSENT</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--accent-text)', marginTop: '2px' }}>{totalAbsent}</div>
-                </div>
-                <div style={{ background: '#f0f9ff', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #bae6fd' }}>
-                  <div style={{ fontSize: '0.66rem', color: 'var(--text-primary)', fontWeight: 700 }}>GROUP / PRACTICE</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '2px' }}>{totalGroup + totalPractice}</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--accent-text)', marginTop: '2px' }}>{reportSummary.absent}</div>
                 </div>
                 <div style={{ background: '#fef3c7', padding: '0.65rem 0.75rem', borderRadius: '6px', textAlign: 'center', border: '1px solid #fde68a' }}>
                   <div style={{ fontSize: '0.66rem', color: 'var(--warning-text)', fontWeight: 700 }}>ATTENDANCE RATE</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--warning-text)', marginTop: '2px' }}>{attendancePercentage}%</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--warning-text)', marginTop: '2px' }}>{reportSummary.rate}%</div>
                 </div>
               </div>
 
@@ -9620,7 +9668,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     </tr>
                   </thead>
                   <tbody>
-                    {activeAttendanceRecords.map((r, idx) => (
+                    {reportSummary.classes.map((r, idx) => (
                       <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '0.45rem 0.6rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.72rem' }}>{idx + 1}</td>
                         <td style={{ padding: '0.45rem 0.6rem', fontWeight: 600, whiteSpace: 'nowrap' }}>{r.date}</td>
@@ -9633,31 +9681,25 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             fontSize: '0.72rem',
                             fontWeight: 700,
                             letterSpacing: '0.2px',
-                            background: r.status === 'PRESENT'
+                            background: reportStatusLabel(r.status) === 'PRESENT'
                               ? '#ecfdf5'
                               : r.status === 'ABSENT'
                                 ? '#fef2f2'
-                                : r.status === 'GROUP_SESSION'
-                                  ? '#f0f9ff'
-                                  : '#faf5ff',
-                            color: r.status === 'PRESENT'
+                                : '#faf5ff',
+                            color: reportStatusLabel(r.status) === 'PRESENT'
                               ? '#047857'
                               : r.status === 'ABSENT'
                                 ? '#b91c1c'
-                                : r.status === 'GROUP_SESSION'
-                                  ? '#0284c7'
-                                  : '#7e22ce',
+                                : '#7e22ce',
                             border: `1px solid ${
-                              r.status === 'PRESENT'
+                              reportStatusLabel(r.status) === 'PRESENT'
                                 ? '#a7f3d0'
                                 : r.status === 'ABSENT'
                                   ? '#fecaca'
-                                  : r.status === 'GROUP_SESSION'
-                                    ? '#bae6fd'
-                                    : '#e9d5ff'
+                                  : '#e9d5ff'
                             }`
                           }}>
-                            {r.status === 'PRACTICE_SESSION' || r.status === 'NA' ? 'PRACTICE' : r.status === 'GROUP_SESSION' ? 'GROUP SESSION' : r.status}
+                            {reportStatusLabel(r.status)}
                           </span>
                         </td>
                         {!isTeacher && (
@@ -9675,7 +9717,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
             <div className={styles.modalFooter} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.6rem' }}>
               <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                {totalMarked} session{totalMarked !== 1 ? 's' : ''} recorded for {activeStudent.name}
+                {reportSummary.total} class{reportSummary.total !== 1 ? 'es' : ''} for {activeStudent.name}
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <button
