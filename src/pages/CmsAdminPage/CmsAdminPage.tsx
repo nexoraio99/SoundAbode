@@ -4,7 +4,7 @@ import admissionStyles from '../AdmissionPage/AdmissionPage.module.css';
 import SEO from '../../components/common/SEO';
 import { BlogService } from '../../services/blogService';
 import { InquiryService, ContactInquiry, ARCHIVE_REASONS, LeadStatus, LeadUpdate, TeamMember, LeadComment } from '../../services/inquiryService';
-import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord, canonicalizeStudentId, sortStudentsById, getStudentCourses, getStudentEntries, entryKeyForRecord, matchRecordCourse, StudentEntry, CourseCompletion, UpgradeStatus } from '../../services/attendanceService';
+import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord, canonicalizeStudentId, sortStudentsById, getStudentCourses, getStudentBatches, parseList, getStudentEntries, entryKeyForRecord, matchRecordCourse, StudentEntry, CourseCompletion, UpgradeStatus } from '../../services/attendanceService';
 import { AdmissionService, AdmissionSubmission } from '../../services/admissionService';
 import { AuthService, CmsUser } from '../../services/authService';
 import { getApiBaseUrl } from '../../services/apiConfig';
@@ -333,6 +333,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     course: string;
     courses: string[];
     batch: string;
+    /** One batch per course, same order as `courses` */
+    batches: string[];
     enrolledDate: string;
   }>({
     name: '',
@@ -341,6 +343,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     course: 'Pro DJ Course',
     courses: ['Pro DJ Course'],
     batch: 'Regular Studio Batch',
+    batches: ['Regular Studio Batch'],
     enrolledDate: new Date().toISOString().split('T')[0],
   });
 
@@ -1504,21 +1507,71 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       course: 'Pro DJ Course',
       courses: ['Pro DJ Course'],
       batch: 'Regular Studio Batch (Mon/Wed/Fri)',
+      batches: ['Regular Studio Batch (Mon/Wed/Fri)'],
       enrolledDate: new Date().toISOString().split('T')[0],
     });
     setIsStudentModalOpen(true);
   };
 
-  const handleOpenEditStudentModal = (std: EnrolledStudent) => {
+  // Keeps one batch per course when the course list changes:
+  //  - a course still in the list keeps its batch;
+  //  - a course typed over another one (renamed in the text box) keeps that slot's batch;
+  //  - a newly added course starts with the batch of the course before it.
+  const alignStudentFormBatches = (nextCourses: string[], prevCourses: string[], prevBatches: string[]) => {
+    const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+    const fallback = prevBatches.find((b) => b.trim()) || '';
+    const result: string[] = [];
+    nextCourses.forEach((course, i) => {
+      const prevIdx = prevCourses.findIndex((c) => same(c, course));
+      const slotCourse = prevCourses[i];
+      const slotRenamed = slotCourse !== undefined && !nextCourses.some((c) => same(c, slotCourse));
+      if (prevIdx !== -1) result.push(prevBatches[prevIdx] ?? fallback);
+      else if (slotRenamed) result.push(prevBatches[i] ?? fallback);
+      else result.push(i > 0 ? result[i - 1] : fallback);
+    });
+    return result;
+  };
+
+  const setStudentFormCourses = (nextCourses: string[], courseText?: string) => {
+    setStudentFormData((prev) => {
+      const batches = alignStudentFormBatches(nextCourses, prev.courses, prev.batches);
+      return {
+        ...prev,
+        courses: nextCourses,
+        course: courseText ?? nextCourses.join(', '),
+        batches,
+        batch: batches.join(' | '),
+      };
+    });
+  };
+
+  const setStudentFormBatch = (index: number, value: string) => {
+    setStudentFormData((prev) => {
+      const batches = prev.courses.map((_, i) => (i === index ? value : prev.batches[i] ?? ''));
+      return { ...prev, batches, batch: batches.join(' | ') };
+    });
+  };
+
+  const handleOpenEditStudentModal = (studentId: string) => {
+    // A multi-course student's table row holds a copy with only that row's course. Editing
+    // that copy saved one course over all of them, so the form always loads the full record.
+    const std = students.find((s) => s.id === studentId);
+    if (!std) return;
     setEditingStudentId(std.id);
     const courses = getStudentCourses(std);
+    const storedBatches = getStudentBatches(std);
+    // Batches line up with courses only when the counts match; otherwise one shared batch
+    const batches = courses.map((_, i) =>
+      storedBatches.length === courses.length ? storedBatches[i] : storedBatches[0] ?? ''
+    );
     setStudentFormData({
       name: std.name,
       email: std.email,
       phone: std.phone,
-      course: courses.join(', ') || std.course,
-      courses: courses.length > 0 ? courses : [std.course || 'Pro DJ Course'],
-      batch: std.batch,
+      course: courses.join(', '),
+      courses,
+      batch: batches.join(' | '),
+      batches,
       enrolledDate: std.enrolledDate,
     });
     setIsStudentModalOpen(true);
@@ -1528,14 +1581,16 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     e.preventDefault();
     if (!studentFormData.name.trim()) return;
 
-    const finalCourses = studentFormData.courses && studentFormData.courses.length > 0
-      ? studentFormData.courses
-      : (studentFormData.course ? getStudentCourses(studentFormData) : ['Pro DJ Course']);
+    const finalCourses = studentFormData.courses.length > 0 ? studentFormData.courses : ['Pro DJ Course'];
+    const finalBatches = alignStudentFormBatches(finalCourses, studentFormData.courses, studentFormData.batches)
+      .map((b) => b.trim());
 
     const payload = {
       ...studentFormData,
       courses: finalCourses,
       course: finalCourses.join(', '),
+      batches: finalBatches,
+      batch: finalBatches.join(' | '),
     };
 
     if (editingStudentId) {
@@ -1550,13 +1605,17 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
   // Takes one course off a multi-course student. Their past sessions for it are kept and
   // then show under "Earlier sessions (course not recorded)".
-  const handleRemoveStudentCourse = (student: EnrolledStudent, course: string) => {
+  const handleRemoveStudentCourse = (studentId: string, course: string) => {
+    // Same as edit: the row's copy has only one course, so use the full record
+    const student = students.find((s) => s.id === studentId);
+    if (!student) return;
     const courses = getStudentCourses(student);
     const idx = courses.findIndex((c) => c.toLowerCase() === course.toLowerCase());
     if (idx === -1 || courses.length <= 1) return;
     if (!window.confirm(`Remove "${course}" from ${student.name}? Their other courses and all past attendance are kept.`)) return;
-    const batches = student.batches && student.batches.length === courses.length
-      ? student.batches.filter((_, i) => i !== idx)
+    const storedBatches = getStudentBatches(student);
+    const batches = storedBatches.length === courses.length
+      ? storedBatches.filter((_, i) => i !== idx)
       : undefined;
     AttendanceService.updateStudent(student.id, {
       courses: courses.filter((_, i) => i !== idx),
@@ -2291,6 +2350,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       })
     );
   }, [students, studentSearch, studentCourseFilter]);
+
+  // Position of a course in the student's course list (1-based), for "Course 2 of 2" labels
+  const courseNumberOf = (student: EnrolledStudent, course: string) =>
+    getStudentCourses(student).findIndex((c) => c.toLowerCase() === course.toLowerCase()) + 1;
 
   // Students tab rows: one per course for multi-course students. With a course filter
   // set, only the matching course rows are shown.
@@ -5067,7 +5130,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   <div style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>{entry.batch}</div>
                                   {entry.kind === 'course' && (
                                     <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                                      1 of {getStudentCourses(std).length} courses
+                                      Course {courseNumberOf(std, entry.course)} of {getStudentCourses(std).length}
                                     </div>
                                   )}
                                 </td>
@@ -5116,7 +5179,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                       </svg>
                                     </button>
                                     <button
-                                      onClick={() => handleOpenEditStudentModal(std)}
+                                      onClick={() => handleOpenEditStudentModal(std.id)}
                                       className={styles.iconAction}
                                       title="Edit student details"
                                       aria-label={`Edit ${std.name}`}
@@ -5128,7 +5191,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                     </button>
                                     {entry.kind === 'course' ? (
                                       <button
-                                        onClick={() => handleRemoveStudentCourse(std, entry.course)}
+                                        onClick={() => handleRemoveStudentCourse(std.id, entry.course)}
                                         className={`${styles.iconAction} ${styles.iconActionDanger}`}
                                         title="Remove this course from the student (keeps the student and their attendance)"
                                         aria-label={`Remove ${entry.course} from ${std.name}`}
@@ -5210,7 +5273,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 <span key={idx} className={styles.mobileCourseChip}>{courseName}</span>
                               ))}
                               {entry.kind === 'course' && (
-                                <span className={styles.mobileCardSubText}>1 of {getStudentCourses(std).length} courses</span>
+                                <span className={styles.mobileCardSubText}>Course {courseNumberOf(std, entry.course)} of {getStudentCourses(std).length}</span>
                               )}
                             </div>
                           )}
@@ -5251,7 +5314,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                               </button>
                             )}
                             <button
-                              onClick={() => handleOpenEditStudentModal(std)}
+                              onClick={() => handleOpenEditStudentModal(std.id)}
                               className={styles.btnSecondary}
                               style={{ height: '34px', fontSize: '0.775rem' }}
                             >
@@ -5259,7 +5322,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             </button>
                             {entry.kind === 'course' ? (
                               <button
-                                onClick={() => handleRemoveStudentCourse(std, entry.course)}
+                                onClick={() => handleRemoveStudentCourse(std.id, entry.course)}
                                 className={`${styles.btnSecondary} ${styles.btnDangerOutline}`}
                                 style={{ height: '34px', padding: '0 0.6rem' }}
                               >
@@ -10302,15 +10365,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           key={cName}
                           type="button"
                           onClick={() => {
-                            const current = studentFormData.courses || [];
+                            const current = studentFormData.courses;
                             const updated = isSelected
                               ? current.filter((c) => c.toLowerCase() !== cName.toLowerCase())
                               : [...current, cName];
-                            setStudentFormData({
-                              ...studentFormData,
-                              courses: updated,
-                              course: updated.join(', '),
-                            });
+                            setStudentFormCourses(updated);
                           }}
                           style={{
                             padding: '0.3rem 0.6rem',
@@ -10344,13 +10403,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     placeholder="Course name(s), separated by commas if multiple..."
                     value={studentFormData.course}
                     onChange={(e) => {
-                      const val = e.target.value;
-                      const split = val.split(',').map((s) => s.trim()).filter(Boolean);
-                      setStudentFormData({
-                        ...studentFormData,
-                        course: val,
-                        courses: split.length > 0 ? split : [val],
-                      });
+                      // Same splitting as everywhere else: a comma before a digit ("50,000") is not a separator
+                      setStudentFormCourses(parseList(undefined, e.target.value), e.target.value);
                     }}
                     className={styles.formInput}
                     style={{ fontSize: '0.8rem' }}
@@ -10368,17 +10422,44 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       className={styles.formInput}
                     />
                   </div>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Batch &amp; Schedule</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Regular Studio Batch (Mon/Wed/Fri)"
-                      value={studentFormData.batch}
-                      onChange={(e) => setStudentFormData({ ...studentFormData, batch: e.target.value })}
-                      className={styles.formInput}
-                    />
-                  </div>
+                  {studentFormData.courses.length <= 1 && (
+                    <div className={styles.formGroup}>
+                      <label className={styles.formLabel} htmlFor="student-batch-0">Batch &amp; Schedule</label>
+                      <input
+                        id="student-batch-0"
+                        type="text"
+                        placeholder="e.g. Regular Studio Batch (Mon/Wed/Fri)"
+                        value={studentFormData.batches[0] ?? ''}
+                        onChange={(e) => setStudentFormBatch(0, e.target.value)}
+                        className={styles.formInput}
+                      />
+                    </div>
+                  )}
                 </div>
+
+                {/* One batch per course, so editing one course's batch never changes the others */}
+                {studentFormData.courses.length > 1 && (
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel}>Batch &amp; Schedule per course</label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      {studentFormData.courses.map((courseName, i) => (
+                        <div key={`${courseName}-${i}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '0.5rem', alignItems: 'center' }}>
+                          <label htmlFor={`student-batch-${i}`} style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>
+                            {courseName}
+                          </label>
+                          <input
+                            id={`student-batch-${i}`}
+                            type="text"
+                            placeholder="Batch for this course"
+                            value={studentFormData.batches[i] ?? ''}
+                            onChange={(e) => setStudentFormBatch(i, e.target.value)}
+                            className={styles.formInput}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
               </div>
 
