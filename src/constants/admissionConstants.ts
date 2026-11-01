@@ -14,6 +14,32 @@ export const EMP_COURSES = [
   { id: 'emp-diploma', name: 'Diploma in Audio Engineering (All 3 Levels + Level 4 Mixing and Mastering)', tenure: '13 Months', fee: '2,40,000 INR' },
 ];
 
+// Recommended next course(s) after completing a catalog course, by course id. Follows the
+// level order above (Basic DJ → Professional DJ; EMP Level 1 → 2 → 3 → 4). A course with no
+// entry has no recommended upgrade; the admin can still pick any course.
+export const COURSE_UPGRADE_PATHS: Record<string, string[]> = {
+  'dj-basic': ['dj-pro'],
+  'emp-beginner': ['emp-intermediate'],
+  'emp-intermediate': ['emp-expert'],
+  'emp-expert': ['emp-diploma'],
+};
+
+export const CATALOG_COURSES = [...DJ_COURSES, ...EMP_COURSES];
+
+const normCourseName = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * Recommended upgrade course names for a completed course. Only an exact catalog name
+ * (ignoring case and spacing) is recognised; free-text legacy names get no suggestion.
+ */
+export function getRecommendedUpgrades(completedCourse: string): string[] {
+  const source = CATALOG_COURSES.find((c) => normCourseName(c.name) === normCourseName(completedCourse));
+  if (!source) return [];
+  return (COURSE_UPGRADE_PATHS[source.id] || [])
+    .map((id) => CATALOG_COURSES.find((c) => c.id === id)?.name)
+    .filter((name): name is string => Boolean(name));
+}
+
 export const DJ_DISCLAIMER = [
   'A student has to complete Basic DJ Training Course (Level 01) first in order to join Professional DJ Training Course.',
   'Our main aim is to help our students understand the art of mixing music. We have all essential tools in our studio workspace to help ease the process. We do not provide permission to carry or use any studio equipment out the studio.',

@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import styles from './CmsAdminPage.module.css';
 import admissionStyles from '../AdmissionPage/AdmissionPage.module.css';
 import SEO from '../../components/common/SEO';
 import { BlogService } from '../../services/blogService';
 import { InquiryService, ContactInquiry, ARCHIVE_REASONS, LeadStatus, LeadUpdate, TeamMember, LeadComment } from '../../services/inquiryService';
-import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord, canonicalizeStudentId, sortStudentsById, getStudentCourses, getStudentEntries, entryKeyForRecord, matchRecordCourse, StudentEntry } from '../../services/attendanceService';
+import { AttendanceService, EnrolledStudent, AttendanceStatus, AttendanceRecord, canonicalizeStudentId, sortStudentsById, getStudentCourses, getStudentEntries, entryKeyForRecord, matchRecordCourse, StudentEntry, CourseCompletion, UpgradeStatus } from '../../services/attendanceService';
 import { AdmissionService, AdmissionSubmission } from '../../services/admissionService';
 import { AuthService, CmsUser } from '../../services/authService';
 import { getApiBaseUrl } from '../../services/apiConfig';
 import { BlogPost } from '../../types/blog';
-import { DJ_COURSES, EMP_COURSES, DJ_DISCLAIMER, EMP_DISCLAIMER } from '../../constants/admissionConstants';
+import { DJ_COURSES, EMP_COURSES, DJ_DISCLAIMER, EMP_DISCLAIMER, getRecommendedUpgrades } from '../../constants/admissionConstants';
 import { escapeHtml, safeImageUrl, safeWhatsAppUrl, sanitizePrintHtml } from '../../utils/security';
 import { IssueService, DeveloperIssue, DEVELOPER_EMAIL, SENDER_EMAIL } from '../../services/issueService';
 import { ReminderService } from '../../services/reminderService';
@@ -38,9 +38,64 @@ function formatLeadAge(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-type TabType = 'overview' | 'students' | 'classes' | 'blog' | 'inquiries' | 'meta-ads' | 'admissions' | 'attendance' | 'fees' | 'settings';
+type TabType = 'overview' | 'students' | 'upgrades' | 'classes' | 'blog' | 'inquiries' | 'meta-ads' | 'admissions' | 'attendance' | 'fees' | 'settings';
+
+// Form type, tenure and fee of an exact catalog course name (case and spacing ignored)
+const findCatalogCourse = (name: string): { formType: 'DJ' | 'EMP'; tenure: string; fee: string } | null => {
+  const norm = (v: string) => v.trim().replace(/\s+/g, ' ').toLowerCase();
+  const dj = DJ_COURSES.find((c) => norm(c.name) === norm(name));
+  if (dj) return { formType: 'DJ', tenure: dj.tenure, fee: dj.fee };
+  const emp = EMP_COURSES.find((c) => norm(c.name) === norm(name));
+  if (emp) return { formType: 'EMP', tenure: emp.tenure, fee: emp.fee };
+  return null;
+};
+
+const UPGRADE_CLOSE_REASONS = ['Not interested', 'Fees / budget', 'Timing / relocation', 'Joined another academy', 'No suitable next course', 'Other'];
+
+const UPGRADE_STATUS_LABELS: Record<UpgradeStatus, string> = {
+  PENDING: 'Awaiting upgrade',
+  UPGRADED: 'Upgraded',
+  NOT_UPGRADING: 'Not upgrading',
+};
+
+const ymdToUtc = (ymd: string): Date => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+};
+const utcToYmd = (date: Date): string => date.toISOString().slice(0, 10);
+const shiftYmd = (ymd: string, days: number): string => {
+  const date = ymdToUtc(ymd);
+  date.setUTCDate(date.getUTCDate() + days);
+  return utcToYmd(date);
+};
+const formatYmdLong = (ymd: string): string =>
+  ymdToUtc(ymd).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+// Whole days from one YYYY-MM-DD date to another (calendar dates, no timezone drift)
+const daysBetween = (from: string, to: string): number => {
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000);
+};
 
 const THEME_STORAGE_KEY = 'soundabode_cms_theme';
+
+// Downloads CSV lines (cells already quoted) as a file. A Blob is used rather than a data: URL,
+// where an unencoded "#" in any cell cut the file short. A cell starting with = + - @ is
+// prefixed with ' so spreadsheet apps show it as text instead of running it as a formula.
+const downloadCsv = (filename: string, headers: string[], rows: string[]) => {
+  const neutralised = rows.map((line) => line.replace(/(^|,)"([=+\-@\t\r])/g, `$1"'$2`));
+  const blob = new Blob(['\uFEFF' + [headers.join(','), ...neutralised].join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  // Released after a moment: some browsers (Safari) cancel the download if revoked immediately
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
 
 const safeMailto = (email: string, subject = '', body = ''): string => {
   const cleanEmail = (email || '').trim().replace(/[^a-zA-Z0-9@._+-]/g, '');
@@ -298,6 +353,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
   // ATTENDANCE FEATURE STATES (Flowchart Integration)
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+
+  // COURSE COMPLETION & UPGRADE STATES (admin only)
+  const [completeCourseTarget, setCompleteCourseTarget] = useState<{ student: EnrolledStudent; course: string } | null>(null);
+  const [completeCourseForm, setCompleteCourseForm] = useState({ completedOn: '', note: '' });
+  const [upgradeTarget, setUpgradeTarget] = useState<{ student: EnrolledStudent; completion: CourseCompletion } | null>(null);
+  const [upgradeForm, setUpgradeForm] = useState<{ targetCourse: string; customCourse: string; batch: string; formType: 'DJ' | 'EMP'; tenure: string; fee: string }>({
+    targetCourse: '', customCourse: '', batch: '', formType: 'DJ', tenure: '', fee: '',
+  });
+  const [closeUpgradeTarget, setCloseUpgradeTarget] = useState<{ student: EnrolledStudent; completion: CourseCompletion } | null>(null);
+  const [closeUpgradeForm, setCloseUpgradeForm] = useState({ reason: UPGRADE_CLOSE_REASONS[0], details: '' });
+  const [upgradeStatusFilter, setUpgradeStatusFilter] = useState<UpgradeStatus>('PENDING');
+  const [completionError, setCompletionError] = useState('');
+  const [isCompletionBusy, setIsCompletionBusy] = useState(false);
+  const [upgradesToast, setUpgradesToast] = useState('');
+  const upgradesToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [calendarDate, setCalendarDate] = useState<Date>(() => new Date());
   const [selectedDateStr, setSelectedDateStr] = useState<string>(() => getTodayDateStr());
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string>('11:00 AM - 01:00 PM');
@@ -386,8 +456,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   // CLASSES SECTION (ADMIN ONLY) STATES & FILTERS
   const [classesTeacherFilter, setClassesTeacherFilter] = useState<'ALL' | 'ashu' | 'vaibhav' | 'vrishan' | 'abhinav' | 'admin'>('ALL');
   const [classesStatusFilter, setClassesStatusFilter] = useState<string>('ALL');
-  const [classesDatePreset, setClassesDatePreset] = useState<'ALL' | 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'THIS_MONTH' | 'CUSTOM'>('ALL');
+  // Classes open on the current month; "today" is re-checked so an open page rolls over at midnight
+  const [classesDatePreset, setClassesDatePreset] = useState<'ALL' | 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'THIS_MONTH' | 'CUSTOM'>('THIS_MONTH');
+  const [classesToday, setClassesToday] = useState<string>(getTodayDateStr);
+  // Custom range: either end may be left empty for an open-ended range
   const [classesCustomDate, setClassesCustomDate] = useState<string>('');
+  const [classesCustomEndDate, setClassesCustomEndDate] = useState<string>('');
   const [classesCourseFilter, setClassesCourseFilter] = useState<string>('ALL');
   const [classesSearch, setClassesSearch] = useState<string>('');
   const [selectedRecordForInspection, setSelectedRecordForInspection] = useState<ClassLogEntry | AttendanceRecord | null>(null);
@@ -564,6 +638,9 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (completeCourseTarget) return setCompleteCourseTarget(null);
+      if (upgradeTarget) return setUpgradeTarget(null);
+      if (closeUpgradeTarget) return setCloseUpgradeTarget(null);
       if (archivePrompt) return setArchivePrompt(null);
       if (notesLeadId) return setNotesLeadId(null);
       if (isReportModalOpen) return setIsReportModalOpen(false);
@@ -582,6 +659,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   }, [
     archivePrompt, notesLeadId, isReportModalOpen, isIssueModalOpen, isReminderModalOpen, isFeeModalOpen, isAttendanceModalOpen,
     isGroupAttendanceModalOpen, isStudentModalOpen, selectedAdmissionForModal, expandedLeadMessage, isMobileMenuOpen,
+    completeCourseTarget, upgradeTarget, closeUpgradeTarget,
   ]);
 
   const navigateToPublic = (path: string) => {
@@ -1495,6 +1573,140 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     }
   };
 
+  // COURSE COMPLETION & UPGRADE HANDLERS
+  // Row entries carry a single-course copy of the student, so always act on the full record.
+  const findFullStudent = (id: string) => students.find((s) => s.id === id);
+
+  const showUpgradesToast = (message: string) => {
+    if (upgradesToastTimer.current) clearTimeout(upgradesToastTimer.current);
+    setUpgradesToast(message);
+    upgradesToastTimer.current = setTimeout(() => setUpgradesToast(''), 4000);
+  };
+
+  const openCompleteCourse = (studentId: string, course: string) => {
+    const student = findFullStudent(studentId);
+    if (!student || !course) return;
+    setCompletionError('');
+    setCompleteCourseForm({ completedOn: getTodayDateStr(), note: '' });
+    setCompleteCourseTarget({ student, course });
+  };
+
+  const handleSubmitCompleteCourse = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!completeCourseTarget || isCompletionBusy) return;
+    const { student, course } = completeCourseTarget;
+    setIsCompletionBusy(true);
+    const result = await AttendanceService.completeCourse(student.id, course, completeCourseForm.completedOn, completeCourseForm.note.trim());
+    setIsCompletionBusy(false);
+    if (!result.ok) return setCompletionError(result.error);
+    setCompleteCourseTarget(null);
+    showUpgradesToast(`"${course}" marked completed for ${student.name}. It is now listed under Upgrades.`);
+  };
+
+  // Catalog courses the student could move to: not the completed course, not one they already take
+  const getUpgradeOptions = (student: EnrolledStudent, completion: CourseCompletion) => {
+    const active = getStudentCourses(student).map((c) => c.toLowerCase());
+    const isAvailable = (name: string) => name.toLowerCase() !== completion.course.toLowerCase() && !active.includes(name.toLowerCase());
+    const recommended = getRecommendedUpgrades(completion.course).filter(isAvailable);
+    const others = [...DJ_COURSES, ...EMP_COURSES].map((c) => c.name).filter((name) => isAvailable(name) && !recommended.includes(name));
+    return { recommended, others };
+  };
+
+  const openUpgrade = (studentId: string, completion: CourseCompletion) => {
+    const student = findFullStudent(studentId);
+    if (!student) return;
+    const { recommended } = getUpgradeOptions(student, completion);
+    const target = recommended[0] || '';
+    // Form details follow the chosen catalog course; otherwise default to the completed course's type
+    const catalog = findCatalogCourse(target) || findCatalogCourse(completion.course);
+    setCompletionError('');
+    setUpgradeForm({
+      targetCourse: target,
+      customCourse: '',
+      batch: completion.batch,
+      formType: catalog?.formType || 'DJ',
+      tenure: target && catalog ? catalog.tenure : '',
+      fee: target && catalog ? catalog.fee : '',
+    });
+    setUpgradeTarget({ student, completion });
+  };
+
+  // Picking a catalog course fills in its form type, tenure and fee; "another course" clears tenure/fee
+  const handleUpgradeCourseChange = (value: string) => {
+    const catalog = value === '__other__' ? null : findCatalogCourse(value);
+    setUpgradeForm((prev) => ({
+      ...prev,
+      targetCourse: value,
+      formType: catalog?.formType || prev.formType,
+      tenure: catalog?.tenure || '',
+      fee: catalog?.fee || '',
+    }));
+  };
+
+  const handleSubmitUpgrade = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!upgradeTarget || isCompletionBusy) return;
+    const { student, completion } = upgradeTarget;
+    const targetCourse = (upgradeForm.targetCourse === '__other__' ? upgradeForm.customCourse : upgradeForm.targetCourse).trim();
+    if (!targetCourse) return setCompletionError('Choose the course to upgrade to.');
+    if (!upgradeForm.batch.trim()) return setCompletionError('Enter a batch for the new course.');
+    setIsCompletionBusy(true);
+    const result = await AttendanceService.decideCompletion(student.id, completion.id, {
+      action: 'UPGRADE',
+      targetCourse,
+      batch: upgradeForm.batch.trim(),
+      formType: upgradeForm.formType,
+      tenure: upgradeForm.tenure.trim(),
+      fee: upgradeForm.fee.trim(),
+    });
+    setIsCompletionBusy(false);
+    if (!result.ok) return setCompletionError(result.error);
+    setUpgradeTarget(null);
+    const formNo = result.student.courseCompletions?.find((c) => c.id === completion.id)?.admissionFormNo;
+    showUpgradesToast(`${student.name} upgraded to "${targetCourse}"${formNo ? `. Submission ${formNo} created.` : '.'}`);
+    refreshData();
+  };
+
+  const openCloseUpgrade = (studentId: string, completion: CourseCompletion) => {
+    const student = findFullStudent(studentId);
+    if (!student) return;
+    setCompletionError('');
+    setCloseUpgradeForm({ reason: UPGRADE_CLOSE_REASONS[0], details: '' });
+    setCloseUpgradeTarget({ student, completion });
+  };
+
+  const handleSubmitCloseUpgrade = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!closeUpgradeTarget || isCompletionBusy) return;
+    const details = closeUpgradeForm.details.trim();
+    if (closeUpgradeForm.reason === 'Other' && !details) return setCompletionError('Describe the reason.');
+    const reason = details ? `${closeUpgradeForm.reason}: ${details}` : closeUpgradeForm.reason;
+    const { student, completion } = closeUpgradeTarget;
+    setIsCompletionBusy(true);
+    const result = await AttendanceService.decideCompletion(student.id, completion.id, { action: 'CLOSE', reason });
+    setIsCompletionBusy(false);
+    if (!result.ok) return setCompletionError(result.error);
+    setCloseUpgradeTarget(null);
+    showUpgradesToast(`${student.name} marked as not upgrading.`);
+  };
+
+  const handleReopenUpgrade = async (studentId: string, completion: CourseCompletion) => {
+    if (isCompletionBusy) return;
+    setIsCompletionBusy(true);
+    const result = await AttendanceService.decideCompletion(studentId, completion.id, { action: 'REOPEN' });
+    setIsCompletionBusy(false);
+    showUpgradesToast(result.ok ? `"${completion.course}" is back in the pending list.` : result.error);
+  };
+
+  const handleUndoCompletion = async (student: EnrolledStudent, completion: CourseCompletion) => {
+    if (isCompletionBusy) return;
+    if (!window.confirm(`Undo the completion of "${completion.course}" for ${student.name}? The course goes back to their active courses.`)) return;
+    setIsCompletionBusy(true);
+    const result = await AttendanceService.undoCompletion(student.id, completion.id);
+    setIsCompletionBusy(false);
+    showUpgradesToast(result.ok ? `Completion undone. "${completion.course}" is active again for ${student.name}.` : result.error);
+  };
+
   // FEES HANDLERS
   const getNextReceiptNo = (existingFees: FeeReceipt[]): string => {
     if (existingFees.length === 0) return '001';
@@ -1792,7 +2004,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         const result = await res.json();
         await AttendanceService.fetchAndSyncFromRemote();
         refreshData();
-        setSettingsSuccessMsg(`Restored ${result.restoredAttendance || 0} attendance records and ${result.restoredStudents || 0} students from ${filename}!`);
+        const failedNote = result.failed ? ` ${result.failed} record(s) could not be restored; see the server log.` : '';
+        setSettingsSuccessMsg(`Restored ${result.restoredAttendance || 0} attendance records and ${result.restoredStudents || 0} students from ${filename}.${failedNote}`);
         setTimeout(() => setSettingsSuccessMsg(''), 5000);
       } else {
         alert('Failed to restore server backup.');
@@ -2087,6 +2300,24 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       .flatMap((s) => getStudentEntries(s))
       .filter((e) => e.kind !== 'course' || studentCourseFilter === 'ALL' || e.course.toLowerCase().includes(filter));
   }, [filteredStudents, studentCourseFilter]);
+
+  // Every course completion across students. Pending ones are listed oldest first (waiting
+  // longest at the top); decided ones newest decision first.
+  const courseCompletionRows = useMemo(() => {
+    return students.flatMap((student) => (student.courseCompletions || []).map((completion) => ({ student, completion })));
+  }, [students]);
+
+  const pendingUpgradeCount = useMemo(
+    () => courseCompletionRows.filter((r) => r.completion.upgradeStatus === 'PENDING').length,
+    [courseCompletionRows]
+  );
+
+  const visibleUpgradeRows = useMemo(() => {
+    const rows = courseCompletionRows.filter((r) => r.completion.upgradeStatus === upgradeStatusFilter);
+    return upgradeStatusFilter === 'PENDING'
+      ? rows.sort((a, b) => a.completion.completedOn.localeCompare(b.completion.completedOn))
+      : rows.sort((a, b) => String(b.completion.decidedAt || '').localeCompare(String(a.completion.decidedAt || '')));
+  }, [courseCompletionRows, upgradeStatusFilter]);
 
   const newInquiryCount = inquiries.filter((i) => i.status === 'NEW').length;
   const metaLeadsCount = useMemo(() => {
@@ -2396,50 +2627,77 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
   };
 
   // ─── CLASSES SECTION COMPUTATIONS & HANDLERS (ADMIN ONLY) ───────────────────
-  const isDateInPreset = (dateStr: string, preset: typeof classesDatePreset, customDate: string) => {
-    if (preset === 'ALL') return true;
-    if (preset === 'CUSTOM') return !customDate || dateStr === customDate;
+  // Re-check the date every minute so "Today" / "This Month" follow the calendar on an open page
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const next = getTodayDateStr();
+      setClassesToday((prev) => (prev === next ? prev : next));
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
 
-    const now = new Date();
-    const todayStr = formatLocalDateStr(now.getFullYear(), now.getMonth(), now.getDate());
+  // The selected period as an inclusive YYYY-MM-DD range ('' = open end) plus a label for headings.
+  // Everything on the Classes tab (list, counts, cards, export, print) filters by this one range.
+  const classesPeriod = useMemo(() => {
+    const today = classesToday;
+    const monthStart = `${today.slice(0, 7)}-01`;
+    const monthEnd = shiftYmd(utcToYmd(new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 1))), -1);
+    const weekday = ymdToUtc(today).getUTCDay(); // 0 = Sunday
+    const weekStart = shiftYmd(today, weekday === 0 ? -6 : 1 - weekday); // weeks start on Monday
 
-    if (preset === 'TODAY') {
-      return dateStr === todayStr;
+    switch (classesDatePreset) {
+      case 'TODAY':
+        return { from: today, to: today, label: `Today, ${formatYmdLong(today)}` };
+      case 'YESTERDAY': {
+        const y = shiftYmd(today, -1);
+        return { from: y, to: y, label: `Yesterday, ${formatYmdLong(y)}` };
+      }
+      case 'THIS_WEEK':
+        return { from: weekStart, to: today, label: `This week (${formatYmdLong(weekStart)} – ${formatYmdLong(today)})` };
+      case 'THIS_MONTH':
+        return {
+          from: monthStart,
+          to: monthEnd,
+          label: ymdToUtc(today).toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
+        };
+      case 'CUSTOM': {
+        // A reversed range is swapped
+        const [from, to] = classesCustomDate && classesCustomEndDate && classesCustomDate > classesCustomEndDate
+          ? [classesCustomEndDate, classesCustomDate]
+          : [classesCustomDate, classesCustomEndDate];
+        const label = from && to
+          ? (from === to ? formatYmdLong(from) : `${formatYmdLong(from)} – ${formatYmdLong(to)}`)
+          : from ? `From ${formatYmdLong(from)}` : to ? `Up to ${formatYmdLong(to)}` : 'All dates';
+        return { from, to, label };
+      }
+      default:
+        return { from: '', to: '', label: 'All dates' };
     }
+  }, [classesDatePreset, classesCustomDate, classesCustomEndDate, classesToday]);
 
-    if (preset === 'YESTERDAY') {
-      const yDate = new Date(now);
-      yDate.setDate(yDate.getDate() - 1);
-      const yesterdayStr = formatLocalDateStr(yDate.getFullYear(), yDate.getMonth(), yDate.getDate());
-      return dateStr === yesterdayStr;
-    }
+  // Dates are YYYY-MM-DD, so string comparison is date order
+  const isInClassesPeriod = (dateStr: string) =>
+    (!classesPeriod.from || dateStr >= classesPeriod.from) && (!classesPeriod.to || dateStr <= classesPeriod.to);
 
-    if (preset === 'THIS_WEEK') {
-      const startOfWeek = new Date(now);
-      const day = startOfWeek.getDay();
-      const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
-      startOfWeek.setDate(diff);
-      const startOfWeekStr = formatLocalDateStr(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate());
-      return dateStr >= startOfWeekStr && dateStr <= todayStr;
-    }
+  // True when the period actually limits records ("All dates" or an empty custom range does not)
+  const isClassesDateFilterActive = Boolean(classesPeriod.from || classesPeriod.to);
 
-    if (preset === 'THIS_MONTH') {
-      const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      return dateStr.startsWith(currentYearMonth);
-    }
+  // Filters other than the period (teacher, status, course, search)
+  const hasClassesNonDateFilter =
+    classesTeacherFilter !== 'ALL' || classesStatusFilter !== 'ALL' || classesCourseFilter !== 'ALL' || Boolean(classesSearch.trim());
 
-    return true;
+  // Anything changed from the default view (current month, no other filters)
+  const hasActiveClassesFilter = hasClassesNonDateFilter || classesDatePreset !== 'THIS_MONTH';
+
+  const resetClassesFilters = () => {
+    setClassesTeacherFilter('ALL');
+    setClassesStatusFilter('ALL');
+    setClassesDatePreset('THIS_MONTH');
+    setClassesCustomDate('');
+    setClassesCustomEndDate('');
+    setClassesCourseFilter('ALL');
+    setClassesSearch('');
   };
-
-  const hasActiveClassesFilter = useMemo(() => {
-    return (
-      classesTeacherFilter !== 'ALL' ||
-      classesStatusFilter !== 'ALL' ||
-      classesDatePreset !== 'ALL' ||
-      classesCourseFilter !== 'ALL' ||
-      Boolean(classesSearch.trim())
-    );
-  }, [classesTeacherFilter, classesStatusFilter, classesDatePreset, classesCourseFilter, classesSearch]);
 
   // Records filtered by Date, Status, Course, and Search (cross-teacher context)
   const contextFilteredRecords = useMemo(() => {
@@ -2447,7 +2705,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       if (classesStatusFilter !== 'ALL' && r.status !== classesStatusFilter) {
         return false;
       }
-      if (!isDateInPreset(r.date, classesDatePreset, classesCustomDate)) {
+      if (!isInClassesPeriod(r.date)) {
         return false;
       }
       if (classesCourseFilter !== 'ALL') {
@@ -2457,10 +2715,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       if (classesSearch.trim()) {
         const q = classesSearch.toLowerCase().trim();
         const st = getOrFallbackStudent(r.studentId, r);
+        // Same fields as the class list search below, so card counts match the list
         const matchesStudent =
           st.name.toLowerCase().includes(q) ||
           (st.email || '').toLowerCase().includes(q) ||
-          (st.phone || '').toLowerCase().includes(q);
+          (st.phone || '').toLowerCase().includes(q) ||
+          (st.course || '').toLowerCase().includes(q);
         const matchesTeacher =
           (r.markedByName || '').toLowerCase().includes(q) ||
           (r.markedBy || '').toLowerCase().includes(q);
@@ -2473,7 +2733,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       }
       return true;
     });
-  }, [allAttendanceRecords, classesStatusFilter, classesDatePreset, classesCustomDate, classesCourseFilter, classesSearch, students]);
+  }, [allAttendanceRecords, classesStatusFilter, classesPeriod, classesCourseFilter, classesSearch, students]);
 
   const teacherAshuRecords = useMemo(() => {
     return allAttendanceRecords.filter((r) => {
@@ -2626,40 +2886,29 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     });
   }, [allAttendanceRecords, students]);
 
-  const filteredClassesRecords = useMemo(() => {
-    return allClassesLogEntries.filter((entry) => {
-      // 1. Teacher Filter (Only relevant when admin is viewing; teachers are strictly scoped to their own classes)
-      if (!isTeacher) {
-        if (classesTeacherFilter === 'ashu') {
-          const by = (entry.markedBy || '').toLowerCase();
-          const name = (entry.markedByName || '').toLowerCase();
-          if (!by.includes('ashu') && !name.includes('ashu')) return false;
-        } else if (classesTeacherFilter === 'vaibhav') {
-          const by = (entry.markedBy || '').toLowerCase();
-          const name = (entry.markedByName || '').toLowerCase();
-          if (!by.includes('vaibhav') && !name.includes('vaibhav')) return false;
-        } else if (classesTeacherFilter === 'vrishan') {
-          const by = (entry.markedBy || '').toLowerCase();
-          const name = (entry.markedByName || '').toLowerCase();
-          if (!by.includes('vrishan') && !name.includes('vrishan')) return false;
-        } else if (classesTeacherFilter === 'abhinav' || classesTeacherFilter === 'admin') {
-          const by = (entry.markedBy || '').toLowerCase();
-          const name = (entry.markedByName || '').toLowerCase();
-          if (by.includes('ashu') || name.includes('ashu') || by.includes('vaibhav') || name.includes('vaibhav') || by.includes('vrishan') || name.includes('vrishan')) return false;
-        }
-      }
+  const classEntryMatchesTeacher = (entry: ClassLogEntry, teacher: typeof classesTeacherFilter) => {
+    if (teacher === 'ALL') return true;
+    const by = (entry.markedBy || '').toLowerCase();
+    const name = (entry.markedByName || '').toLowerCase();
+    const isBy = (key: string) => by.includes(key) || name.includes(key);
+    if (teacher === 'abhinav' || teacher === 'admin') return !isBy('ashu') && !isBy('vaibhav') && !isBy('vrishan');
+    return isBy(teacher);
+  };
 
-      // 2. Status Filter
+  // Class sessions passing every filter except the teacher toggle (feeds the teacher pill counts)
+  const contextFilteredClassEntries = useMemo(() => {
+    return allClassesLogEntries.filter((entry) => {
+      // Status Filter
       if (classesStatusFilter !== 'ALL') {
         if (entry.status !== classesStatusFilter) return false;
       }
 
-      // 3. Date Filter
-      if (!isDateInPreset(entry.date, classesDatePreset, classesCustomDate)) {
+      // Date Filter
+      if (!isInClassesPeriod(entry.date)) {
         return false;
       }
 
-      // 4. Course Filter
+      // Course Filter
       if (classesCourseFilter !== 'ALL') {
         if (entry.type === 'INDIVIDUAL') {
           if (!entry.student || !getStudentCourses(entry.student).includes(classesCourseFilter)) return false;
@@ -2668,7 +2917,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         }
       }
 
-      // 5. Search Query
+      // Search Query
       if (classesSearch.trim()) {
         const q = classesSearch.toLowerCase().trim();
         const matchesStudentName = entry.students.some((s) => s.name.toLowerCase().includes(q));
@@ -2699,17 +2948,30 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
     });
   }, [
     allClassesLogEntries,
-    classesTeacherFilter,
     classesStatusFilter,
-    classesDatePreset,
-    classesCustomDate,
+    classesPeriod,
     classesCourseFilter,
     classesSearch,
-    isTeacher,
   ]);
 
+  // All class sessions in the selected period, before teacher/status/course/search filters
+  const classEntriesInPeriod = useMemo(
+    () => allClassesLogEntries.filter((entry) => isInClassesPeriod(entry.date)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allClassesLogEntries, classesPeriod]
+  );
+
+  const filteredClassesRecords = useMemo(() => {
+    // Teachers are already scoped to their own classes, so the teacher toggle only applies to admins
+    if (isTeacher) return contextFilteredClassEntries;
+    return contextFilteredClassEntries.filter((entry) => classEntryMatchesTeacher(entry, classesTeacherFilter));
+  }, [contextFilteredClassEntries, classesTeacherFilter, isTeacher]);
+
+  const classSessionCountFor = (teacher: typeof classesTeacherFilter) =>
+    contextFilteredClassEntries.filter((entry) => classEntryMatchesTeacher(entry, teacher)).length;
+
   const ashuAnalytics = useMemo(() => {
-    const isContextFiltered = classesDatePreset !== 'ALL' || classesStatusFilter !== 'ALL' || classesCourseFilter !== 'ALL' || Boolean(classesSearch.trim());
+    const isContextFiltered = isClassesDateFilterActive || classesStatusFilter !== 'ALL' || classesCourseFilter !== 'ALL' || Boolean(classesSearch.trim());
     const records = isContextFiltered ? filteredAshuRecords : teacherAshuRecords;
     const total = records.length;
     const present = records.filter((r) => r.status === 'PRESENT').length;
@@ -2737,10 +2999,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       presentRate,
       datesCount: dates.length,
     };
-  }, [teacherAshuRecords, filteredAshuRecords, students, classesDatePreset, classesStatusFilter, classesCourseFilter, classesSearch]);
+  }, [teacherAshuRecords, filteredAshuRecords, students, isClassesDateFilterActive, classesStatusFilter, classesCourseFilter, classesSearch]);
 
   const vaibhavAnalytics = useMemo(() => {
-    const isContextFiltered = classesDatePreset !== 'ALL' || classesStatusFilter !== 'ALL' || classesCourseFilter !== 'ALL' || Boolean(classesSearch.trim());
+    const isContextFiltered = isClassesDateFilterActive || classesStatusFilter !== 'ALL' || classesCourseFilter !== 'ALL' || Boolean(classesSearch.trim());
     const records = isContextFiltered ? filteredVaibhavRecords : teacherVaibhavRecords;
     const total = records.length;
     const present = records.filter((r) => r.status === 'PRESENT').length;
@@ -2768,10 +3030,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       presentRate,
       datesCount: dates.length,
     };
-  }, [teacherVaibhavRecords, filteredVaibhavRecords, students, classesDatePreset, classesStatusFilter, classesCourseFilter, classesSearch]);
+  }, [teacherVaibhavRecords, filteredVaibhavRecords, students, isClassesDateFilterActive, classesStatusFilter, classesCourseFilter, classesSearch]);
 
   const vrishanAnalytics = useMemo(() => {
-    const isContextFiltered = classesDatePreset !== 'ALL' || classesStatusFilter !== 'ALL' || classesCourseFilter !== 'ALL' || Boolean(classesSearch.trim());
+    const isContextFiltered = isClassesDateFilterActive || classesStatusFilter !== 'ALL' || classesCourseFilter !== 'ALL' || Boolean(classesSearch.trim());
     const records = isContextFiltered ? filteredVrishanRecords : teacherVrishanRecords;
     const total = records.length;
     const present = records.filter((r) => r.status === 'PRESENT').length;
@@ -2799,10 +3061,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       presentRate,
       datesCount: dates.length,
     };
-  }, [teacherVrishanRecords, filteredVrishanRecords, students, classesDatePreset, classesStatusFilter, classesCourseFilter, classesSearch]);
+  }, [teacherVrishanRecords, filteredVrishanRecords, students, isClassesDateFilterActive, classesStatusFilter, classesCourseFilter, classesSearch]);
 
   const abhinavAnalytics = useMemo(() => {
-    const isContextFiltered = classesDatePreset !== 'ALL' || classesStatusFilter !== 'ALL' || classesCourseFilter !== 'ALL' || Boolean(classesSearch.trim());
+    const isContextFiltered = isClassesDateFilterActive || classesStatusFilter !== 'ALL' || classesCourseFilter !== 'ALL' || Boolean(classesSearch.trim());
     const records = isContextFiltered ? filteredAbhinavRecords : teacherAbhinavRecords;
     const total = records.length;
     const present = records.filter((r) => r.status === 'PRESENT').length;
@@ -2830,7 +3092,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       presentRate,
       datesCount: dates.length,
     };
-  }, [teacherAbhinavRecords, filteredAbhinavRecords, students, classesDatePreset, classesStatusFilter, classesCourseFilter, classesSearch]);
+  }, [teacherAbhinavRecords, filteredAbhinavRecords, students, isClassesDateFilterActive, classesStatusFilter, classesCourseFilter, classesSearch]);
 
   const handleExportClassesCSV = () => {
     const headers = [
@@ -2883,14 +3145,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       ].join(',');
     });
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `soundabode_teacher_classes_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const periodSlug = classesPeriod.from || classesPeriod.to ? `${classesPeriod.from || 'start'}_to_${classesPeriod.to || 'latest'}` : 'all_dates';
+    downloadCsv(`soundabode_teacher_classes_${periodSlug}.csv`, headers, rows);
 
     setClassesFeedbackToast('Exported class logs to CSV successfully.');
     setTimeout(() => setClassesFeedbackToast(null), 3500);
@@ -2941,7 +3197,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
         </head>
         <body>
           <h1>Soundabode Studios - Teacher Classes & Attendance Master Ledger</h1>
-          <p>Generated on ${new Date().toLocaleString('en-IN')} | Total Records: ${filteredClassesRecords.length} | Teachers: Ashu, Vaibhav &amp; Vrishan</p>
+          <p>Period: ${escapeHtml(classesPeriod.label)} | Generated on ${new Date().toLocaleString('en-IN')} | Total Records: ${filteredClassesRecords.length} | Teachers: Ashu, Vaibhav &amp; Vrishan</p>
           <table>
             <thead>
               <tr>
@@ -3051,15 +3307,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
       ].join(',');
     });
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
     const safeName = (targetStudent.name || 'student').toLowerCase().replace(/[^a-z0-9]/g, '_');
-    link.setAttribute('download', `soundabode_attendance_${safeName}_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadCsv(`soundabode_attendance_${safeName}_${getTodayDateStr()}.csv`, headers, rows);
   };
 
   const handlePrintAttendanceReport = (student?: EnrolledStudent) => {
@@ -3981,6 +4230,18 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
 
               {!isTeacher && (
                 <button
+                  onClick={() => { setActiveTab('upgrades'); setIsMobileMenuOpen(false); }}
+                  className={`${styles.sidebarBtn} ${activeTab === 'upgrades' ? styles.sidebarBtnActive : ''}`}
+                  title="Students whose course is completed and who are waiting for an upgrade decision"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="17 11 12 6 7 11" /><line x1="12" y1="6" x2="12" y2="18" /></svg>
+                  Upgrades
+                  <span className={pendingUpgradeCount > 0 ? styles.badgeCountNew : styles.badgeCount}>{pendingUpgradeCount}</span>
+                </button>
+              )}
+
+              {!isTeacher && (
+                <button
                   onClick={() => { setActiveTab('classes'); setIsMobileMenuOpen(false); }}
                   className={`${styles.sidebarBtn} ${activeTab === 'classes' ? styles.sidebarBtnActive : ''}`}
                 >
@@ -4144,6 +4405,18 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               </svg>
               Students
               <span className={styles.badgeCount}>{students.length}</span>
+            </button>
+          )}
+
+          {!isTeacher && (
+            <button
+              onClick={() => setActiveTab('upgrades')}
+              className={`${styles.sidebarBtn} ${activeTab === 'upgrades' ? styles.sidebarBtnActive : ''}`}
+              title="Students whose course is completed and who are waiting for an upgrade decision"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="17 11 12 6 7 11" /><line x1="12" y1="6" x2="12" y2="18" /></svg>
+              Upgrades
+              <span className={pendingUpgradeCount > 0 ? styles.badgeCountNew : styles.badgeCount}>{pendingUpgradeCount}</span>
             </button>
           )}
 
@@ -4654,6 +4927,23 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           {/* TAB: STUDENT DIRECTORY */}
           {!isTeacher && activeTab === 'students' && (
             <div>
+              {upgradesToast && (
+                <div
+                  role="status"
+                  style={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-medium)',
+                    color: 'var(--text-primary)',
+                    padding: '0.65rem 0.9rem',
+                    borderRadius: 'var(--radius-btn)',
+                    fontSize: '0.82rem',
+                    fontWeight: 500,
+                    marginBottom: '0.75rem',
+                  }}
+                >
+                  {upgradesToast}
+                </div>
+              )}
               <div className={styles.pageHeaderRow}>
                 <div>
                   <h1 className={styles.pageTitle}>Student Directory</h1>
@@ -4707,12 +4997,12 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       <table className={styles.dataTable} style={{ minWidth: '850px' }}>
                         <thead>
                           <tr>
-                            <th style={{ minWidth: '180px' }}>Enrolled Student</th>
-                            <th style={{ minWidth: '180px' }}>Course &amp; Program</th>
-                            <th style={{ minWidth: '200px' }}>Batch Details</th>
-                            <th style={{ minWidth: '160px' }}>Contact Info</th>
+                            <th style={{ minWidth: '170px' }}>Enrolled Student</th>
+                            <th style={{ minWidth: '170px' }}>Course &amp; Program</th>
+                            <th style={{ minWidth: '150px' }}>Batch Details</th>
+                            <th style={{ minWidth: '190px' }}>Contact Info</th>
                             <th style={{ width: '110px' }}>Enrolled Date</th>
-                            <th style={{ textAlign: 'right', minWidth: '180px' }}>Actions</th>
+                            <th style={{ textAlign: 'right', width: '310px' }}>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -4720,6 +5010,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             const std = entry.student;
                             const avatar = getAvatarDetails(std.name);
                             const rowCourses = entry.kind === 'course' ? [entry.course] : getStudentCourses(std);
+                            const completableCourse = entry.kind === 'course' ? entry.course : rowCourses.length === 1 ? rowCourses[0] : '';
+                            const pendingCompletions = (std.courseCompletions || []).filter((c) => c.upgradeStatus === 'PENDING').length;
                             return (
                               <tr key={entry.key}>
                                 <td>
@@ -4732,7 +5024,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                     </div>
                                     <div>
                                       <div className={styles.studentName} style={{ fontWeight: 600 }}>{std.name}</div>
-                                      <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>{std.email}</div>
+                                      <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>{std.id}</div>
                                     </div>
                                   </div>
                                 </td>
@@ -4756,7 +5048,20 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                         {courseName}
                                       </span>
                                     ))}
+                                    {rowCourses.length === 0 && (
+                                      <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>No active course</span>
+                                    )}
                                   </div>
+                                  {pendingCompletions > 0 && entry.kind !== 'course' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => { setUpgradeStatusFilter('PENDING'); setActiveTab('upgrades'); }}
+                                      className={styles.filterPill}
+                                      style={{ marginTop: '0.35rem', fontSize: '0.7rem', padding: '0.1rem 0.45rem' }}
+                                    >
+                                      {pendingCompletions} completed · awaiting upgrade
+                                    </button>
+                                  )}
                                 </td>
                                 <td>
                                   <div style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>{entry.batch}</div>
@@ -4768,7 +5073,10 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                 </td>
                                 <td>
                                   <a href={safeMailto(std.email)} style={{ color: 'var(--text-secondary)', textDecoration: 'none', display: 'block', fontSize: '0.775rem' }}>
-                                    {std.email}
+                                    {/* Let long addresses wrap at the @ rather than mid-word */}
+                                    {std.email.includes('@') ? (
+                                      <>{std.email.slice(0, std.email.indexOf('@'))}<wbr />{std.email.slice(std.email.indexOf('@'))}</>
+                                    ) : std.email}
                                   </a>
                                   <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>{std.phone}</div>
                                 </td>
@@ -4776,55 +5084,72 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   {std.enrolledDate}
                                 </td>
                                 <td style={{ textAlign: 'right' }}>
-                                  <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap', maxWidth: '260px', marginLeft: 'auto' }}>
-                                    <button
-                                      onClick={() => handleOpenReminderModal(std, 'FEE_PAYMENT')}
-                                      className={styles.btnSecondary}
-                                      style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem', color: 'var(--text-primary)', borderColor: 'var(--border-strong)', gap: '0.25rem', whiteSpace: 'nowrap' }}
-                                      title="Send email reminder via Zoho Mail SMTP"
-                                    >
-                                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-                                        <polyline points="22,6 12,13 2,6" />
-                                      </svg>
-                                      Send Email
-                                    </button>
+                                  <div className={styles.rowActions}>
                                     <button
                                       onClick={() => {
                                         setSelectedStudentId(entry.key);
                                         setActiveTab('attendance');
                                       }}
-                                      className={styles.btnSecondary}
-                                      style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem', whiteSpace: 'nowrap' }}
+                                      className={`${styles.btnSecondary} ${styles.rowActionBtn}`}
                                       title="View & mark attendance"
                                     >
                                       Attendance
                                     </button>
+                                    {completableCourse && (
+                                      <button
+                                        onClick={() => openCompleteCourse(std.id, completableCourse)}
+                                        className={`${styles.btnSecondary} ${styles.rowActionBtn}`}
+                                        title={`Mark "${completableCourse}" as completed and add it to the upgrade list`}
+                                      >
+                                        Mark complete
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => handleOpenReminderModal(std, 'FEE_PAYMENT')}
+                                      className={styles.iconAction}
+                                      title="Send email reminder"
+                                      aria-label={`Send email reminder to ${std.name}`}
+                                    >
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                                        <polyline points="22,6 12,13 2,6" />
+                                      </svg>
+                                    </button>
                                     <button
                                       onClick={() => handleOpenEditStudentModal(std)}
-                                      className={styles.btnSecondary}
-                                      style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem', whiteSpace: 'nowrap' }}
+                                      className={styles.iconAction}
                                       title="Edit student details"
+                                      aria-label={`Edit ${std.name}`}
                                     >
-                                      Edit
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                                        <path d="M12 20h9" />
+                                        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+                                      </svg>
                                     </button>
                                     {entry.kind === 'course' ? (
                                       <button
                                         onClick={() => handleRemoveStudentCourse(std, entry.course)}
-                                        className={styles.btnDestructive}
-                                        style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem', whiteSpace: 'nowrap' }}
+                                        className={`${styles.iconAction} ${styles.iconActionDanger}`}
                                         title="Remove this course from the student (keeps the student and their attendance)"
+                                        aria-label={`Remove ${entry.course} from ${std.name}`}
                                       >
-                                        Remove course
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                                          <circle cx="12" cy="12" r="9" />
+                                          <line x1="8" y1="12" x2="16" y2="12" />
+                                        </svg>
                                       </button>
                                     ) : (
                                       <button
                                         onClick={() => handleDeleteStudent(std.id, std.name)}
-                                        className={styles.btnDestructive}
-                                        style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem', whiteSpace: 'nowrap' }}
+                                        className={`${styles.iconAction} ${styles.iconActionDanger}`}
                                         title="Permanently delete student from roster & MongoDB"
+                                        aria-label={`Delete ${std.name}`}
                                       >
-                                        Delete
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                                          <polyline points="3 6 5 6 21 6" />
+                                          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                                          <path d="M10 11v6M14 11v6M9 6V4h6v2" />
+                                        </svg>
                                       </button>
                                     )}
                                   </div>
@@ -4843,6 +5168,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       const std = entry.student;
                       const avatar = getAvatarDetails(std.name);
                       const rowCourses = entry.kind === 'course' ? [entry.course] : getStudentCourses(std);
+                      const completableCourse = entry.kind === 'course' ? entry.course : rowCourses.length === 1 ? rowCourses[0] : '';
+                      const pendingCompletions = (std.courseCompletions || []).filter((c) => c.upgradeStatus === 'PENDING').length;
                       return (
                         <div key={entry.key} className={styles.mobileDataCard}>
                           <div className={styles.mobileCardHeader}>
@@ -4860,6 +5187,23 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             </div>
                           </div>
 
+                          {rowCourses.length === 0 && (
+                            <div className={styles.mobileCourseChips}>
+                              <span className={styles.mobileCardSubText}>No active course</span>
+                            </div>
+                          )}
+                          {pendingCompletions > 0 && entry.kind !== 'course' && (
+                            <div className={styles.mobileCourseChips}>
+                              <button
+                                type="button"
+                                onClick={() => { setUpgradeStatusFilter('PENDING'); setActiveTab('upgrades'); }}
+                                className={styles.filterPill}
+                                style={{ fontSize: '0.72rem' }}
+                              >
+                                {pendingCompletions} completed · awaiting upgrade
+                              </button>
+                            </div>
+                          )}
                           {rowCourses.length > 0 && (
                             <div className={styles.mobileCourseChips}>
                               {rowCourses.map((courseName, idx) => (
@@ -4897,6 +5241,15 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             >
                               Attendance
                             </button>
+                            {completableCourse && (
+                              <button
+                                onClick={() => openCompleteCourse(std.id, completableCourse)}
+                                className={styles.btnSecondary}
+                                style={{ height: '34px', fontSize: '0.775rem' }}
+                              >
+                                Mark complete
+                              </button>
+                            )}
                             <button
                               onClick={() => handleOpenEditStudentModal(std)}
                               className={styles.btnSecondary}
@@ -4907,7 +5260,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             {entry.kind === 'course' ? (
                               <button
                                 onClick={() => handleRemoveStudentCourse(std, entry.course)}
-                                className={styles.btnDestructive}
+                                className={`${styles.btnSecondary} ${styles.btnDangerOutline}`}
                                 style={{ height: '34px', padding: '0 0.6rem' }}
                               >
                                 Remove course
@@ -4915,10 +5268,224 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                             ) : (
                               <button
                                 onClick={() => handleDeleteStudent(std.id, std.name)}
-                                className={styles.btnDestructive}
+                                className={`${styles.btnSecondary} ${styles.btnDangerOutline}`}
                                 style={{ height: '34px', padding: '0 0.6rem' }}
                               >
                                 Delete
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* TAB: COURSE UPGRADES (ADMIN ROLE ONLY) */}
+          {!isTeacher && activeTab === 'upgrades' && (
+            <div>
+              {upgradesToast && (
+                <div
+                  role="status"
+                  style={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-medium)',
+                    color: 'var(--text-primary)',
+                    padding: '0.65rem 0.9rem',
+                    borderRadius: 'var(--radius-btn)',
+                    fontSize: '0.82rem',
+                    fontWeight: 500,
+                    marginBottom: '0.75rem',
+                  }}
+                >
+                  {upgradesToast}
+                </div>
+              )}
+              <div className={styles.pageHeaderRow}>
+                <div>
+                  <h1 className={styles.pageTitle}>Course Upgrades</h1>
+                  <div className={styles.pageMetaBadge}>
+                    <span>
+                      {pendingUpgradeCount === 0
+                        ? 'No students waiting for an upgrade decision'
+                        : `${pendingUpgradeCount} completed ${pendingUpgradeCount === 1 ? 'course' : 'courses'} waiting for an upgrade decision`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.filterBar}>
+                <div className={styles.filterPillGroup}>
+                  {(['PENDING', 'NOT_UPGRADING', 'UPGRADED'] as UpgradeStatus[]).map((status) => (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => setUpgradeStatusFilter(status)}
+                      className={`${styles.filterPill} ${upgradeStatusFilter === status ? styles.filterPillActive : ''}`}
+                    >
+                      {UPGRADE_STATUS_LABELS[status]} ({courseCompletionRows.filter((r) => r.completion.upgradeStatus === status).length})
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {visibleUpgradeRows.length === 0 ? (
+                <div className={styles.emptyStateBox} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
+                  <p>
+                    {upgradeStatusFilter === 'PENDING'
+                      ? 'Nobody is waiting. Use "Mark complete" on a student in the Students tab when they finish a course.'
+                      : `No completions marked "${UPGRADE_STATUS_LABELS[upgradeStatusFilter].toLowerCase()}" yet.`}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* DESKTOP TABLE VIEW */}
+                  <div className={styles.desktopTableContainer}>
+                    <div className={styles.tableCard}>
+                      <table className={styles.dataTable} style={{ minWidth: '850px' }}>
+                        <thead>
+                          <tr>
+                            <th style={{ minWidth: '180px' }}>Student</th>
+                            <th style={{ minWidth: '200px' }}>Completed Course</th>
+                            <th style={{ width: '130px' }}>Completed On</th>
+                            <th style={{ minWidth: '220px' }}>
+                              {upgradeStatusFilter === 'PENDING' ? 'Recommended Next' : upgradeStatusFilter === 'UPGRADED' ? 'Upgraded To' : 'Reason'}
+                            </th>
+                            <th style={{ textAlign: 'right', minWidth: '200px' }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {visibleUpgradeRows.map(({ student, completion }) => {
+                            const recommended = getUpgradeOptions(student, completion).recommended;
+                            const waitingDays = daysBetween(completion.completedOn, getTodayDateStr());
+                            return (
+                              <tr key={completion.id}>
+                                <td>
+                                  <div className={styles.studentName} style={{ fontWeight: 600 }}>{student.name}</div>
+                                  <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>{student.id} · {student.phone || student.email}</div>
+                                </td>
+                                <td>
+                                  <div style={{ fontSize: '0.8rem' }}>{completion.course}</div>
+                                  {completion.batch && <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{completion.batch}</div>}
+                                  {completion.note && <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>Note: {completion.note}</div>}
+                                </td>
+                                <td style={{ fontSize: '0.775rem' }}>
+                                  <div>{completion.completedOn}</div>
+                                  {completion.upgradeStatus === 'PENDING' && (
+                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                      {waitingDays === 0 ? 'Today' : `Waiting ${waitingDays} ${waitingDays === 1 ? 'day' : 'days'}`}
+                                    </div>
+                                  )}
+                                </td>
+                                <td style={{ fontSize: '0.775rem' }}>
+                                  {completion.upgradeStatus === 'PENDING' && (
+                                    recommended.length > 0
+                                      ? recommended.join(' or ')
+                                      : <span style={{ color: 'var(--text-muted)' }}>No set next course: choose one when upgrading</span>
+                                  )}
+                                  {completion.upgradeStatus === 'UPGRADED' && completion.upgradedTo}
+                                  {completion.upgradeStatus === 'UPGRADED' && completion.admissionFormNo && (
+                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Submission {completion.admissionFormNo}</div>
+                                  )}
+                                  {completion.upgradeStatus === 'NOT_UPGRADING' && completion.closeReason}
+                                  {completion.upgradeStatus !== 'PENDING' && completion.decidedBy && (
+                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                      by {completion.decidedBy}{completion.decidedAt ? ` · ${completion.decidedAt.slice(0, 10)}` : ''}
+                                    </div>
+                                  )}
+                                </td>
+                                <td style={{ textAlign: 'right' }}>
+                                  <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                    {completion.upgradeStatus === 'PENDING' && (
+                                      <>
+                                        <button onClick={() => openUpgrade(student.id, completion)} className={styles.btnPrimary} style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.6rem' }}>
+                                          Upgrade
+                                        </button>
+                                        <button onClick={() => openCloseUpgrade(student.id, completion)} className={styles.btnSecondary} style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem' }}>
+                                          Not upgrading
+                                        </button>
+                                      </>
+                                    )}
+                                    {completion.upgradeStatus === 'NOT_UPGRADING' && (
+                                      <button onClick={() => handleReopenUpgrade(student.id, completion)} className={styles.btnSecondary} style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem' }}>
+                                        Reopen
+                                      </button>
+                                    )}
+                                    {completion.upgradeStatus !== 'UPGRADED' && (
+                                      <button
+                                        onClick={() => handleUndoCompletion(student, completion)}
+                                        className={styles.btnDestructive}
+                                        style={{ fontSize: '0.725rem', height: '26px', padding: '0 0.55rem' }}
+                                        title="Marked complete by mistake: put the course back into the student's active courses"
+                                      >
+                                        Undo completion
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* MOBILE CARDS VIEW */}
+                  <div className={styles.mobileCardList}>
+                    {visibleUpgradeRows.map(({ student, completion }) => {
+                      const recommended = getUpgradeOptions(student, completion).recommended;
+                      return (
+                        <div key={completion.id} className={styles.mobileDataCard}>
+                          <div className={styles.mobileCardHeader}>
+                            <div>
+                              <div className={styles.mobileCardTitle}>{student.name}</div>
+                              <div className={styles.mobileCardSubText}>{student.id} · {student.phone || student.email}</div>
+                            </div>
+                          </div>
+                          <div className={styles.mobileCardBody}>
+                            <div className={styles.mobileCardRow}>
+                              <span className={styles.mobileCardLabel}>Completed</span>
+                              <span className={styles.mobileCardValue}>{completion.course}</span>
+                            </div>
+                            <div className={styles.mobileCardRow}>
+                              <span className={styles.mobileCardLabel}>On</span>
+                              <span className={styles.mobileCardValue}>{completion.completedOn}</span>
+                            </div>
+                            <div className={styles.mobileCardRow}>
+                              <span className={styles.mobileCardLabel}>
+                                {completion.upgradeStatus === 'PENDING' ? 'Next' : completion.upgradeStatus === 'UPGRADED' ? 'Upgraded to' : 'Reason'}
+                              </span>
+                              <span className={styles.mobileCardValue}>
+                                {completion.upgradeStatus === 'PENDING' && (recommended.join(' or ') || 'Choose when upgrading')}
+                                {completion.upgradeStatus === 'UPGRADED' && completion.upgradedTo}
+                                {completion.upgradeStatus === 'UPGRADED' && completion.admissionFormNo && ` (${completion.admissionFormNo})`}
+                                {completion.upgradeStatus === 'NOT_UPGRADING' && completion.closeReason}
+                              </span>
+                            </div>
+                          </div>
+                          <div className={styles.mobileCardActions}>
+                            {completion.upgradeStatus === 'PENDING' && (
+                              <>
+                                <button onClick={() => openUpgrade(student.id, completion)} className={styles.btnPrimary} style={{ height: '34px', fontSize: '0.775rem' }}>
+                                  Upgrade
+                                </button>
+                                <button onClick={() => openCloseUpgrade(student.id, completion)} className={styles.btnSecondary} style={{ height: '34px', fontSize: '0.775rem' }}>
+                                  Not upgrading
+                                </button>
+                              </>
+                            )}
+                            {completion.upgradeStatus === 'NOT_UPGRADING' && (
+                              <button onClick={() => handleReopenUpgrade(student.id, completion)} className={styles.btnSecondary} style={{ height: '34px', fontSize: '0.775rem' }}>
+                                Reopen
+                              </button>
+                            )}
+                            {completion.upgradeStatus !== 'UPGRADED' && (
+                              <button onClick={() => handleUndoCompletion(student, completion)} className={styles.btnDestructive} style={{ height: '34px', padding: '0 0.6rem' }}>
+                                Undo
                               </button>
                             )}
                           </div>
@@ -4963,20 +5530,17 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   </h1>
                   <div className={styles.pageMetaBadge}>
                     <span>
-                      {hasActiveClassesFilter ? (
-                        <>Showing <strong>{filteredClassesRecords.length}</strong> of {allAttendanceRecords.length} sessions (Filtered)</>
-                      ) : (
-                        <>{allAttendanceRecords.length} total sessions logged</>
-                      )}
+                      <strong>{classesPeriod.label}</strong>: {classEntriesInPeriod.length} {classEntriesInPeriod.length === 1 ? 'session' : 'sessions'}
+                      {hasClassesNonDateFilter && <> ({filteredClassesRecords.length} match filters)</>}
                     </span>
                     <span>•</span>
-                    <span>Ashu ({filteredAshuRecords.length})</span>
+                    <span>Ashu ({classSessionCountFor('ashu')})</span>
                     <span>•</span>
-                    <span>Vaibhav ({filteredVaibhavRecords.length})</span>
+                    <span>Vaibhav ({classSessionCountFor('vaibhav')})</span>
                     <span>•</span>
-                    <span>Vrishan ({filteredVrishanRecords.length})</span>
+                    <span>Vrishan ({classSessionCountFor('vrishan')})</span>
                     <span>•</span>
-                    <span>Abhinav ({filteredAbhinavRecords.length})</span>
+                    <span>Abhinav ({classSessionCountFor('abhinav')})</span>
                   </div>
                 </div>
 
@@ -5091,7 +5655,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           {classesTeacherFilter === 'ashu' ? 'Active' : 'Filter'}
                         </button>
                       </div>
-                      <div className={styles.summaryStatCount}>{ashuAnalytics.total}</div>
+                      {/* Class sessions, matching the list; the line below breaks them down per student */}
+                      <div className={styles.summaryStatCount}>{classSessionCountFor('ashu')}<span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)', marginLeft: '0.4rem' }}>{(classSessionCountFor('ashu')) === 1 ? 'session' : 'sessions'}</span></div>
                       <div className={styles.summaryStatMeta}>
                         <span className={styles.summaryStatMetaItem}>
                           Present: <span className={styles.summaryStatMetaNum}>{ashuAnalytics.present}</span>
@@ -5134,7 +5699,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           {classesTeacherFilter === 'vaibhav' ? 'Active' : 'Filter'}
                         </button>
                       </div>
-                      <div className={styles.summaryStatCount}>{vaibhavAnalytics.total}</div>
+                      {/* Class sessions, matching the list; the line below breaks them down per student */}
+                      <div className={styles.summaryStatCount}>{classSessionCountFor('vaibhav')}<span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)', marginLeft: '0.4rem' }}>{(classSessionCountFor('vaibhav')) === 1 ? 'session' : 'sessions'}</span></div>
                       <div className={styles.summaryStatMeta}>
                         <span className={styles.summaryStatMetaItem}>
                           Present: <span className={styles.summaryStatMetaNum}>{vaibhavAnalytics.present}</span>
@@ -5177,7 +5743,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           {classesTeacherFilter === 'vrishan' ? 'Active' : 'Filter'}
                         </button>
                       </div>
-                      <div className={styles.summaryStatCount}>{vrishanAnalytics.total}</div>
+                      {/* Class sessions, matching the list; the line below breaks them down per student */}
+                      <div className={styles.summaryStatCount}>{classSessionCountFor('vrishan')}<span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)', marginLeft: '0.4rem' }}>{(classSessionCountFor('vrishan')) === 1 ? 'session' : 'sessions'}</span></div>
                       <div className={styles.summaryStatMeta}>
                         <span className={styles.summaryStatMetaItem}>
                           Present: <span className={styles.summaryStatMetaNum}>{vrishanAnalytics.present}</span>
@@ -5220,7 +5787,8 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                           {classesTeacherFilter === 'abhinav' ? 'Active' : 'Filter'}
                         </button>
                       </div>
-                      <div className={styles.summaryStatCount}>{abhinavAnalytics.total}</div>
+                      {/* Class sessions, matching the list; the line below breaks them down per student */}
+                      <div className={styles.summaryStatCount}>{classSessionCountFor('abhinav')}<span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)', marginLeft: '0.4rem' }}>{(classSessionCountFor('abhinav')) === 1 ? 'session' : 'sessions'}</span></div>
                       <div className={styles.summaryStatMeta}>
                         <span className={styles.summaryStatMetaItem}>
                           Present: <span className={styles.summaryStatMetaNum}>{abhinavAnalytics.present}</span>
@@ -5251,32 +5819,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       <div className={styles.summaryStatHeader}>
                         <span className={styles.summaryStatTitle}>
                           {classesTeacherFilter !== 'ALL'
-                            ? `${classesTeacherFilter.toUpperCase()} Active`
-                            : hasActiveClassesFilter
-                            ? 'Filtered Total'
-                            : 'Studio Total'}
+                            ? `${classesTeacherFilter.toUpperCase()} · ${classesPeriod.label}`
+                            : hasClassesNonDateFilter
+                            ? `Filtered · ${classesPeriod.label}`
+                            : `Studio Total · ${classesPeriod.label}`}
                         </span>
                         <button
                           type="button"
-                          onClick={() => {
-                            setClassesTeacherFilter('ALL');
-                            setClassesStatusFilter('ALL');
-                            setClassesDatePreset('ALL');
-                            setClassesCustomDate('');
-                            setClassesCourseFilter('ALL');
-                            setClassesSearch('');
-                          }}
+                          onClick={resetClassesFilters}
                           className={styles.filterPill}
                           style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
                         >
                           Reset
                         </button>
                       </div>
-                      <div className={styles.summaryStatCount}>
-                        {classesTeacherFilter !== 'ALL'
-                          ? (classesTeacherFilter === 'ashu' ? filteredAshuRecords.length : classesTeacherFilter === 'vaibhav' ? filteredVaibhavRecords.length : classesTeacherFilter === 'vrishan' ? filteredVrishanRecords.length : filteredAbhinavRecords.length)
-                          : contextFilteredRecords.length}
-                      </div>
+                      <div className={styles.summaryStatCount}>{filteredClassesRecords.length}<span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)', marginLeft: '0.4rem' }}>{(filteredClassesRecords.length) === 1 ? 'session' : 'sessions'}</span></div>
                       <div className={styles.summaryStatMeta}>
                         <span className={styles.summaryStatMetaItem}>
                           Present:{' '}
@@ -5349,35 +5906,35 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                       onClick={() => setClassesTeacherFilter('ALL')}
                       className={`${styles.filterPill} ${classesTeacherFilter === 'ALL' ? styles.filterPillActive : ''}`}
                     >
-                      All ({contextFilteredRecords.length})
+                      All ({classSessionCountFor('ALL')})
                     </button>
                     <button
                       type="button"
                       onClick={() => setClassesTeacherFilter(classesTeacherFilter === 'ashu' ? 'ALL' : 'ashu')}
                       className={`${styles.filterPill} ${classesTeacherFilter === 'ashu' ? styles.filterPillActive : ''}`}
                     >
-                      Ashu ({filteredAshuRecords.length})
+                      Ashu ({classSessionCountFor('ashu')})
                     </button>
                     <button
                       type="button"
                       onClick={() => setClassesTeacherFilter(classesTeacherFilter === 'vaibhav' ? 'ALL' : 'vaibhav')}
                       className={`${styles.filterPill} ${classesTeacherFilter === 'vaibhav' ? styles.filterPillActive : ''}`}
                     >
-                      Vaibhav ({filteredVaibhavRecords.length})
+                      Vaibhav ({classSessionCountFor('vaibhav')})
                     </button>
                     <button
                       type="button"
                       onClick={() => setClassesTeacherFilter(classesTeacherFilter === 'vrishan' ? 'ALL' : 'vrishan')}
                       className={`${styles.filterPill} ${classesTeacherFilter === 'vrishan' ? styles.filterPillActive : ''}`}
                     >
-                      Vrishan ({filteredVrishanRecords.length})
+                      Vrishan ({classSessionCountFor('vrishan')})
                     </button>
                     <button
                       type="button"
                       onClick={() => setClassesTeacherFilter(classesTeacherFilter === 'abhinav' ? 'ALL' : 'abhinav')}
                       className={`${styles.filterPill} ${classesTeacherFilter === 'abhinav' ? styles.filterPillActive : ''}`}
                     >
-                      Abhinav ({filteredAbhinavRecords.length})
+                      Abhinav ({classSessionCountFor('abhinav')})
                     </button>
                   </div>
                 )}
@@ -5408,17 +5965,32 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                     <option value="TODAY">Today</option>
                     <option value="YESTERDAY">Yesterday</option>
                     <option value="THIS_WEEK">This Week</option>
-                    <option value="THIS_MONTH">This Month</option>
-                    <option value="CUSTOM">Custom Date</option>
+                    <option value="THIS_MONTH">This Month ({ymdToUtc(classesToday).toLocaleDateString('en-IN', { month: 'short', year: 'numeric', timeZone: 'UTC' })})</option>
+                    <option value="CUSTOM">Custom Range</option>
                   </select>
 
                   {classesDatePreset === 'CUSTOM' && (
-                    <input
-                      type="date"
-                      value={classesCustomDate}
-                      onChange={(e) => setClassesCustomDate(e.target.value)}
-                      className={styles.filterSelect}
-                    />
+                    <>
+                      <input
+                        type="date"
+                        aria-label="From date"
+                        title="From date (leave empty for no start limit)"
+                        value={classesCustomDate}
+                        max={classesCustomEndDate || undefined}
+                        onChange={(e) => setClassesCustomDate(e.target.value)}
+                        className={styles.filterSelect}
+                      />
+                      <span style={{ alignSelf: 'center', fontSize: '0.78rem', color: 'var(--text-muted)' }}>to</span>
+                      <input
+                        type="date"
+                        aria-label="To date"
+                        title="To date (leave empty for no end limit)"
+                        value={classesCustomEndDate}
+                        min={classesCustomDate || undefined}
+                        onChange={(e) => setClassesCustomEndDate(e.target.value)}
+                        className={styles.filterSelect}
+                      />
+                    </>
                   )}
 
                   {/* COURSE FILTER */}
@@ -5439,14 +6011,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                   {hasActiveClassesFilter && (
                     <button
                       type="button"
-                      onClick={() => {
-                        setClassesTeacherFilter('ALL');
-                        setClassesStatusFilter('ALL');
-                        setClassesDatePreset('ALL');
-                        setClassesCustomDate('');
-                        setClassesCourseFilter('ALL');
-                        setClassesSearch('');
-                      }}
+                      onClick={resetClassesFilters}
                       className={styles.btnSecondary}
                       style={{ fontSize: '0.75rem', height: '32px' }}
                     >
@@ -5459,28 +6024,21 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               {/* DYNAMIC RESULTS COUNTER STRIP */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0.65rem 0 0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                 <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                  Showing <strong style={{ color: 'var(--text-primary)' }}>{filteredClassesRecords.length}</strong> class {filteredClassesRecords.length === 1 ? 'session' : 'sessions'}
-                  {hasActiveClassesFilter && (
-                    <span style={{ marginLeft: '0.4rem', color: 'var(--text-primary)', fontWeight: 500 }}>
-                      (filtered from {allClassesLogEntries.length} total sessions)
-                    </span>
-                  )}
+                  Showing <strong style={{ color: 'var(--text-primary)' }}>{filteredClassesRecords.length}</strong>
+                  {hasClassesNonDateFilter && <> of {classEntriesInPeriod.length}</>}
+                  {' '}class {(hasClassesNonDateFilter ? classEntriesInPeriod.length : filteredClassesRecords.length) === 1 ? 'session' : 'sessions'}{' '}
+                  {isClassesDateFilterActive
+                    ? <>in <strong style={{ color: 'var(--text-primary)' }}>{classesPeriod.label}</strong></>
+                    : 'across all dates'}
                 </div>
                 {hasActiveClassesFilter && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setClassesTeacherFilter('ALL');
-                      setClassesStatusFilter('ALL');
-                      setClassesDatePreset('ALL');
-                      setClassesCustomDate('');
-                      setClassesCourseFilter('ALL');
-                      setClassesSearch('');
-                    }}
+                    onClick={resetClassesFilters}
                     className={styles.filterPill}
                     style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem' }}
                   >
-                    Reset filters
+                    Back to this month
                   </button>
                 )}
               </div>
@@ -5489,25 +6047,37 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
               {filteredClassesRecords.length === 0 ? (
                 <div className={styles.emptyStateCard} style={{ padding: '2.5rem 1.5rem', textAlign: 'center' }}>
                   <div className={styles.emptyStateTitle} style={{ fontSize: '1rem', fontWeight: 600 }}>
-                    No class records found
+                    {hasClassesNonDateFilter ? 'No classes match these filters' : `No classes logged for ${classesPeriod.label}`}
                   </div>
                   <div className={styles.emptyStateDesc} style={{ maxWidth: '340px', margin: '0.35rem auto 1rem', fontSize: '0.8rem' }}>
-                    Adjust filters to view attendance logs marked by teachers.
+                    {hasClassesNonDateFilter
+                      ? `${classEntriesInPeriod.length} ${classEntriesInPeriod.length === 1 ? 'session was' : 'sessions were'} logged in ${classesPeriod.label}. Clear the filters to see them.`
+                      : 'Classes appear here as teachers mark attendance.'}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setClassesTeacherFilter('ALL');
-                      setClassesStatusFilter('ALL');
-                      setClassesDatePreset('ALL');
-                      setClassesCourseFilter('ALL');
-                      setClassesSearch('');
-                    }}
-                    className={styles.btnPrimary}
-                    style={{ height: '34px', fontSize: '0.8rem' }}
-                  >
-                    Reset Filters
-                  </button>
+                  {hasClassesNonDateFilter ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClassesTeacherFilter('ALL');
+                        setClassesStatusFilter('ALL');
+                        setClassesCourseFilter('ALL');
+                        setClassesSearch('');
+                      }}
+                      className={styles.btnPrimary}
+                      style={{ height: '34px', fontSize: '0.8rem' }}
+                    >
+                      Clear filters
+                    </button>
+                  ) : classesDatePreset !== 'ALL' && (
+                    <button
+                      type="button"
+                      onClick={() => setClassesDatePreset('ALL')}
+                      className={styles.btnPrimary}
+                      style={{ height: '34px', fontSize: '0.8rem' }}
+                    >
+                      Show all dates
+                    </button>
+                  )}
                 </div>
               ) : (
                 <>
@@ -7699,6 +8269,11 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                                   >
                                     {item.formNo}
                                   </span>
+                                  {item.origin === 'UPGRADE' && (
+                                    <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '0.25rem' }} title={`Created when the student was upgraded from ${item.upgradedFrom || 'a completed course'}`}>
+                                      Course upgrade
+                                    </div>
+                                  )}
                                 </td>
                                 <td>
                                   <div className={styles.studentCell}>
@@ -7805,7 +8380,7 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
                               )}
                               <div>
                                 <div className={styles.mobileCardTitle}>{item.firstName} {item.lastName}</div>
-                                <div className={styles.mobileCardSubText}>Form No: {item.formNo}</div>
+                                <div className={styles.mobileCardSubText}>Form No: {item.formNo}{item.origin === 'UPGRADE' ? ' · Course upgrade' : ''}</div>
                               </div>
                             </div>
                             {renderAdmissionStatusSelect(item)}
@@ -8436,6 +9011,244 @@ export const CmsAdminPage: React.FC<CmsAdminPageProps> = ({ onNavigate }) => {
           )}
         </main>
       </div>
+
+      {/* MARK COURSE COMPLETE MODAL */}
+      {completeCourseTarget && (
+        <div className={styles.modalOverlay}>
+          <div className={styles.modalCard} style={{ maxWidth: '480px' }} role="dialog" aria-modal="true" aria-labelledby="complete-course-title">
+            <div className={styles.modalHeader}>
+              <h2 id="complete-course-title" className={styles.modalTitle}>Mark course complete</h2>
+              <button onClick={() => setCompleteCourseTarget(null)} className={styles.closeModalBtn} aria-label="Close">✕</button>
+            </div>
+            <form onSubmit={handleSubmitCompleteCourse}>
+              <div className={styles.modalBody}>
+                {completionError && (
+                  <div className={styles.leadsErrorBanner} role="alert" style={{ marginBottom: '1rem' }}>
+                    <span>{completionError}</span>
+                  </div>
+                )}
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: 0, lineHeight: 1.5 }}>
+                  <strong style={{ color: 'var(--text-primary)' }}>{completeCourseTarget.course}</strong> will be removed from{' '}
+                  {completeCourseTarget.student.name}&apos;s active courses and listed under Upgrades. Past attendance is kept.
+                </p>
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel} htmlFor="completed-on">Completed on *</label>
+                  <input
+                    id="completed-on"
+                    type="date"
+                    required
+                    className={styles.formInput}
+                    value={completeCourseForm.completedOn}
+                    min={/^\d{4}-\d{2}-\d{2}$/.test(completeCourseTarget.student.enrolledDate || '') ? completeCourseTarget.student.enrolledDate : undefined}
+                    max={getTodayDateStr()}
+                    onChange={(e) => setCompleteCourseForm({ ...completeCourseForm, completedOn: e.target.value })}
+                  />
+                </div>
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel} htmlFor="completion-note">Note</label>
+                  <textarea
+                    id="completion-note"
+                    className={styles.formInput}
+                    rows={2}
+                    maxLength={500}
+                    placeholder="Optional, e.g. final assessment result"
+                    value={completeCourseForm.note}
+                    onChange={(e) => setCompleteCourseForm({ ...completeCourseForm, note: e.target.value })}
+                    style={{ resize: 'vertical' }}
+                  />
+                </div>
+              </div>
+              <div className={styles.modalFooter}>
+                <button type="button" onClick={() => setCompleteCourseTarget(null)} className={styles.btnSecondary}>Cancel</button>
+                <button type="submit" className={styles.btnPrimary} disabled={isCompletionBusy}>
+                  {isCompletionBusy ? 'Saving…' : 'Mark complete'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* UPGRADE COURSE MODAL */}
+      {upgradeTarget && (() => {
+        const { recommended, others } = getUpgradeOptions(upgradeTarget.student, upgradeTarget.completion);
+        return (
+          <div className={styles.modalOverlay}>
+            <div className={styles.modalCard} style={{ maxWidth: '520px' }} role="dialog" aria-modal="true" aria-labelledby="upgrade-course-title">
+              <div className={styles.modalHeader}>
+                <h2 id="upgrade-course-title" className={styles.modalTitle}>Upgrade {upgradeTarget.student.name}</h2>
+                <button onClick={() => setUpgradeTarget(null)} className={styles.closeModalBtn} aria-label="Close">✕</button>
+              </div>
+              <form onSubmit={handleSubmitUpgrade}>
+                <div className={styles.modalBody}>
+                  {completionError && (
+                    <div className={styles.leadsErrorBanner} role="alert" style={{ marginBottom: '1rem' }}>
+                      <span>{completionError}</span>
+                    </div>
+                  )}
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: 0, lineHeight: 1.5 }}>
+                    Completed <strong style={{ color: 'var(--text-primary)' }}>{upgradeTarget.completion.course}</strong> on {upgradeTarget.completion.completedOn}.
+                    The new course is added to their active courses.
+                  </p>
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel} htmlFor="upgrade-course">Upgrade to *</label>
+                    <select
+                      id="upgrade-course"
+                      required
+                      className={styles.formInput}
+                      value={upgradeForm.targetCourse}
+                      onChange={(e) => handleUpgradeCourseChange(e.target.value)}
+                    >
+                      <option value="" disabled>Choose a course</option>
+                      {recommended.length > 0 && (
+                        <optgroup label="Recommended next">
+                          {recommended.map((name) => <option key={name} value={name}>{name}</option>)}
+                        </optgroup>
+                      )}
+                      {others.length > 0 && (
+                        <optgroup label="Other courses">
+                          {others.map((name) => <option key={name} value={name}>{name}</option>)}
+                        </optgroup>
+                      )}
+                      <option value="__other__">Another course (type the name)</option>
+                    </select>
+                  </div>
+                  {upgradeForm.targetCourse === '__other__' && (
+                    <div className={styles.formGroup}>
+                      <label className={styles.formLabel} htmlFor="upgrade-custom-course">Course name *</label>
+                      <input
+                        id="upgrade-custom-course"
+                        type="text"
+                        required
+                        maxLength={200}
+                        className={styles.formInput}
+                        value={upgradeForm.customCourse}
+                        onChange={(e) => setUpgradeForm({ ...upgradeForm, customCourse: e.target.value })}
+                      />
+                    </div>
+                  )}
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel} htmlFor="upgrade-form-type">Submission form type *</label>
+                    <select
+                      id="upgrade-form-type"
+                      className={styles.formInput}
+                      value={upgradeForm.formType}
+                      onChange={(e) => setUpgradeForm({ ...upgradeForm, formType: e.target.value as 'DJ' | 'EMP' })}
+                    >
+                      <option value="DJ">DJ (SAS/V-9/DJ-…)</option>
+                      <option value="EMP">EMP (SAS/V-9/EMP-…)</option>
+                    </select>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
+                      A submission with the next {upgradeForm.formType} form number is created, using details from their previous form.
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div className={styles.formGroup}>
+                      <label className={styles.formLabel} htmlFor="upgrade-tenure">Tenure</label>
+                      <input
+                        id="upgrade-tenure"
+                        type="text"
+                        maxLength={60}
+                        className={styles.formInput}
+                        placeholder="e.g. 4 Months"
+                        value={upgradeForm.tenure}
+                        onChange={(e) => setUpgradeForm({ ...upgradeForm, tenure: e.target.value })}
+                      />
+                    </div>
+                    <div className={styles.formGroup}>
+                      <label className={styles.formLabel} htmlFor="upgrade-fee">Fee</label>
+                      <input
+                        id="upgrade-fee"
+                        type="text"
+                        maxLength={60}
+                        className={styles.formInput}
+                        placeholder="e.g. 60,000 INR"
+                        value={upgradeForm.fee}
+                        onChange={(e) => setUpgradeForm({ ...upgradeForm, fee: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel} htmlFor="upgrade-batch">Batch *</label>
+                    <input
+                      id="upgrade-batch"
+                      type="text"
+                      required
+                      maxLength={200}
+                      className={styles.formInput}
+                      placeholder="e.g. Regular DJ Studio Batch"
+                      value={upgradeForm.batch}
+                      onChange={(e) => setUpgradeForm({ ...upgradeForm, batch: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className={styles.modalFooter}>
+                  <button type="button" onClick={() => setUpgradeTarget(null)} className={styles.btnSecondary}>Cancel</button>
+                  <button type="submit" className={styles.btnPrimary} disabled={isCompletionBusy}>
+                    {isCompletionBusy ? 'Saving…' : 'Upgrade student'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* NOT UPGRADING MODAL */}
+      {closeUpgradeTarget && (
+        <div className={styles.modalOverlay}>
+          <div className={styles.modalCard} style={{ maxWidth: '460px' }} role="dialog" aria-modal="true" aria-labelledby="close-upgrade-title">
+            <div className={styles.modalHeader}>
+              <h2 id="close-upgrade-title" className={styles.modalTitle}>Not upgrading</h2>
+              <button onClick={() => setCloseUpgradeTarget(null)} className={styles.closeModalBtn} aria-label="Close">✕</button>
+            </div>
+            <form onSubmit={handleSubmitCloseUpgrade}>
+              <div className={styles.modalBody}>
+                {completionError && (
+                  <div className={styles.leadsErrorBanner} role="alert" style={{ marginBottom: '1rem' }}>
+                    <span>{completionError}</span>
+                  </div>
+                )}
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: 0, lineHeight: 1.5 }}>
+                  {closeUpgradeTarget.student.name} completed {closeUpgradeTarget.completion.course}. This moves them out of the pending
+                  list; you can reopen it later.
+                </p>
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel} htmlFor="close-reason">Reason *</label>
+                  <select
+                    id="close-reason"
+                    className={styles.formInput}
+                    value={closeUpgradeForm.reason}
+                    onChange={(e) => setCloseUpgradeForm({ ...closeUpgradeForm, reason: e.target.value })}
+                  >
+                    {UPGRADE_CLOSE_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel} htmlFor="close-details">
+                    Details{closeUpgradeForm.reason === 'Other' ? ' *' : ''}
+                  </label>
+                  <input
+                    id="close-details"
+                    type="text"
+                    maxLength={200}
+                    required={closeUpgradeForm.reason === 'Other'}
+                    className={styles.formInput}
+                    value={closeUpgradeForm.details}
+                    onChange={(e) => setCloseUpgradeForm({ ...closeUpgradeForm, details: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className={styles.modalFooter}>
+                <button type="button" onClick={() => setCloseUpgradeTarget(null)} className={styles.btnSecondary}>Cancel</button>
+                <button type="submit" className={styles.btnPrimary} disabled={isCompletionBusy}>
+                  {isCompletionBusy ? 'Saving…' : 'Confirm'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* FEE RECEIPT MODAL (CREATE / EDIT) */}
       {isFeeModalOpen && (

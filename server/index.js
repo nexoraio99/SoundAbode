@@ -265,11 +265,44 @@ app.use('/api', (_req, res, next) => {
 });
 
 // ─── Real-Time Server-Sent Events (SSE) Live Stream ───────────────────────────
-const sseClients = new Set();
+// Connected streams and who is on each, so every event only reaches users allowed to see it
+const sseClients = new Map();
+
+// A teacher owns an attendance record they marked: exact email, or (older records) exact name.
+// Exact matches only; a substring match let "Ashu" see records marked by "Ashutosh".
+function isAttendanceOwner(record, user) {
+  if (!record || !user) return false;
+  const by = String(record.markedBy || '').trim().toLowerCase();
+  const byName = String(record.markedByName || '').trim().toLowerCase();
+  const email = String(user.email || '').trim().toLowerCase();
+  const name = String(user.name || '').trim().toLowerCase();
+  return (email && by === email) || (name && (by === name || byName === name));
+}
+
+// Admins receive every event. Teachers only receive what their own API access already shows
+// them: their attendance, the student roster, and leads assigned to them. Admissions (Aadhaar,
+// address, photo), fee receipts and unassigned leads stay admin-only.
+function canReceiveLiveEvent(user, type, data) {
+  if (user.role === 'admin') return true;
+  switch (type) {
+    case 'ATTENDANCE_SAVED':
+      return isAttendanceOwner(data, user);
+    case 'ATTENDANCE_DELETED':
+    case 'ATTENDANCE_PURGED':
+    case 'STUDENT_SAVED':
+    case 'STUDENT_DELETED':
+      return true;
+    case 'INQUIRY_SAVED':
+      return String(data?.assignedTo || '').toLowerCase() === String(user.email || '').toLowerCase();
+    default:
+      return false;
+  }
+}
 
 function broadcastLiveEvent(type, data) {
   const message = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const client of sseClients) {
+  for (const [client, user] of sseClients) {
+    if (!canReceiveLiveEvent(user, type, data)) continue;
     try {
       client.write(message);
     } catch {
@@ -302,7 +335,7 @@ app.get('/api/live-stream', (req, res) => {
   // Send initial ping to confirm connection
   res.write(`event: connected\ndata: ${JSON.stringify({ timestamp: new Date().toISOString() })}\n\n`);
 
-  sseClients.add(res);
+  sseClients.set(res, user);
 
   // Keep-alive heartbeat every 20s
   const heartbeat = setInterval(() => {
@@ -632,6 +665,29 @@ const studentSchema = new mongoose.Schema({
   batch: { type: String, default: '' },
   batches: [{ type: String }],
   enrolledDate: { type: String, default: () => new Date().toISOString().split('T')[0] },
+  // A completed course leaves `courses` and is recorded here. Each completion waits for an
+  // admin decision: upgrade to a next course, or close it as not upgrading.
+  courseCompletions: {
+    type: [
+      {
+        _id: false,
+        id: { type: String, required: true },
+        course: { type: String, required: true },
+        batch: { type: String, default: '' },
+        completedOn: { type: String, required: true }, // YYYY-MM-DD
+        completedBy: { type: String, default: '' },
+        note: { type: String, default: '' },
+        upgradeStatus: { type: String, enum: ['PENDING', 'UPGRADED', 'NOT_UPGRADING'], default: 'PENDING' },
+        upgradedTo: { type: String, default: '' },
+        admissionId: { type: String, default: '' },
+        admissionFormNo: { type: String, default: '' },
+        closeReason: { type: String, default: '' },
+        decidedBy: { type: String, default: '' },
+        decidedAt: { type: Date, default: null },
+      },
+    ],
+    default: [],
+  },
   attendanceRecords: [
     {
       date: String,
@@ -662,6 +718,10 @@ const admissionSchema = new mongoose.Schema({
   photoUrl: { type: String, default: '' },
   submittedAt: { type: String, default: () => new Date().toISOString() },
   status: { type: String, enum: ['NEW', 'CONTACTED', 'ENROLLED', 'ARCHIVED'], default: 'NEW' },
+  // 'UPGRADE' = created by the CMS when an admin upgraded an enrolled student to a new course
+  origin: { type: String, enum: ['FORM', 'UPGRADE'], default: 'FORM' },
+  studentId: { type: String, default: '' },
+  upgradedFrom: { type: String, default: '' },
 });
 
 const attendanceRecordSchema = new mongoose.Schema({
@@ -1061,30 +1121,15 @@ async function autoSeedIfEmpty() {
       );
     }
 
-    // Deduplicate AdmissionModel entries
-    const allAdmissions = await AdmissionModel.find();
-    const seenSigs = new Set();
-    const duplicateIds = [];
-    for (const a of allAdmissions) {
-      const sig = `${(a.email || '').toLowerCase()}_${(a.courseOpted || '').toLowerCase()}_${a.formType || 'DJ'}`;
-      if (seenSigs.has(sig)) {
-        duplicateIds.push(a._id);
-      } else {
-        seenSigs.add(sig);
-      }
-    }
-    if (duplicateIds.length > 0) {
-      await AdmissionModel.deleteMany({ _id: { $in: duplicateIds } });
-      console.log(`[INFO] Deduplicated ${duplicateIds.length} duplicate admission entries in MongoDB Atlas.`);
-    }
+    // (Removed: deleting admissions that share email + course + form type. Students who
+    //  left the email blank, or applied twice, lost real applications on every restart.)
 
-    // Seed official articles if legacy posts exist or count < 6 or content is missing
-    const hasLegacy = await BlogPostModel.exists({ id: { $in: ['post-1', 'post-2', 'post-3', 'post-4'] } });
+    // Seed the official articles only into an empty collection. Existing posts are never
+    // deleted here: wiping and reseeding whenever there were fewer than 6 posts or one had
+    // empty content destroyed every admin-written article on restart.
     const blogCount = await BlogPostModel.countDocuments();
-    const missingContent = await BlogPostModel.exists({ $or: [{ content: '' }, { content: null }, { content: { $exists: false } }] });
 
-    if (hasLegacy || blogCount < 6 || missingContent) {
-      await BlogPostModel.deleteMany({});
+    if (blogCount === 0) {
       await BlogPostModel.insertMany([
         {
           id: "1775517370006",
@@ -1826,13 +1871,27 @@ app.get('/api/inquiries', requireAuth, async (req, res) => {
 app.post('/api/inquiries', publicFormLimiter, async (req, res) => {
   // Public endpoint — contact form submissions (no auth required)
   try {
-    const inquiryData = req.body;
-    if (!inquiryData.id) inquiryData.id = `inq-${Date.now()}`;
-    if (!inquiryData.submittedAt) inquiryData.submittedAt = new Date().toISOString();
-    if (!inquiryData.status) inquiryData.status = 'NEW';
+    // Only the form's own fields are accepted. Status, assignment, notes, call notes and the
+    // Meta lead id are CMS-managed, so a visitor cannot pre-assign a lead or plant notes.
+    const src = req.body && typeof req.body === 'object' ? req.body : {};
+    const inquiryData = {
+      name: cleanStr(src.name),
+      email: cleanStr(src.email),
+      phone: cleanStr(src.phone, 60),
+      courseInterest: cleanStr(src.courseInterest) || 'General Inquiry',
+      message: typeof src.message === 'string' ? src.message.trim().slice(0, 5000) : '',
+      source: cleanStr(src.source, 100) || 'Contact Form',
+      submittedAt: new Date().toISOString(),
+      status: 'NEW',
+    };
+    if (!inquiryData.name) return res.status(400).json({ error: 'Name is required.' });
+    // Keep the browser's id only when it is a fresh inq-<timestamp> id not already in use
+    const clientId = typeof src.id === 'string' && /^inq-\d{10,16}$/.test(src.id) ? src.id : '';
+    const idTaken = clientId && mongoose.connection.readyState === 1 && (await InquiryModel.exists({ id: clientId }));
+    inquiryData.id = clientId && !idTaken ? clientId : `inq-${Date.now()}-${randomBytes(3).toString('hex')}`;
 
     // Normalize attribution and resolve source label
-    const rawAttribution = inquiryData.attribution || {};
+    const rawAttribution = src.attribution && typeof src.attribution === 'object' ? src.attribution : {};
     const resolvedSource = resolveLeadSource(rawAttribution);
     inquiryData.attribution = {
       source: resolvedSource,
@@ -2181,7 +2240,7 @@ app.post('/api/webhooks/meta-leads', async (req, res) => {
 });
 
 // 3. GET: Webhook and credentials status (for CMS Admin Meta Ads tab)
-app.get('/api/webhooks/meta-leads/status', requireAuth, async (req, res) => {
+app.get('/api/webhooks/meta-leads/status', requireAuth, requireAdmin, async (req, res) => {
   const hasVerifyToken = Boolean(process.env.META_WEBHOOK_VERIFY_TOKEN);
   const hasAppSecret = Boolean(process.env.META_APP_SECRET);
   const hasPageAccessToken = Boolean(process.env.META_PAGE_ACCESS_TOKEN);
@@ -2381,26 +2440,55 @@ app.post('/api/webhooks/meta-leads/sync', requireAuth, requireAdmin, async (req,
 
 // ─── ADMISSIONS ────────────────────────────────────────────────────────────────
 
-// Helper: compute the next sequential form number from MongoDB.
-// Always queries the live DB so it can never produce a duplicate.
-async function getNextFormNo(formType) {
-  const prefix = formType === 'EMP' ? 'EMP' : 'DJ';
-  const startSeq = formType === 'EMP' ? 2000 : 1000;
-  let maxSeq = startSeq;
-  if (mongoose.connection.readyState === 1) {
-    const all = await AdmissionModel.find(
-      { formType },
-      { formNo: 1, _id: 0 }
-    );
-    all.forEach(({ formNo }) => {
-      const m = (formNo || '').match(/(?:DJ|EMP)-(\d+)/i);
-      if (m) {
-        const n = parseInt(m[1], 10);
-        if (!isNaN(n) && n > maxSeq) maxSeq = n;
-      }
-    });
+// ─── Form numbers (SAS/V-9/DJ-1001, SAS/V-9/EMP-2001, …) ───────────────────────
+// Numbers come from an atomic per-type counter, so two forms saved at the same moment can never
+// share a number (reading the highest existing number and adding one could hand out the same
+// number twice). Before each allocation the counter is raised to at least the highest number
+// already on a form, so it continues from existing data and from any manually edited numbers.
+// A number taken by a save that then fails is not reused (a gap, never a duplicate).
+const CounterModel = mongoose.model('Counter', new mongoose.Schema({ _id: String, seq: Number }, { versionKey: false }));
+const FORM_NO_START = { DJ: 1000, EMP: 2000 };
+
+const formatFormNo = (formType, seq) => `SAS/V-9/${formType}-${seq}`;
+
+async function highestFormSeq(formType) {
+  let maxSeq = FORM_NO_START[formType];
+  const all = await AdmissionModel.find({ formType }, { formNo: 1, _id: 0 }).lean();
+  all.forEach(({ formNo }) => {
+    const m = (formNo || '').match(/(?:DJ|EMP)-(\d+)/i);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (!isNaN(n) && n > maxSeq) maxSeq = n;
+    }
+  });
+  return maxSeq;
+}
+
+// The number the next form will probably get (for the form's preview; allocates nothing)
+async function peekNextFormNo(formType) {
+  const type = formType === 'EMP' ? 'EMP' : 'DJ';
+  if (mongoose.connection.readyState !== 1) return formatFormNo(type, FORM_NO_START[type] + 1);
+  const [highest, counter] = await Promise.all([highestFormSeq(type), CounterModel.findById(`formNo-${type}`).lean()]);
+  return formatFormNo(type, Math.max(highest, counter?.seq || 0) + 1);
+}
+
+// Takes the next number for a form that is being saved now
+async function allocateFormNo(formType) {
+  const type = formType === 'EMP' ? 'EMP' : 'DJ';
+  if (mongoose.connection.readyState !== 1) return formatFormNo(type, FORM_NO_START[type] + 1);
+  const key = `formNo-${type}`;
+  const highest = await highestFormSeq(type);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await CounterModel.updateOne({ _id: key }, { $max: { seq: highest } }, { upsert: true });
+      const counter = await CounterModel.findOneAndUpdate({ _id: key }, { $inc: { seq: 1 } }, { new: true, upsert: true });
+      return formatFormNo(type, counter.seq);
+    } catch (err) {
+      // Two first-ever allocations can both try to create the counter; the loser retries once
+      if (err?.code === 11000 && attempt === 0) continue;
+      throw err;
+    }
   }
-  return `SAS/V-9/${prefix}-${maxSeq + 1}`;
 }
 
 // Public endpoint — lets the form preview the next form number before submitting
@@ -2410,14 +2498,14 @@ app.get('/api/admissions/next-form-number', async (req, res) => {
     if (formType !== 'DJ' && formType !== 'EMP') {
       return res.status(400).json({ error: 'formType must be DJ or EMP' });
     }
-    const formNo = await getNextFormNo(formType);
+    const formNo = await peekNextFormNo(formType);
     return res.json({ formNo });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/api/admissions', requireAuth, async (req, res) => {
+app.get('/api/admissions', requireAuth, requireAdmin, async (req, res) => {
   try {
     if (mongoose.connection.readyState === 1) {
       const admissions = await AdmissionModel.find().sort({ submittedAt: -1 });
@@ -2432,16 +2520,42 @@ app.get('/api/admissions', requireAuth, async (req, res) => {
 app.post('/api/admissions', publicFormLimiter, async (req, res) => {
   // Public endpoint — admission form submissions
   try {
-    const admissionData = req.body;
-    if (!admissionData.id) admissionData.id = `adm-${Date.now()}`;
-    if (!admissionData.submittedAt) admissionData.submittedAt = new Date().toISOString();
-    if (!admissionData.status) admissionData.status = 'NEW';
+    // Whitelist the form fields. Status, form number and submit time are always set here,
+    // so a visitor can never mark themselves ENROLLED or rewrite another application.
+    const src = req.body && typeof req.body === 'object' ? req.body : {};
+    const formType = String(src.formType || 'DJ').toUpperCase() === 'EMP' ? 'EMP' : 'DJ';
+    const admissionData = {
+      formType,
+      firstName: cleanStr(src.firstName),
+      lastName: cleanStr(src.lastName),
+      cellPhone: cleanStr(src.cellPhone, 60),
+      workPhone: cleanStr(src.workPhone, 60),
+      email: cleanStr(src.email),
+      aadharNo: cleanStr(src.aadharNo, 40),
+      fatherName: cleanStr(src.fatherName),
+      address: cleanStr(src.address, 1000),
+      courseOpted: cleanStr(src.courseOpted),
+      tenure: cleanStr(src.tenure),
+      fee: cleanStr(src.fee),
+      paymentOption: ['Full Payment', '2 Easy Instalments'].includes(src.paymentOption) ? src.paymentOption : '',
+      agreedToTerms: src.agreedToTerms !== false,
+      signatureName: cleanStr(src.signatureName),
+      photoUrl: typeof src.photoUrl === 'string' ? src.photoUrl : '',
+      submittedAt: new Date().toISOString(),
+      status: 'NEW',
+    };
+    if (!admissionData.firstName) {
+      return res.status(400).json({ error: 'First name is required.' });
+    }
+
+    // Keep the browser's id only when it is a fresh adm-<timestamp> id not already in use
+    // (the form uses it to update its local copy); otherwise mint one.
+    const clientId = typeof src.id === 'string' && /^adm-\d{10,16}$/.test(src.id) ? src.id : '';
+    const idTaken = clientId && mongoose.connection.readyState === 1 && (await AdmissionModel.exists({ id: clientId }));
+    admissionData.id = clientId && !idTaken ? clientId : `adm-${Date.now()}-${randomBytes(3).toString('hex')}`;
 
     // ── Form number is ALWAYS assigned server-side from MongoDB ──────────────
-    // This ensures the sequence is correct and no two submissions ever share
-    // the same form number, regardless of what the client sends.
-    const formType = admissionData.formType || 'DJ';
-    admissionData.formNo = await getNextFormNo(formType);
+    admissionData.formNo = await allocateFormNo(formType);
     // ─────────────────────────────────────────────────────────────────────────
 
     // Forward to Google Sheets server-side
@@ -2453,11 +2567,8 @@ app.post('/api/admissions', publicFormLimiter, async (req, res) => {
     // Attempt MongoDB save
     if (mongoose.connection.readyState === 1) {
       try {
-        const admission = await AdmissionModel.findOneAndUpdate(
-          { id: admissionData.id },
-          admissionData,
-          { upsert: true, new: true }
-        );
+        // create(), not an upsert: a submission must never replace an existing record
+        const admission = await AdmissionModel.create(admissionData);
         const result = { ...admission.toObject(), mongoSaved: true };
         broadcastLiveEvent('ADMISSION_CREATED', result);
         return res.status(201).json(result);
@@ -2477,7 +2588,7 @@ app.post('/api/admissions', publicFormLimiter, async (req, res) => {
   }
 });
 
-app.patch('/api/admissions/:id', requireAuth, async (req, res) => {
+app.patch('/api/admissions/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const updates = stripUnsafeKeys(req.body);
@@ -2533,7 +2644,7 @@ app.patch('/api/admissions/:id', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/api/admissions/:id', requireAuth, async (req, res) => {
+app.delete('/api/admissions/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     if (mongoose.connection.readyState === 1) {
@@ -2620,20 +2731,14 @@ app.get('/api/attendance', requireAuth, async (req, res) => {
     const user = req.sessionUser;
     let query = {};
 
-    // Strict role isolation: Teachers only receive attendance records marked by themselves
+    // Teachers only receive records they marked (same exact rule as isAttendanceOwner)
     if (user && user.role === 'teacher') {
-      const userEmail = (user.email || '').trim().toLowerCase();
-      const userName = (user.name || '').trim().toLowerCase();
-      const userEmailRegex = new RegExp(`^${userEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
-      const userNameRegex = new RegExp(`^${userName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
-      const nameKeyRegex = new RegExp(userName, 'i');
-
+      const exact = (value) => new RegExp('^' + escapeRegex(String(value || '').trim()) + '$', 'i');
       query = {
         $or: [
-          { markedBy: userEmailRegex },
-          { markedByName: userNameRegex },
-          { markedBy: nameKeyRegex },
-          { markedByName: nameKeyRegex },
+          { markedBy: exact(user.email) },
+          { markedBy: exact(user.name) },
+          { markedByName: exact(user.name) },
         ],
       };
     }
@@ -2650,24 +2755,35 @@ app.get('/api/attendance', requireAuth, async (req, res) => {
 
 app.post('/api/attendance', requireAuth, async (req, res) => {
   try {
-    const recordData = req.body || {};
+    const src = req.body || {};
     const user = req.sessionUser;
 
     // Strict Server-Side Validation
-    if (!recordData.studentId || typeof recordData.studentId !== 'string') {
+    if (!src.studentId || typeof src.studentId !== 'string') {
       return res.status(400).json({ error: 'Valid student ID is required.' });
     }
-    if (!recordData.date || typeof recordData.date !== 'string') {
+    if (typeof src.date !== 'string' || !YMD_RE.test(src.date)) {
       return res.status(400).json({ error: 'Valid date (YYYY-MM-DD) is required.' });
     }
-    if (!recordData.timeSlot || typeof recordData.timeSlot !== 'string') {
+    if (!src.timeSlot || typeof src.timeSlot !== 'string') {
       return res.status(400).json({ error: 'Valid time slot is required.' });
     }
 
     const VALID_STATUSES = ['PRESENT', 'ABSENT', 'PRACTICE_SESSION', 'GROUP_SESSION', 'NA'];
-    if (!recordData.status || !VALID_STATUSES.includes(recordData.status)) {
-      recordData.status = 'PRESENT';
-    }
+    // Only known fields are stored (no _id, ids or other fields from the request body)
+    const recordData = {
+      studentId: cleanStr(src.studentId, 60),
+      studentName: cleanStr(src.studentName),
+      studentEmail: cleanStr(src.studentEmail),
+      studentPhone: cleanStr(src.studentPhone, 60),
+      course: cleanStr(src.course, 300),
+      batch: cleanStr(src.batch, 300),
+      date: src.date,
+      timeSlot: cleanStr(src.timeSlot, 60),
+      status: VALID_STATUSES.includes(src.status) ? src.status : 'PRESENT',
+      comment: typeof src.comment === 'string' ? src.comment.slice(0, 1000) : '',
+      updatedAt: new Date().toISOString(),
+    };
 
     // Role-based teacher identity enforcement on server
     if (user.role === 'teacher') {
@@ -2675,47 +2791,49 @@ app.post('/api/attendance', requireAuth, async (req, res) => {
       recordData.markedByName = user.name;
       recordData.markedByRole = 'teacher';
     } else {
-      if (!recordData.markedBy) recordData.markedBy = user.email || 'abhinav@soundabode.com';
-      if (!recordData.markedByName) recordData.markedByName = user.name || 'Abhinav';
-      if (!recordData.markedByRole) recordData.markedByRole = user.role || 'admin';
+      recordData.markedBy = cleanStr(src.markedBy) || user.email;
+      recordData.markedByName = cleanStr(src.markedByName) || user.name;
+      recordData.markedByRole = src.markedByRole === 'teacher' ? 'teacher' : 'admin';
     }
 
     // Sent for a multi-course student's course entry: the same student can have two
     // courses in one slot, so the course is part of what identifies the record.
-    const courseScoped = recordData.courseScoped === true && typeof recordData.course === 'string' && recordData.course.trim();
-    delete recordData.courseScoped;
-
-    if (!recordData.id) {
-      recordData.id = `att-${Date.now()}-${Math.random().toString(36).substring(2, 8)}-${recordData.studentId}`;
-    }
-    recordData.updatedAt = new Date().toISOString();
-    if (typeof recordData.comment !== 'string') recordData.comment = '';
-    if (recordData.comment.length > 1000) recordData.comment = recordData.comment.slice(0, 1000);
+    const courseScoped = src.courseScoped === true && Boolean(recordData.course);
+    const requestedId = cleanStr(src.id, 160);
 
     if (mongoose.connection.readyState === 1) {
-      const query = {
-        $or: [
-          { id: recordData.id },
-          {
-            studentId: recordData.studentId,
-            date: recordData.date,
-            timeSlot: recordData.timeSlot,
-            markedBy: recordData.markedBy,
-            ...(courseScoped ? { course: recordData.course } : {}),
-          },
-        ],
+      // A teacher may only update a record by id if they own it
+      if (requestedId && user.role === 'teacher') {
+        const byId = await AttendanceRecordModel.findOne({ id: requestedId }).lean();
+        if (byId && !isAttendanceOwner(byId, user)) {
+          return res.status(403).json({ error: 'Forbidden. You can only change your own attendance records.' });
+        }
+      }
+      const slotMatch = {
+        studentId: recordData.studentId,
+        date: recordData.date,
+        timeSlot: recordData.timeSlot,
+        markedBy: recordData.markedBy,
+        ...(courseScoped ? { course: recordData.course } : {}),
       };
+      const query = requestedId ? { $or: [{ id: requestedId }, slotMatch] } : slotMatch;
+      // The id is set only when the record is created, so re-marking a slot keeps its id
+      // (it used to be replaced by each new request's id, breaking deletes from other tabs).
       const record = await AttendanceRecordModel.findOneAndUpdate(
         query,
-        recordData,
+        {
+          $set: recordData,
+          $setOnInsert: { id: requestedId || `att-${Date.now()}-${randomBytes(3).toString('hex')}-${recordData.studentId}` },
+        },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
       broadcastLiveEvent('ATTENDANCE_SAVED', record);
       return res.status(201).json(record);
     }
 
-    broadcastLiveEvent('ATTENDANCE_SAVED', recordData);
-    res.status(201).json(recordData);
+    const offlineRecord = { ...recordData, id: requestedId || `att-${Date.now()}-${recordData.studentId}` };
+    broadcastLiveEvent('ATTENDANCE_SAVED', offlineRecord);
+    res.status(201).json(offlineRecord);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2743,16 +2861,9 @@ app.delete('/api/attendance/:id', requireAuth, async (req, res) => {
     if (mongoose.connection.readyState === 1) {
       // If teacher, check ownership before deletion
       if (user.role === 'teacher') {
-        const existing = await AttendanceRecordModel.findOne(buildDeleteQuery(id));
-        if (existing) {
-          const mBy = (existing.markedBy || '').toLowerCase();
-          const mName = (existing.markedByName || '').toLowerCase();
-          const uEmail = (user.email || '').toLowerCase();
-          const uName = (user.name || '').toLowerCase();
-          const isOwner = mBy === uEmail || mName === uName || mBy.includes(uName) || mName.includes(uName);
-          if (!isOwner) {
-            return res.status(403).json({ error: 'Forbidden. You can only delete your own attendance records.' });
-          }
+        const existing = await AttendanceRecordModel.findOne(buildDeleteQuery(id)).lean();
+        if (existing && !isAttendanceOwner(existing, user)) {
+          return res.status(403).json({ error: 'Forbidden. You can only delete your own attendance records.' });
         }
       }
 
@@ -2782,7 +2893,7 @@ app.get('/api/posts', async (req, res) => {
   }
 });
 
-app.post('/api/posts', requireAuth, async (req, res) => {
+app.post('/api/posts', requireAuth, requireAdmin, async (req, res) => {
   try {
     const postData = req.body;
     if (mongoose.connection.readyState === 1) {
@@ -2798,7 +2909,7 @@ app.post('/api/posts', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/api/posts/:id', requireAuth, async (req, res) => {
+app.delete('/api/posts/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     if (mongoose.connection.readyState === 1) {
@@ -2835,7 +2946,7 @@ app.get('/api/students', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/students', requireAuth, async (req, res) => {
+app.post('/api/students', requireAuth, requireAdmin, async (req, res) => {
   try {
     const isNew = req.body && req.body.isNew === true;
     const studentData = sanitizeStudentPayload(req.body);
@@ -2883,6 +2994,261 @@ app.post('/api/students', requireAuth, async (req, res) => {
   }
 });
 
+// ─── COURSE COMPLETION & UPGRADES (admin only) ───────────────────────────────
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+const sameCourse = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+
+// "Today" in the studio's timezone. The server runs in UTC (Render), which is still the previous
+// day until 05:30 IST, so a completion dated today in Pune would otherwise be rejected as future.
+const STUDIO_TIMEZONE = 'Asia/Kolkata';
+function todayYmd() {
+  // en-CA formats as YYYY-MM-DD
+  return new Intl.DateTimeFormat('en-CA', { timeZone: STUDIO_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+
+// Batches line up with courses by index only when both lists are the same length
+// (the same rule the CMS uses to show a course's batch)
+function courseLists(student) {
+  const courses = toUniqueList(student.courses, student.course);
+  const batches = toUniqueList(student.batches, student.batch);
+  return { courses, batches, aligned: batches.length === courses.length };
+}
+
+// Appends a course, and its batch when that keeps the lists consistent: always when they
+// were aligned, otherwise only if the batch is not already listed
+function withCourseAdded({ courses, batches, aligned }, course, batch) {
+  const nextCourses = [...courses, course];
+  if (!batch) return { courses: nextCourses, batches };
+  if (aligned || !batches.some((b) => sameCourse(b, batch))) return { courses: nextCourses, batches: [...batches, batch] };
+  return { courses: nextCourses, batches };
+}
+
+// Writes the new lists and completions only if the student's courses and completions are
+// still what we read, so two admins acting at once cannot overwrite each other.
+async function saveCourseState(student, courses, batches, completions) {
+  const unchanged = (value) => (Array.isArray(value) ? value : { $exists: false });
+  const cleanBatches = toUniqueList(batches);
+  const updated = await StudentModel.findOneAndUpdate(
+    { _id: student._id, courses: unchanged(student.courses), courseCompletions: unchanged(student.courseCompletions) },
+    {
+      $set: {
+        courses,
+        course: courses.join(', '),
+        batches: cleanBatches,
+        batch: cleanBatches.join(' | '),
+        courseCompletions: completions,
+      },
+    },
+    { new: true }
+  );
+  if (updated) broadcastLiveEvent('STUDENT_SAVED', updated);
+  return updated;
+}
+
+const CONFLICT_MSG = 'This student was changed by someone else. Refresh and try again.';
+
+// The student's most recent admission form: matched by email when the student has one,
+// otherwise by exact full name. Used to carry personal details onto the upgrade form.
+async function findLatestAdmissionFor(student) {
+  const email = cleanStr(student.email).toLowerCase();
+  let filter;
+  if (email) {
+    filter = { email: new RegExp('^' + escapeRegex(email) + '$', 'i') };
+  } else {
+    const [first, ...rest] = cleanStr(student.name).split(/\s+/);
+    if (!first) return null;
+    filter = {
+      firstName: new RegExp('^' + escapeRegex(first) + '$', 'i'),
+      lastName: new RegExp('^' + escapeRegex(rest.join(' ')) + '$', 'i'),
+    };
+  }
+  return AdmissionModel.findOne(filter).sort({ submittedAt: -1 }).lean();
+}
+
+// The form recorded when a student is upgraded: next serial form number for its type,
+// personal details from their previous form, and ENROLLED since they already joined.
+// Terms and signature are left unset: the student has not signed this form.
+async function buildUpgradeAdmission(student, completion, { targetCourse, formType, tenure, fee }) {
+  const previous = await findLatestAdmissionFor(student);
+  const [first, ...rest] = cleanStr(student.name).split(/\s+/);
+  return {
+    id: `adm-${Date.now()}-${randomBytes(3).toString('hex')}`,
+    formNo: await allocateFormNo(formType),
+    formType,
+    firstName: previous?.firstName || first || student.name,
+    lastName: previous ? previous.lastName || '' : rest.join(' '),
+    cellPhone: cleanStr(student.phone, 60) || previous?.cellPhone || '',
+    workPhone: previous?.workPhone || '',
+    email: cleanStr(student.email) || previous?.email || '',
+    aadharNo: previous?.aadharNo || '',
+    fatherName: previous?.fatherName || '',
+    address: previous?.address || '',
+    photoUrl: previous?.photoUrl || '',
+    courseOpted: targetCourse,
+    tenure,
+    fee,
+    paymentOption: '',
+    agreedToTerms: false,
+    signatureName: '',
+    submittedAt: new Date().toISOString(),
+    status: 'ENROLLED',
+    origin: 'UPGRADE',
+    studentId: student.id,
+    upgradedFrom: completion.course,
+  };
+}
+
+// Mark one of a student's active courses as completed
+app.post('/api/students/:id/completions', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: 'Database unavailable. Nothing was changed.' });
+    const course = cleanStr((req.body || {}).course);
+    const completedOn = cleanStr((req.body || {}).completedOn, 10) || todayYmd();
+    const note = cleanStr((req.body || {}).note, 500);
+    if (!course) return res.status(400).json({ error: 'Choose the course to mark as completed.' });
+    if (!YMD_RE.test(completedOn)) return res.status(400).json({ error: 'Completion date must be YYYY-MM-DD.' });
+    if (completedOn > todayYmd()) return res.status(400).json({ error: 'Completion date cannot be in the future.' });
+
+    const student = await StudentModel.findOne({ id: String(req.params.id) }).lean();
+    if (!student) return res.status(404).json({ error: 'Student not found.' });
+
+    const { courses, batches, aligned } = courseLists(student);
+    const idx = courses.findIndex((c) => sameCourse(c, course));
+    if (idx === -1) return res.status(400).json({ error: `"${course}" is not one of this student's active courses.` });
+    if (YMD_RE.test(student.enrolledDate || '') && completedOn < student.enrolledDate) {
+      return res.status(400).json({ error: `Completion date is before the student's enrolment date (${student.enrolledDate}).` });
+    }
+
+    const completion = {
+      id: `cmp-${Date.now()}-${randomBytes(3).toString('hex')}`,
+      course: courses[idx],
+      batch: aligned ? batches[idx] : batches.length === 1 ? batches[0] : '',
+      completedOn,
+      completedBy: req.sessionUser.email,
+      note,
+      upgradeStatus: 'PENDING',
+      upgradedTo: '',
+      closeReason: '',
+      decidedBy: '',
+      decidedAt: null,
+    };
+    const nextCourses = courses.filter((_, i) => i !== idx);
+    // Drop the batch with the course when they line up; a single shared batch stays while courses remain
+    const nextBatches = aligned ? batches.filter((_, i) => i !== idx) : nextCourses.length > 0 ? batches : [];
+
+    const updated = await saveCourseState(student, nextCourses, nextBatches, [...(student.courseCompletions || []), completion]);
+    if (!updated) return res.status(409).json({ error: CONFLICT_MSG });
+    res.status(201).json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Decide a pending completion: UPGRADE to a next course, CLOSE as not upgrading,
+// or REOPEN a closed one back to pending
+app.patch('/api/students/:id/completions/:completionId', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: 'Database unavailable. Nothing was changed.' });
+    const body = req.body || {};
+    const action = String(body.action || '');
+    if (!['UPGRADE', 'CLOSE', 'REOPEN'].includes(action)) return res.status(400).json({ error: 'Unknown action.' });
+
+    const student = await StudentModel.findOne({ id: String(req.params.id) }).lean();
+    if (!student) return res.status(404).json({ error: 'Student not found.' });
+    const completions = (student.courseCompletions || []).map((c) => ({ ...c }));
+    const completion = completions.find((c) => c.id === req.params.completionId);
+    if (!completion) return res.status(404).json({ error: 'Completion record not found.' });
+
+    const lists = courseLists(student);
+    let { courses, batches } = lists;
+    let upgradeAdmission = null;
+
+    if (action === 'UPGRADE') {
+      if (completion.upgradeStatus !== 'PENDING') return res.status(409).json({ error: 'This completion has already been decided.' });
+      const targetCourse = cleanStr(body.targetCourse);
+      const targetBatch = cleanStr(body.batch) || completion.batch;
+      if (!targetCourse) return res.status(400).json({ error: 'Choose the course to upgrade to.' });
+      if (sameCourse(targetCourse, completion.course)) return res.status(400).json({ error: 'The upgrade course must differ from the completed course.' });
+      if (courses.some((c) => sameCourse(c, targetCourse))) return res.status(409).json({ error: `The student is already enrolled in "${targetCourse}".` });
+      if (!targetBatch) return res.status(400).json({ error: 'Enter a batch for the new course.' });
+      const formType = String(body.formType || '');
+      if (formType !== 'DJ' && formType !== 'EMP') return res.status(400).json({ error: 'Choose the form type (DJ or EMP) for the new submission.' });
+      ({ courses, batches } = withCourseAdded(lists, targetCourse, targetBatch));
+      upgradeAdmission = await buildUpgradeAdmission(student, completion, {
+        targetCourse,
+        formType,
+        tenure: cleanStr(body.tenure),
+        fee: cleanStr(body.fee),
+      });
+      completion.upgradeStatus = 'UPGRADED';
+      completion.upgradedTo = targetCourse;
+      completion.admissionId = upgradeAdmission.id;
+      completion.admissionFormNo = upgradeAdmission.formNo;
+      completion.closeReason = '';
+    } else if (action === 'CLOSE') {
+      if (completion.upgradeStatus !== 'PENDING') return res.status(409).json({ error: 'Only a pending completion can be closed.' });
+      const reason = cleanStr(body.reason, 300);
+      if (!reason) return res.status(400).json({ error: 'Give a reason for not upgrading.' });
+      completion.upgradeStatus = 'NOT_UPGRADING';
+      completion.closeReason = reason;
+    } else {
+      if (completion.upgradeStatus !== 'NOT_UPGRADING') return res.status(409).json({ error: 'Only a completion marked "not upgrading" can be reopened.' });
+      completion.upgradeStatus = 'PENDING';
+      completion.closeReason = '';
+    }
+    const reopened = action === 'REOPEN';
+    completion.decidedBy = reopened ? '' : req.sessionUser.email;
+    completion.decidedAt = reopened ? null : new Date();
+
+    // An upgrade writes two records. The form is created first and removed again if the
+    // student update does not go through, so there is never an upgrade without its form
+    // or a form for an upgrade that did not happen.
+    if (upgradeAdmission) await AdmissionModel.create(upgradeAdmission);
+    let updated;
+    try {
+      updated = await saveCourseState(student, courses, batches, completions);
+    } catch (saveErr) {
+      if (upgradeAdmission) await AdmissionModel.deleteOne({ id: upgradeAdmission.id });
+      throw saveErr;
+    }
+    if (!updated) {
+      if (upgradeAdmission) await AdmissionModel.deleteOne({ id: upgradeAdmission.id });
+      return res.status(409).json({ error: CONFLICT_MSG });
+    }
+    if (upgradeAdmission) broadcastLiveEvent('ADMISSION_CREATED', { ...upgradeAdmission, mongoSaved: true });
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Undo a completion marked by mistake: the course goes back to the student's active courses.
+// Not allowed once upgraded (the new course would also have to be undone).
+app.delete('/api/students/:id/completions/:completionId', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (mongoose.connection.readyState !== 1) return res.status(503).json({ error: 'Database unavailable. Nothing was changed.' });
+    const student = await StudentModel.findOne({ id: String(req.params.id) }).lean();
+    if (!student) return res.status(404).json({ error: 'Student not found.' });
+    const completions = student.courseCompletions || [];
+    const completion = completions.find((c) => c.id === req.params.completionId);
+    if (!completion) return res.status(404).json({ error: 'Completion record not found.' });
+    if (completion.upgradeStatus === 'UPGRADED') {
+      return res.status(409).json({ error: `Already upgraded to "${completion.upgradedTo}". Remove that course first if the upgrade was a mistake.` });
+    }
+
+    const lists = courseLists(student);
+    // The same course may have been re-added since (e.g. re-enrolled); then only the record goes
+    const { courses, batches } = lists.courses.some((c) => sameCourse(c, completion.course))
+      ? lists
+      : withCourseAdded(lists, completion.course, completion.batch);
+    const updated = await saveCourseState(student, courses, batches, completions.filter((c) => c.id !== completion.id));
+    if (!updated) return res.status(409).json({ error: CONFLICT_MSG });
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/admin/standardize-student-ids', requireAuth, requireAdmin, async (req, res) => {
   try {
     await syncAndMigrateStudentSequence();
@@ -2899,31 +3265,16 @@ app.post('/api/admin/standardize-student-ids', requireAuth, requireAdmin, async 
   }
 });
 
-app.delete('/api/students/:id', requireAuth, async (req, res) => {
+app.delete('/api/students/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { email, name } = req.query;
     if (mongoose.connection.readyState === 1) {
       const cleanId = String(id || '').trim();
-      const queryConditions = [
-        { id: cleanId },
-        { name: cleanId },
-        { email: cleanId },
-      ];
-
-      if (email && typeof email === 'string') {
-        queryConditions.push({ email: email.trim() });
-      }
-      if (name && typeof name === 'string') {
-        queryConditions.push({ name: name.trim() });
-      }
-      if (mongoose.Types.ObjectId.isValid(cleanId)) {
-        queryConditions.push({ _id: new mongoose.Types.ObjectId(cleanId) });
-        queryConditions.push({ _id: cleanId });
-      }
-
-      const result = await StudentModel.deleteMany({ $or: queryConditions });
-      console.log(`[DELETE] Deleted ${result.deletedCount} student(s) matching id/email/name: ${id} / ${email || ''} / ${name || ''}`);
+      if (!cleanId) return res.status(400).json({ error: 'Student id is required.' });
+      // Match by id only. Matching name or email as well deleted every other student who
+      // shared that name or email (siblings, namesakes).
+      const result = await StudentModel.deleteOne(buildDeleteQuery(cleanId));
+      console.log(`[DELETE] Deleted ${result.deletedCount} student(s) matching id: ${cleanId}`);
       broadcastLiveEvent('STUDENT_DELETED', { id: cleanId });
       return res.json({ success: true, deletedCount: result.deletedCount, id: cleanId });
     }
@@ -2938,7 +3289,9 @@ app.delete('/api/students/:id', requireAuth, async (req, res) => {
 app.get('/api/issues', requireAuth, async (req, res) => {
   try {
     if (isConnected) {
-      const issues = await IssueModel.find().sort({ createdAt: -1 }).lean();
+      // Teachers see only the issues they reported
+      const filter = req.sessionUser.role === 'admin' ? {} : { reporterEmail: req.sessionUser.email };
+      const issues = await IssueModel.find(filter).sort({ createdAt: -1 }).lean();
       return res.json({ success: true, issues });
     }
     res.json({ success: true, issues: [] });
@@ -2973,7 +3326,9 @@ function getMailTransporter() {
       port,
       secure,
       auth: { user, pass },
-      tls: { rejectUnauthorized: false }
+      // Certificates are verified (smtp.zoho.com has a valid one); not verifying them would
+      // let anyone on the network path read the SMTP password and every email
+      tls: { rejectUnauthorized: true }
     });
   }
   return mailTransporter;
@@ -3021,23 +3376,24 @@ const DEVELOPER_SENDER_EMAIL = process.env.SMTP_FROM_EMAIL || 'services@soundabo
 
 app.post('/api/issues', requireAuth, async (req, res) => {
   try {
-    const { title, description, category, priority, systemInfo, reporterEmail, reporterName, reporterRole, id } = req.body || {};
+    const { title, description, category, priority, systemInfo, id } = req.body || {};
     if (!title || !description) {
       return res.status(400).json({ error: 'Title and description are required.' });
     }
 
-    const issueId = id || `issue_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const issueId = cleanStr(id, 80) || `issue_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     const user = req.sessionUser || {};
 
     const issueData = {
       id: issueId,
       title: String(title).trim(),
       description: String(description).trim(),
-      category: category || 'Bug / Technical Issue',
-      priority: priority || 'Medium',
-      reporterEmail: reporterEmail || user.email || '',
-      reporterName: reporterName || user.name || '',
-      reporterRole: reporterRole || user.role || '',
+      category: cleanStr(category, 100) || 'Bug / Technical Issue',
+      priority: cleanStr(priority, 30) || 'Medium',
+      // Always the logged-in user, so a report cannot be filed under someone else's name
+      reporterEmail: user.email || '',
+      reporterName: user.name || '',
+      reporterRole: user.role || '',
       systemInfo: systemInfo || {},
       status: 'OPEN',
       createdAt: new Date().toISOString()
@@ -3105,11 +3461,18 @@ app.post('/api/issues', requireAuth, async (req, res) => {
 });
 
 // ─── STUDENT EMAIL REMINDERS ENDPOINT ──────────────────────────────────────
-app.post('/api/students/send-reminder', requireAuth, async (req, res) => {
+app.post('/api/students/send-reminder', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { studentEmail, studentName, subject, message, reminderType, courseName } = req.body || {};
     if (!studentEmail || !subject || !message) {
       return res.status(400).json({ error: 'Student email, subject, and message are required.' });
+    }
+    // Exactly one plain address (no lists, display names or line breaks) and plain-text fields
+    if (typeof studentEmail !== 'string' || !/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(studentEmail.trim())) {
+      return res.status(400).json({ error: 'Enter one valid student email address.' });
+    }
+    if (typeof subject !== 'string' || typeof message !== 'string' || /[\r\n]/.test(subject)) {
+      return res.status(400).json({ error: 'Subject and message must be plain text (subject on one line).' });
     }
 
     const typeTitle = reminderType === 'FEE_PAYMENT' ? 'Fee Payment Reminder'
@@ -3157,7 +3520,7 @@ app.post('/api/students/send-reminder', requireAuth, async (req, res) => {
   }
 });
 
-app.patch('/api/issues/:id', requireAuth, async (req, res) => {
+app.patch('/api/issues/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { status, developerNotes } = req.body || {};
@@ -3309,16 +3672,28 @@ app.post('/api/admin/backups/restore/:filename', requireAuth, requireAdmin, asyn
     const snapshot = JSON.parse(raw);
     const data = snapshot.data || snapshot;
 
+    // Snapshot rows carry Mongo's own _id/__v. Writing those back fails whenever the record was
+    // recreated since (different _id), which used to abort the restore halfway. Records are
+    // matched by their app id instead, and one bad row is counted and skipped, not fatal.
+    const withoutMongoKeys = (doc) => {
+      const { _id, __v, ...rest } = doc;
+      return stripMongoOperators(rest);
+    };
+    const failures = [];
+
     let restoredAttendance = 0;
     if (Array.isArray(data.attendanceRecords) && isConnected) {
       for (const rec of data.attendanceRecords) {
-        if (rec && rec.id && rec.studentId && rec.date) {
+        if (!rec || !rec.id || !rec.studentId || !rec.date) continue;
+        try {
           await AttendanceRecordModel.findOneAndUpdate(
-            { id: rec.id },
-            rec,
-            { upsert: true, new: true, setDefaultsOnInsert: true }
+            { id: String(rec.id) },
+            { $set: withoutMongoKeys(rec) },
+            { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
           );
           restoredAttendance++;
+        } catch (rowErr) {
+          failures.push({ type: 'attendance', id: rec.id, error: rowErr.message });
         }
       }
       broadcastLiveEvent('ATTENDANCE_SAVED', {});
@@ -3327,22 +3702,27 @@ app.post('/api/admin/backups/restore/:filename', requireAuth, requireAdmin, asyn
     let restoredStudents = 0;
     if (Array.isArray(data.students) && isConnected) {
       for (const st of data.students) {
-        if (st && st.id && st.name) {
+        if (!st || !st.id || !st.name) continue;
+        try {
           await StudentModel.findOneAndUpdate(
-            { id: st.id },
-            st,
-            { upsert: true, new: true, setDefaultsOnInsert: true }
+            { id: String(st.id) },
+            { $set: withoutMongoKeys(st) },
+            { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
           );
           restoredStudents++;
+        } catch (rowErr) {
+          failures.push({ type: 'student', id: st.id, error: rowErr.message });
         }
       }
     }
 
-    console.log(`[BACKUP RESTORE] Restored ${restoredAttendance} attendance records and ${restoredStudents} students from ${safeName}`);
+    console.log(`[BACKUP RESTORE] Restored ${restoredAttendance} attendance records and ${restoredStudents} students from ${safeName} (${failures.length} failed)`);
     res.json({
-      success: true,
+      success: failures.length === 0,
       restoredAttendance,
       restoredStudents,
+      failed: failures.length,
+      failures: failures.slice(0, 20),
       filename: safeName,
     });
   } catch (err) {

@@ -12,7 +12,33 @@ export interface EnrolledStudent {
   batches?: string[];
   avatarUrl?: string;
   enrolledDate: string;
+  /** Completed courses (removed from `courses`) and the upgrade decision for each. Server-managed. */
+  courseCompletions?: CourseCompletion[];
 }
+
+export type UpgradeStatus = 'PENDING' | 'UPGRADED' | 'NOT_UPGRADING';
+
+export interface CourseCompletion {
+  id: string;
+  course: string;
+  batch: string;
+  completedOn: string; // YYYY-MM-DD
+  completedBy: string;
+  note: string;
+  upgradeStatus: UpgradeStatus;
+  upgradedTo: string;
+  /** The submission (admission form) created when the student was upgraded */
+  admissionId?: string;
+  admissionFormNo?: string;
+  closeReason: string;
+  decidedBy: string;
+  decidedAt: string | null;
+}
+
+export type CompletionDecision =
+  | { action: 'UPGRADE'; targetCourse: string; batch: string; formType: 'DJ' | 'EMP'; tenure: string; fee: string }
+  | { action: 'CLOSE'; reason: string }
+  | { action: 'REOPEN' };
 
 // Splits on commas NOT followed by a digit (so "50,000" stays intact) and on pipes.
 const LIST_SPLIT_RE = /\s*,\s*(?!\d)|\s*\|\s*/;
@@ -675,23 +701,19 @@ export class AttendanceService {
     const existingIndex = students.findIndex((s) => s.id === targetId || (student.email && s.email && s.email.toLowerCase() === student.email.toLowerCase()));
     let updated: EnrolledStudent[];
     if (existingIndex !== -1) {
+      // The event carries the saved server record, so its course lists are authoritative.
+      // (Merging them with the local copy would bring back a course that was completed or removed.)
       updated = [...students];
-      const mergedCourses = Array.from(new Set([
-        ...getStudentCourses(updated[existingIndex]),
-        ...getStudentCourses(student),
-      ]));
-      const mergedBatches = Array.from(new Set([
-        ...getStudentBatches(updated[existingIndex]),
-        ...getStudentBatches(student),
-      ]));
+      const courses = getStudentCourses(student);
+      const batches = getStudentBatches(student);
       updated[existingIndex] = {
         ...updated[existingIndex],
         ...student,
         id: targetId,
-        courses: mergedCourses,
-        course: mergedCourses.join(', ') || student.course || updated[existingIndex].course,
-        batches: mergedBatches,
-        batch: mergedBatches.join(' | ') || student.batch || updated[existingIndex].batch,
+        courses,
+        course: courses.join(', '),
+        batches,
+        batch: batches.join(' | '),
       };
     } else {
       const courses = getStudentCourses(student);
@@ -849,6 +871,54 @@ export class AttendanceService {
     return students[index];
   }
 
+  // ─── Course completion & upgrades ─────────────────────────────────────────
+  // These run on the server only (no optimistic local change): the server checks the course is
+  // active, the completion is still pending, etc. The saved student replaces the local copy.
+
+  private static async sendCompletionRequest(
+    method: 'POST' | 'PATCH' | 'DELETE',
+    path: string,
+    body?: object
+  ): Promise<{ ok: true; student: EnrolledStudent } | { ok: false; error: string }> {
+    try {
+      const res = await fetch(`${API_BASE_URL}${path}`, {
+        method,
+        headers: AuthService.getAuthHeaders(),
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: data.error || `Request failed (HTTP ${res.status}).` };
+      const saved = normalizeStudent({ ...(data as EnrolledStudent), id: canonicalizeStudentId(data.id) });
+      const students = this.getStoredStudents();
+      const index = students.findIndex((s) => s.id === saved.id);
+      if (index === -1) students.push(saved);
+      else students[index] = saved;
+      this.saveStudents(sortStudentsById(students));
+      return { ok: true, student: saved };
+    } catch {
+      return { ok: false, error: 'Could not reach the server. Nothing was changed.' };
+    }
+  }
+
+  public static completeCourse(studentId: string, course: string, completedOn: string, note: string) {
+    return this.sendCompletionRequest('POST', `/students/${encodeURIComponent(studentId)}/completions`, { course, completedOn, note });
+  }
+
+  public static decideCompletion(studentId: string, completionId: string, decision: CompletionDecision) {
+    return this.sendCompletionRequest(
+      'PATCH',
+      `/students/${encodeURIComponent(studentId)}/completions/${encodeURIComponent(completionId)}`,
+      decision
+    );
+  }
+
+  public static undoCompletion(studentId: string, completionId: string) {
+    return this.sendCompletionRequest(
+      'DELETE',
+      `/students/${encodeURIComponent(studentId)}/completions/${encodeURIComponent(completionId)}`
+    );
+  }
+
   /**
    * Adds the course from each ENROLLED admission to the matching existing student.
    * Each admission is applied only once, so a course an admin later removes is not re-added.
@@ -877,6 +947,13 @@ export class AttendanceService {
       const targetCourse = (adm.courseOpted || '').trim() || (adm.formType === 'DJ' ? 'DJ Training Course' : 'EMP Production');
       const targetBatch = adm.formType === 'DJ' ? 'Regular DJ Studio Batch' : 'Regular EMP Studio Batch';
       const student = students[idx];
+      // A completed course is history: re-adding it from its old form would undo the completion.
+      // (This list of applied forms is per browser, so a new device would otherwise re-add it.)
+      const completed = (student.courseCompletions || []).some((c) => normCourse(c.course) === normCourse(targetCourse));
+      if (completed) {
+        appliedSet.add(adm.id);
+        return;
+      }
       const courses = mergeLists(getStudentCourses(student), [targetCourse]);
       const batches = mergeLists(getStudentBatches(student), [targetBatch]);
 
@@ -908,7 +985,6 @@ export class AttendanceService {
 
   public static async deleteStudent(id: string): Promise<boolean> {
     let students = this.getStoredStudents();
-    const targetStudent = students.find((s) => s.id === id);
     students = students.filter((s) => s.id !== id);
     this.saveStudents(students);
 
@@ -930,15 +1006,8 @@ export class AttendanceService {
           }).catch(() => {});
         });
 
-        const queryParams = new URLSearchParams();
-        if (targetStudent?.email) queryParams.append('email', targetStudent.email);
-        if (targetStudent?.name) queryParams.append('name', targetStudent.name);
-        const qStr = queryParams.toString();
-        const deleteUrl = qStr
-          ? `${API_BASE_URL}/students/${encodeURIComponent(id)}?${qStr}`
-          : `${API_BASE_URL}/students/${encodeURIComponent(id)}`;
-
-        const res = await fetch(deleteUrl, {
+        // Delete by id only — the server no longer matches on name or email
+        const res = await fetch(`${API_BASE_URL}/students/${encodeURIComponent(id)}`, {
           method: 'DELETE',
           headers: AuthService.getAuthHeaders(),
         });

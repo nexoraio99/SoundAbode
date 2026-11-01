@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { BlogPost } from '../../types/blog';
-import { safeImageUrl, sanitizeHtml } from '../../utils/security';
+import { escapeHtml, safeImageUrl, sanitizeHtml } from '../../utils/security';
 import styles from './WordPressArticleEditorModal.module.css';
 
 export interface WordPressArticleEditorModalProps {
@@ -72,14 +72,15 @@ export const WordPressArticleEditorModal: React.FC<WordPressArticleEditorModalPr
   useEffect(() => {
     setFormData(initialData);
     if (visualEditorRef.current && initialData.content) {
-      visualEditorRef.current.innerHTML = initialData.content;
+      // Saved content is sanitized before it is loaded into the live editor
+      visualEditorRef.current.innerHTML = sanitizeHtml(initialData.content);
     }
   }, [initialData, isOpen]);
 
   // Keep contentEditable in sync when switching tabs
   useEffect(() => {
     if (editorMode === 'visual' && visualEditorRef.current) {
-      visualEditorRef.current.innerHTML = formData.content;
+      visualEditorRef.current.innerHTML = sanitizeHtml(formData.content);
     }
   }, [editorMode]);
 
@@ -175,13 +176,13 @@ export const WordPressArticleEditorModal: React.FC<WordPressArticleEditorModalPr
 
     if (editorMode === 'visual') {
       if (linkText) {
-        const linkHtml = `<a href="${safeUrl}"${targetAttr}>${linkText}</a>`;
+        const linkHtml = `<a href="${escapeHtml(safeUrl)}"${targetAttr}>${escapeHtml(linkText)}</a>`;
         execCmd('insertHTML', linkHtml);
       } else {
         execCmd('createLink', safeUrl);
       }
     } else {
-      const linkHtml = `<a href="${safeUrl}"${targetAttr}>${linkText || safeUrl}</a>`;
+      const linkHtml = `<a href="${escapeHtml(safeUrl)}"${targetAttr}>${escapeHtml(linkText || safeUrl)}</a>`;
       setFormData((prev) => ({ ...prev, content: prev.content + linkHtml }));
     }
 
@@ -203,8 +204,9 @@ export const WordPressArticleEditorModal: React.FC<WordPressArticleEditorModalPr
     restoreCurrentSelection();
 
     const safeSrc = safeImageUrl(imageUrl);
-    const captionHtml = imageCaption ? `<figcaption style="font-size: 0.8rem; color: #94a3b8; text-align: center; margin-top: 0.4rem;">${imageCaption}</figcaption>` : '';
-    const imgHtml = `<figure style="margin: 1.5rem 0; text-align: center;"><img src="${safeSrc}" alt="${imageAlt || 'Article illustration'}" style="max-width: 100%; height: auto; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);" />${captionHtml}</figure><p></p>`;
+    // Typed values are escaped: a quote in the alt text or URL must not break out of the attribute
+    const captionHtml = imageCaption ? `<figcaption style="font-size: 0.8rem; color: #94a3b8; text-align: center; margin-top: 0.4rem;">${escapeHtml(imageCaption)}</figcaption>` : '';
+    const imgHtml = `<figure style="margin: 1.5rem 0; text-align: center;"><img src="${escapeHtml(safeSrc)}" alt="${escapeHtml(imageAlt || 'Article illustration')}" style="max-width: 100%; height: auto; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);" />${captionHtml}</figure><p></p>`;
 
     if (editorMode === 'visual') {
       execCmd('insertHTML', imgHtml);

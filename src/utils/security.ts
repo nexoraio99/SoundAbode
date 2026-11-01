@@ -53,10 +53,43 @@ export const safeImageUrl = (url?: string): string => {
   return '';
 };
 
-/**
- * Sanitizes an HTML string using DOMParser to strip script tags, dangerous elements,
- * inline event handlers (on*), and unsafe link/image sources.
- */
+// ─── Article HTML sanitizer (allowlist) ───────────────────────────────────────
+// Only formatting the article editor produces is kept. Everything else is dropped:
+//  - DROP_WITH_CONTENT elements are removed with everything inside them (scripts, embeds,
+//    forms, and SVG/MathML, whose namespace quirks enable mutation-XSS tricks);
+//  - any other unknown element is unwrapped (its text and allowed children stay);
+//  - attributes not on the allowlist are removed (on* handlers, xlink:href, formaction, srcdoc…);
+//  - href must be http(s), mailto, tel or relative; src goes through safeImageUrl.
+const ALLOWED_TAGS = new Set([
+  'p', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'b', 'em', 'i', 'u', 's', 'strike',
+  'del', 'ins', 'sub', 'sup', 'small', 'mark', 'blockquote', 'q', 'cite', 'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+  'a', 'img', 'figure', 'figcaption', 'pre', 'code', 'span', 'div', 'font',
+  'table', 'caption', 'colgroup', 'col', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
+]);
+const DROP_WITH_CONTENT = new Set([
+  'script', 'style', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet', 'svg', 'math',
+  'template', 'noscript', 'noembed', 'noframes', 'xmp', 'plaintext', 'form', 'input', 'button',
+  'select', 'option', 'textarea', 'link', 'meta', 'base', 'title', 'head',
+]);
+const ALLOWED_ATTRS = new Set([
+  'href', 'src', 'alt', 'title', 'target', 'rel', 'width', 'height', 'class', 'style',
+  'colspan', 'rowspan', 'scope', 'align', 'color', 'face', 'size', 'start', 'reversed', 'type', 'loading',
+]);
+
+// Removes whitespace/control characters browsers ignore inside a URL scheme ("java\tscript:")
+const compactUrl = (value: string) => value.replace(/[\u0000-\u0020\u007F-\u009F]/g, '');
+
+const isSafeHref = (value: string): boolean => {
+  const v = compactUrl(value).toLowerCase();
+  if (!v) return false;
+  const scheme = v.match(/^([a-z][a-z0-9+.-]*):/);
+  return !scheme || ['http', 'https', 'mailto', 'tel'].includes(scheme[1]);
+};
+
+// Inline styles can't run script in current browsers; old-IE expression()/behaviors and
+// script URLs are rejected anyway
+const isSafeStyle = (value: string) => !/expression\s*\(|javascript:|vbscript:|@import|behavior\s*:|-moz-binding/i.test(compactUrl(value));
+
 export const sanitizeHtml = (html?: string): string => {
   if (!html) return '';
 
@@ -65,52 +98,53 @@ export const sanitizeHtml = (html?: string): string => {
   }
 
   try {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const body = doc.body;
 
-    // Remove executable / structural injection tags
-    const dangerousTags = [
-      'script', 'iframe', 'object', 'embed', 'link', 'meta', 'style',
-      'form', 'input', 'button', 'select', 'textarea', 'base', 'applet', 'template'
-    ];
+    // Comments are dropped (they are a common carrier for parser-confusion payloads)
+    const walker = doc.createTreeWalker(body, NodeFilter.SHOW_COMMENT);
+    const comments: Node[] = [];
+    while (walker.nextNode()) comments.push(walker.currentNode);
+    comments.forEach((c) => c.parentNode?.removeChild(c));
 
-    dangerousTags.forEach((tag) => {
-      const elements = doc.querySelectorAll(tag);
-      elements.forEach((el) => el.remove());
-    });
+    Array.from(body.querySelectorAll('*')).forEach((el) => {
+      if (!el.isConnected) return; // inside an element already removed
+      const tag = el.tagName.toLowerCase();
 
-    // Remove inline event attributes (e.g. onerror, onload, onclick) and sanitize href/src
-    const allElements = doc.querySelectorAll('*');
-    allElements.forEach((el) => {
-      const attributeNames = Array.from(el.attributes).map((attr) => attr.name);
-      attributeNames.forEach((attrName) => {
-        const lowerAttrName = attrName.toLowerCase();
+      if (DROP_WITH_CONTENT.has(tag)) {
+        el.remove();
+        return;
+      }
+      if (!ALLOWED_TAGS.has(tag)) {
+        el.replaceWith(...Array.from(el.childNodes));
+        return;
+      }
 
-        // Strip inline event handler attributes
-        if (lowerAttrName.startsWith('on')) {
-          el.removeAttribute(attrName);
+      Array.from(el.attributes).forEach((attr) => {
+        const name = attr.name.toLowerCase();
+        if (!ALLOWED_ATTRS.has(name)) {
+          el.removeAttribute(attr.name);
           return;
         }
-
-        // Validate src and href
-        if (lowerAttrName === 'src') {
-          const val = el.getAttribute(attrName) || '';
-          const cleaned = safeImageUrl(val);
-          if (cleaned) {
-            el.setAttribute(attrName, cleaned);
-          } else {
-            el.removeAttribute(attrName);
-          }
-        } else if (lowerAttrName === 'href') {
-          const val = (el.getAttribute(attrName) || '').trim();
-          if (/^(javascript|vbscript|data:)/i.test(val)) {
-            el.removeAttribute(attrName);
-          }
+        if (name === 'href' && !isSafeHref(attr.value)) {
+          el.removeAttribute(attr.name);
+        } else if (name === 'src') {
+          // safeImageUrl parses the URL (browsers drop tabs/newlines there too) and only keeps http(s), relative or raster data: images
+          const cleaned = safeImageUrl(attr.value);
+          if (cleaned) el.setAttribute('src', cleaned);
+          else el.removeAttribute('src');
+        } else if (name === 'style' && !isSafeStyle(attr.value)) {
+          el.removeAttribute(attr.name);
         }
       });
+
+      // Links opening a new tab can't reach back into this page
+      if (tag === 'a' && el.getAttribute('target') === '_blank') {
+        el.setAttribute('rel', 'noopener noreferrer');
+      }
     });
 
-    return doc.body.innerHTML;
+    return body.innerHTML;
   } catch {
     return escapeHtml(html);
   }

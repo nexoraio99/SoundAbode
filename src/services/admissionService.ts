@@ -24,6 +24,10 @@ export interface AdmissionSubmission {
   photoUrl?: string;
   submittedAt: string;
   status: 'NEW' | 'CONTACTED' | 'ENROLLED' | 'ARCHIVED';
+  /** 'UPGRADE' when the CMS created this form while upgrading an enrolled student */
+  origin?: 'FORM' | 'UPGRADE';
+  studentId?: string;
+  upgradedFrom?: string;
 }
 
 const LOCAL_STORAGE_KEY = 'soundabode_admission_submissions';
@@ -363,12 +367,18 @@ export class AdmissionService {
               'Reason:', data.dbError || 'Unknown'
             );
           } else {
-            // Server always reassigns formNo from MongoDB — update local copy
-            if (data && data.formNo && data.formNo !== newAdmission.formNo) {
+            // Server always reassigns formNo (and may reassign id) — update local copy
+            const idChanged = data && data.id && data.id !== newAdmission.id;
+            const formNoChanged = data && data.formNo && data.formNo !== newAdmission.formNo;
+            if (idChanged || formNoChanged) {
               const current = this.getStoredAdmissions();
               const idx = current.findIndex((a) => a.id === newAdmission.id);
               if (idx !== -1) {
-                current[idx] = { ...current[idx], formNo: data.formNo };
+                current[idx] = {
+                  ...current[idx],
+                  ...(idChanged ? { id: data.id } : {}),
+                  ...(formNoChanged ? { formNo: data.formNo } : {}),
+                };
                 this.saveAdmissions(current);
               }
             }

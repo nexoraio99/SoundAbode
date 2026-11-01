@@ -4238,3 +4238,61 @@
   font-size: 0.7rem;
   color: var(--text-muted);
 }
+
+/* Student directory row actions: one non-wrapping row of compact buttons */
+.rowActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex-wrap: nowrap;
+}
+
+.rowActionBtn {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 0.65rem;
+  font-size: 0.75rem;
+}
+
+.iconAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-btn);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.iconAction:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.iconAction:focus-visible {
+  outline: 2px solid var(--border-strong);
+  outline-offset: 2px;
+}
+
+.iconActionDanger:hover {
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+
+/* Outlined destructive button: matches neighbouring secondary buttons, red text */
+.btnDangerOutline {
+  color: var(--accent-red);
+}
+
+.btnDangerOutline:hover {
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
